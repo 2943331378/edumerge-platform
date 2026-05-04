@@ -1,0 +1,48 @@
+# ===== 生产环境配置 (application-prod.yml) =====
+# 启用此配置: spring.profiles.active=prod
+
+spring:
+  datasource:
+    url: jdbc:mysql://mysql-prod-server:3306/edumerge?useUnicode=true&characterEncoding=utf-8&useSSL=true&serverTimezone=UTC&allowPublicKeyRetrieval=false
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      minimum-idle: 10
+      maximum-pool-size: 50
+      max-lifetime: 1800000
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+
+milvus:
+  host: ${MILVUS_HOST}
+  port: 19530
+  timeout: 60000
+
+langchain4j:
+  # 使用 OpenAI 或其他生产级模型
+  openai:
+    api-key: ${OPENAI_API_KEY}
+    model: gpt-4
+
+logging:
+  level:
+    root: warn
+    com.edumerge: info
+  file:
+    name: /var/log/edumerge/edumerge.log
+    max-size: 100MB
+    max-history: 90

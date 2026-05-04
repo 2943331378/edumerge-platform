@@ -1,0 +1,210 @@
+spring:
+  application:
+    name: edumerge
+
+  # 启动时自动执行 schema.sql
+  sql:
+    init:
+      mode: always
+
+  # ===== 文件上传大小限制 =====
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 60MB
+
+  # ===== 服务器配置 =====
+  server:
+    port: 8080
+    servlet:
+      context-path: /api
+
+  # ===== MySQL 数据库配置 =====
+  datasource:
+    url: jdbc:mysql://localhost:3306/edumerge?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 连接池配置（HikariCP）
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      auto-commit: true
+
+  # ===== JPA/Hibernate 配置 (如果使用) =====
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+        jdbc:
+          batch_size: 20
+          fetch_size: 100
+
+  # ===== Redis 缓存配置 =====
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: ""
+      timeout: 2000ms
+      database: 0
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+          max-wait: -1ms
+      # 连接超时和读写超时
+      client-type: lettuce
+
+  # ===== RabbitMQ 消息队列配置 =====
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    # 连接池配置
+    connection-timeout: 10000
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        concurrency: 5
+        max-concurrency: 10
+        prefetch: 1
+    # 确保消息不会丢失
+    template:
+      retry:
+        enabled: true
+        initial-interval: 1000
+        max-attempts: 3
+        max-interval: 10000
+        multiplier: 1.0
+
+  # ===== Jackson JSON 配置 =====
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: false
+
+  # ===== 异常处理配置 =====
+  web:
+    throw-exception-if-no-handler-found: true
+    resources:
+      add-mappings: false
+
+# ===== MyBatis-Plus 配置 =====
+mybatis-plus:
+  # mapper.xml 文件路径
+  mapper-locations: classpath:/mapper/**/*.xml
+  # 实体类所在的包
+  type-aliases-package: com.edumerge.**.entity
+  # 开启驼峰命名法映射
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+    call-setters-on-nulls: true
+  # MyBatis-Plus 全局配置
+  global-config:
+    db-config:
+      # 主键类型: AUTO(自增), INPUT(输入), ASSIGN_ID(雪花算法), ASSIGN_UUID(UUID)
+      id-type: auto
+      # 逻辑删除配置
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# ===== 日志配置 =====
+logging:
+  level:
+    root: info
+    com.edumerge: debug
+    org.springframework: warn
+    org.springframework.web: debug
+    com.baomidou.mybatisplus: debug
+  charset:
+    console: UTF-8
+    file: UTF-8
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/edumerge.log
+    max-size: 10MB
+    max-history: 30
+
+# ===== Milvus 向量数据库配置 =====
+milvus:
+  host: localhost
+  port: 19530
+  database: edumerge
+  # 超时时间（单位：毫秒）
+  timeout: 30000
+
+# ===== LangChain4j 配置 =====
+langchain4j:
+  # 模型提供商配置（根据实际选择）
+  # model-provider: ollama
+  # Ollama 本地模型配置
+  # ollama:
+  #   url: http://localhost:11434
+  #   model: llama2 # 或其他本地模型名称
+  # 如果使用 OpenAI 或其他云服务，替换为对应配置
+  openai:
+    api-key: ${DEEPSEEK_API_KEY}
+    base-url: https://api.deepseek.com/v1
+    model: deepseek-v4-pro
+    # Embedding 模型单独配置 (DeepSeek 不支持 embeddings，需使用其他兼容 API)
+    embedding-model: text-embedding-v3
+    embedding-base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    embedding-api-key: sk-970e9ed6fb054cd9a20b519aee82d923
+
+# ===== 应用自定义配置 =====
+app:
+  # RAG 相关配置
+  rag:
+    # 检索相似度阈值（0-1）
+    similarity-threshold: 0.7
+    # 返回的文档数量
+    top-k: 5
+    # 向量维度 (DashScope text-embedding-v3 = 1024)
+    embedding-dimension: 1024
+    # 文本分块大小（字符数）
+    chunk-size: 1000
+    # 分块重叠大小
+    chunk-overlap: 100
+
+  # 文档处理配置
+  document:
+    # 上传文件存储目录 (绝对路径或相对于应用启动目录)
+    upload-dir: E:/EduMerge/uploads
+    # 支持的文档类型
+    allowed-types: pdf,doc,docx,txt,md
+    # 最大上传大小（MB）
+    max-upload-size: 50
+    # 文档处理超时时间（秒）
+    process-timeout: 300
+
+# ===== 服务器配置 =====
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+  # 错误处理
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: on_param
+    include-exception: false

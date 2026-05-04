@@ -1,0 +1,121 @@
+package com.edumerge.controller;
+
+import com.edumerge.ai.AiRagService;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.StreamingResponseHandler;
+import dev.langchain4j.model.output.Response;
+import dev.langchain4j.store.embedding.EmbeddingMatch;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * 流式 RAG 对话接口
+ * 控制器仅负责 HTTP 参数解析与 SSE 推送, 所有业务逻辑委托给 RagChatService
+ */
+@Slf4j
+@RestController
+@RequestMapping("/chat")
+public class LearningChatController {
+
+    private final AiRagService aiRagService;
+
+    @Autowired
+    public LearningChatController(AiRagService aiRagService) {
+        this.aiRagService = aiRagService;
+    }
+
+    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter stream(@RequestBody Map<String, String> body) {
+        String message = body.get("message");
+        String documentId = body.get("documentId");
+
+        if (message == null || message.isBlank()) {
+            SseEmitter err = new SseEmitter();
+            err.completeWithError(new IllegalArgumentException("消息不能为空"));
+            return err;
+        }
+
+        SseEmitter emitter = new SseEmitter(120_000L);
+        log.info("流式对话请求: message='{}', documentId='{}'", message, documentId);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                // 先检索, 再流式生成 (拆开两步以安全捕获 matches)
+                List<EmbeddingMatch<TextSegment>> matches =
+                        aiRagService.retrieveMatches(message, documentId);
+
+                if (matches.isEmpty()) {
+                    emit(emitter, Map.of("token", "在该材料中未找到相关内容。"));
+                    emit(emitter, Map.of("sources", List.of()));
+                    emitDone(emitter);
+                    emitter.complete();
+                    return;
+                }
+
+                List<dev.langchain4j.data.message.ChatMessage> messages =
+                        aiRagService.buildMessages(message, aiRagService.buildContext(matches));
+
+                aiRagService.getStreamingModel().generate(messages,
+                        new StreamingResponseHandler<AiMessage>() {
+                            @Override
+                            public void onNext(String token) {
+                                emit(emitter, Map.of("token", token));
+                            }
+
+                            @Override
+                            public void onComplete(Response<AiMessage> response) {
+                                List<Map<String, Object>> sources = matches.stream()
+                                        .map(m -> Map.<String, Object>of(
+                                                "index", matches.indexOf(m) + 1,
+                                                "content", m.embedded().text(),
+                                                "score", m.score()))
+                                        .toList();
+                                emit(emitter, Map.of("sources", sources));
+                                emitDone(emitter);
+                                emitter.complete();
+                            }
+
+                            @Override
+                            public void onError(Throwable error) {
+                                log.error("流式生成错误: {}", error.getMessage(), error);
+                                emit(emitter, Map.of("error", "生成回答失败: " + error.getMessage()));
+                                emitDone(emitter);
+                                emitter.complete();
+                            }
+                        });
+            } catch (Exception e) {
+                log.error("流式对话异常: {}", e.getMessage(), e);
+                emit(emitter, Map.of("error", "系统异常: " + e.getMessage()));
+                emitDone(emitter);
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
+    private void emit(SseEmitter emitter, Object data) {
+        try {
+            emitter.send(SseEmitter.event().data(data));
+        } catch (IOException e) {
+            log.debug("SSE 推送失败: {}", e.getMessage());
+        }
+    }
+
+    private void emitDone(SseEmitter emitter) {
+        try {
+            emitter.send(SseEmitter.event().data("[DONE]"));
+        } catch (IOException e) {
+            log.debug("SSE [DONE] 推送失败: {}", e.getMessage());
+        }
+    }
+}

@@ -1,0 +1,15 @@
+# 后端 (Spring Boot / Java)
+backend/target/
+backend/*.iml
+backend/.idea/
+backend/application-dev.yml # 如果你的密钥写在这里，务必忽略！
+
+# 前端 (Next.js / Node)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env* # 忽略所有环境变量文件！
+
+# 操作系统/IDE
+.DS_Store
+*.log

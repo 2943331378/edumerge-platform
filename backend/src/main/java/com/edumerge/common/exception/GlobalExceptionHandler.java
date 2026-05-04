@@ -1,0 +1,119 @@
+package com.edumerge.common.exception;
+
+import com.edumerge.common.result.Result;
+import com.edumerge.common.result.ResultCode;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindingResult;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+
+import java.util.stream.Collectors;
+
+/**
+ * 全局异常处理器
+ * 统一处理所有 REST 接口抛出的异常，确保返回格式一致
+ */
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    /**
+     * 处理业务异常 (BusinessException)
+     * 业务逻辑中主动抛出的异常
+     */
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<Result<?>> handleBusinessException(BusinessException e) {
+        log.warn("业务异常: code={}, message={}", e.getCode(), e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.fail(e.getCode(), e.getMessage()));
+    }
+
+    /**
+     * 处理参数验证异常 (MethodArgumentNotValidException)
+     * 在 @Valid 验证不通过时触发
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Result<?>> handleMethodArgumentNotValidException(MethodArgumentNotValidException e) {
+        BindingResult bindingResult = e.getBindingResult();
+        String errorMessage = bindingResult.getFieldErrors().stream()
+                .map(FieldError::getDefaultMessage)
+                .collect(Collectors.joining("; "));
+
+        log.warn("参数验证异常: {}", errorMessage);
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.fail(ResultCode.INVALID_PARAMETER.getCode(), errorMessage));
+    }
+
+    /**
+     * 处理类型不匹配异常 (MethodArgumentTypeMismatchException)
+     * 如：期望 Integer 但收到 String
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Result<?>> handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException e) {
+        String errorMessage = String.format("参数类型错误: %s 应为 %s", 
+                e.getName(), e.getRequiredType().getSimpleName());
+        log.warn(errorMessage);
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.fail(ResultCode.INVALID_PARAMETER.getCode(), errorMessage));
+    }
+
+    /**
+     * 处理 404 异常 (NoHandlerFoundException)
+     * 当请求的路由不存在时触发
+     */
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<Result<?>> handleNoHandlerFoundException(NoHandlerFoundException e) {
+        String errorMessage = String.format("请求的资源不存在: %s %s", e.getHttpMethod(), e.getRequestURL());
+        log.warn(errorMessage);
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.fail(ResultCode.NOT_FOUND.getCode(), errorMessage));
+    }
+
+    /**
+     * 处理 IllegalArgumentException
+     * 通常由非法参数触发
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Result<?>> handleIllegalArgumentException(IllegalArgumentException e) {
+        log.warn("非法参数异常: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.fail(ResultCode.INVALID_PARAMETER.getCode(), 
+                        e.getMessage() != null ? e.getMessage() : "非法参数"));
+    }
+
+    /**
+     * 处理 NullPointerException
+     * 空指针异常（不应该在生产环境出现）
+     */
+    @ExceptionHandler(NullPointerException.class)
+    public ResponseEntity<Result<?>> handleNullPointerException(NullPointerException e) {
+        log.error("空指针异常", e);
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.error("系统异常: 空指针"));
+    }
+
+    /**
+     * 处理其他所有异常 (Throwable)
+     * 作为兜底方案，捕获所有未被特殊处理的异常
+     */
+    @ExceptionHandler(Throwable.class)
+    public ResponseEntity<Result<?>> handleThrowable(Throwable e) {
+        log.error("未知异常", e);
+        String message = e.getMessage() != null ? e.getMessage() : "系统异常，请稍后重试";
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.error(message));
+    }
+}
