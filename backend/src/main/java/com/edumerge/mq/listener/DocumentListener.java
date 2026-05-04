@@ -13,13 +13,18 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import lombok.extern.slf4j.Slf4j;
+import net.sourceforge.tess4j.Tesseract;
+import net.sourceforge.tess4j.TesseractException;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 文档向量化消费者 — 监听向量化队列, 执行 PDF 解析 → 文本切块 → 向量化 → 存入 Milvus 全流程
+ * 文档向量化消费者 — 监听向量化队列, 执行 PDF 解析(含 OCR) → 文本切块 → 向量化 → 存入 Milvus 全流程
  */
 @Slf4j
 @Component
@@ -36,6 +41,17 @@ public class DocumentListener {
     private final EmbeddingModel embeddingModel;
     private final MilvusEmbeddingStore embeddingStore;
     private final DocumentService documentService;
+
+    @Value("${app.document.ocr.enabled:true}")
+    private boolean ocrEnabled;
+    @Value("${app.document.ocr.tesseract-data-path}")
+    private String tesseractDataPath;
+    @Value("${app.document.ocr.language:chi_sim+eng}")
+    private String ocrLanguage;
+    @Value("${app.document.ocr.render-dpi:200}")
+    private int renderDpi;
+
+    private Tesseract tesseract;
 
     @Autowired
     public DocumentListener(EmbeddingModel embeddingModel,
@@ -61,10 +77,11 @@ public class DocumentListener {
         }
 
         try {
-            // 2. PDF 提取文本
+            // 2. PDF 提取文本 (优先文字层, 扫描版自动 OCR 回退)
             String text = extractPdfText(pdfPath);
             if (text.isBlank()) {
-                log.warn("PDF 文本为空: documentId={}", documentId);
+                log.warn("PDF 文本为空(含 OCR): documentId={}", documentId);
+                updateDocStatus(filePath, "FAILED", null, null, "无法提取文本(可能为加密或纯图 PDF)");
                 return;
             }
             log.info("PDF 文本提取完成: documentId={}, 长度={} 字符", documentId, text.length());
@@ -132,13 +149,108 @@ public class DocumentListener {
     }
 
     /**
-     * 使用 Apache PDFBox 提取 PDF 全文
+     * 提取 PDF 全文 — 优先文字层, 扫描版自动 OCR 回退
      */
     private String extractPdfText(Path pdfPath) throws IOException {
         try (PDDocument pdfDoc = Loader.loadPDF(pdfPath.toFile())) {
+            int pageCount = pdfDoc.getNumberOfPages();
+            log.info("PDF 加载成功: 页数={}, 文件={}", pageCount, pdfPath.getFileName());
+
+            // 先尝试文字层提取
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);
-            return stripper.getText(pdfDoc);
+            StringBuilder allText = new StringBuilder();
+            int pagesWithText = 0;
+            for (int page = 1; page <= pageCount; page++) {
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                String pageText = stripper.getText(pdfDoc);
+                if (pageText != null && !pageText.isBlank()) {
+                    pagesWithText++;
+                    allText.append(pageText).append("\n");
+                }
+            }
+            log.info("PDF 文字页统计: {}/{} 页含文字层, 总计 {} 字符", pagesWithText, pageCount, allText.length());
+
+            if (!allText.isEmpty()) {
+                return allText.toString();
+            }
+
+            // 文字层为空 → OCR 回退
+            if (ocrEnabled) {
+                log.info("启用 OCR 回退: DPI={}, 语言={}, tessdata={}", renderDpi, ocrLanguage, tesseractDataPath);
+                return ocrPdfPages(pdfDoc, pageCount);
+            }
+
+            log.warn("PDF 无文字层且 OCR 未启用 (app.document.ocr.enabled=false)");
+            return "";
+        }
+    }
+
+    /**
+     * OCR 识别扫描版 PDF — PDFBox 渲染每页为图片, Tesseract 逐页识别
+     */
+    private String ocrPdfPages(PDDocument pdfDoc, int pageCount) {
+        initTesseract();
+        if (tesseract == null) {
+            log.error("Tesseract 初始化失败, OCR 不可用");
+            return "";
+        }
+
+        PDFRenderer renderer = new PDFRenderer(pdfDoc);
+        StringBuilder text = new StringBuilder();
+        int renderedPages = 0;
+        long startTime = System.currentTimeMillis();
+
+        for (int page = 0; page < pageCount; page++) {
+            BufferedImage image = null;
+            try {
+                image = renderer.renderImage(page, renderDpi / 72f);
+                String pageText = tesseract.doOCR(image);
+                if (pageText != null && !pageText.isBlank()) {
+                    renderedPages++;
+                    text.append(pageText).append("\n");
+                }
+            } catch (IOException e) {
+                log.warn("OCR 渲染第{}页失败: {}", page + 1, e.getMessage());
+            } catch (TesseractException e) {
+                log.warn("OCR 识别第{}页失败: {}", page + 1, e.getMessage());
+            } catch (Throwable t) {
+                log.error("OCR 第{}页 JNA 错误 (语言包缺失?): {}", page + 1, t.toString());
+                break; // 跳过后续页面, 语言包问题不会自愈
+            } finally {
+                if (image != null) image.flush();
+            }
+            if ((page + 1) % 10 == 0) {
+                log.info("OCR 进度: {}/{} 页 (已耗时 {}s)", page + 1, pageCount,
+                        (System.currentTimeMillis() - startTime) / 1000);
+            }
+        }
+        long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+        log.info("OCR 完成: {}/{} 页识别到文字, 总计 {} 字符, 耗时 {}s",
+                renderedPages, pageCount, text.length(), elapsed);
+        return text.toString();
+    }
+
+    private void initTesseract() {
+        if (tesseract != null) return;
+        try {
+            // 校验语言包文件存在, 避免 doOCR 时 JNA 内存访问错误导致线程崩溃
+            for (String lang : ocrLanguage.split("\\+")) {
+                Path dataFile = Path.of(tesseractDataPath, lang + ".traineddata");
+                if (!Files.exists(dataFile)) {
+                    log.error("Tesseract 语言包缺失: {} (OCR 不可用)", dataFile);
+                    return;
+                }
+            }
+            tesseract = new Tesseract();
+            tesseract.setDatapath(tesseractDataPath);
+            tesseract.setLanguage(ocrLanguage);
+            tesseract.setOcrEngineMode(1);
+            log.info("Tesseract 初始化成功: datapath={}, language={}", tesseractDataPath, ocrLanguage);
+        } catch (Throwable t) {
+            log.error("Tesseract 初始化失败 (OCR 不可用): {}", t.toString());
+            tesseract = null;
         }
     }
 }

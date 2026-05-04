@@ -21,9 +21,10 @@ public class ChatHistoryService {
     }
 
     /** 保存对话记录 */
-    public ChatHistory save(String query, String response, int retrievedCount) {
+    public ChatHistory save(String query, String response, int retrievedCount, String sessionId) {
         ChatHistory history = ChatHistory.builder()
-                .userId(1L) // 默认用户 (TODO: 接入认证后替换)
+                .userId(1L)
+                .sessionId(sessionId)
                 .query(query)
                 .response(response)
                 .retrievedDocuments(retrievedCount)
@@ -32,10 +33,11 @@ public class ChatHistoryService {
         return history;
     }
 
-    /** 查询最近对话历史 */
-    public List<ChatHistory> listRecent(int limit) {
+    /** 按会话查询最近对话历史 */
+    public List<ChatHistory> listBySession(String sessionId, int limit) {
         return chatHistoryMapper.selectList(
                 new LambdaQueryWrapper<ChatHistory>()
+                        .eq(sessionId != null, ChatHistory::getSessionId, sessionId)
                         .orderByDesc(ChatHistory::getCreatedAt)
                         .last("LIMIT " + limit));
     }

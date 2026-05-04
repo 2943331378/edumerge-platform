@@ -83,7 +83,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                         .sourceSegment(src).status("ACTIVE").build());
             }
             if (!cards.isEmpty()) {
-                flashcardMapper.insert(cards, cards.size()); // 批量写入
+                flashcardMapper.insert(cards, 50); // 批量写入
                 log.info("学习卡片写入完成: docId={}, 卡片数={}", docId, cards.size());
             }
         } catch (Exception e) {

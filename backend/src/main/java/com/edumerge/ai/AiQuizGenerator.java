@@ -96,7 +96,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
                         .difficulty("application".equals(difficulty) ? 4 : 2).status("ACTIVE").build());
             }
             if (!quizzes.isEmpty()) {
-                quizMapper.insert(quizzes, quizzes.size());
+                quizMapper.insert(quizzes, 50);
                 log.info("测试题写入完成: docId={}, 题目数={}", docId, quizzes.size());
             }
         } catch (Exception e) {

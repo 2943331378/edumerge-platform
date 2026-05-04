@@ -1,6 +1,7 @@
 package com.edumerge.controller;
 
 import com.edumerge.ai.AiRagService;
+import com.edumerge.service.SessionService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.StreamingResponseHandler;
@@ -27,16 +28,30 @@ import java.util.concurrent.CompletableFuture;
 public class LearningChatController {
 
     private final AiRagService aiRagService;
+    private final SessionService sessionService;
 
     @Autowired
-    public LearningChatController(AiRagService aiRagService) {
+    public LearningChatController(AiRagService aiRagService, SessionService sessionService) {
         this.aiRagService = aiRagService;
+        this.sessionService = sessionService;
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@RequestBody Map<String, String> body) {
         String message = body.get("message");
         String documentId = body.get("documentId");
+        String sessionIdStr = body.get("sessionId");
+
+        // sessionId 优先: 解析为 documentUuid 用于 Milvus 过滤
+        String resolvedDocId = documentId;
+        if (sessionIdStr != null && !sessionIdStr.isBlank()) {
+            try {
+                resolvedDocId = sessionService.resolveDocUuid(Long.parseLong(sessionIdStr));
+            } catch (Exception e) {
+                log.warn("sessionId 解析失败: {}", e.getMessage());
+            }
+        }
+        final String finalDocId = resolvedDocId;
 
         if (message == null || message.isBlank()) {
             SseEmitter err = new SseEmitter();
@@ -45,13 +60,12 @@ public class LearningChatController {
         }
 
         SseEmitter emitter = new SseEmitter(120_000L);
-        log.info("流式对话请求: message='{}', documentId='{}'", message, documentId);
+        log.info("流式对话请求: message='{}', documentId='{}'", message, finalDocId);
 
         CompletableFuture.runAsync(() -> {
             try {
-                // 先检索, 再流式生成 (拆开两步以安全捕获 matches)
                 List<EmbeddingMatch<TextSegment>> matches =
-                        aiRagService.retrieveMatches(message, documentId);
+                        aiRagService.retrieveMatches(message, finalDocId);
 
                 if (matches.isEmpty()) {
                     emit(emitter, Map.of("token", "在该材料中未找到相关内容。"));

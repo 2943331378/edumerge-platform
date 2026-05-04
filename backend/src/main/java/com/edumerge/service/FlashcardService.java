@@ -38,7 +38,7 @@ public class FlashcardService {
 
     public void batchCreate(List<Flashcard> cards) {
         if (!cards.isEmpty()) {
-            flashcardMapper.insert(cards, cards.size());
+            flashcardMapper.insert(cards, 50);
             log.info("批量创建学习卡片完成: 数量={}", cards.size());
         }
     }

@@ -114,6 +114,13 @@
             <version>3.0.1</version>
         </dependency>
 
+        <!-- OCR (Tesseract Java 封装, 处理扫描版 PDF) -->
+        <dependency>
+            <groupId>net.sourceforge.tess4j</groupId>
+            <artifactId>tess4j</artifactId>
+            <version>5.11.0</version>
+        </dependency>
+
         <!-- Word 文档解析 -->
         <dependency>
             <groupId>org.apache.poi</groupId>

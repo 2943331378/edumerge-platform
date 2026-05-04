@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- ===== 文档表 =====
 CREATE TABLE IF NOT EXISTS documents (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '文档ID',
+    document_id VARCHAR(64) COMMENT 'Milvus 文档UUID (向量检索标识)',
     user_id BIGINT NOT NULL COMMENT '用户ID',
     title VARCHAR(200) NOT NULL COMMENT '文档标题',
     description TEXT COMMENT '文档描述',
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS documents (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_id (user_id),
+    INDEX idx_document_id (document_id),
     INDEX idx_status (status),
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档表';
@@ -57,6 +59,23 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     INDEX idx_document_id (document_id),
     INDEX idx_embedding_status (embedding_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档分块表';
+
+-- ===== 会话表 =====
+CREATE TABLE IF NOT EXISTS sessions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '会话ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    title VARCHAR(200) COMMENT '会话标题',
+    status VARCHAR(20) DEFAULT 'ACTIVE' COMMENT '状态: ACTIVE, ARCHIVED',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_doc_id (doc_id),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话表';
 
 -- ===== 对话历史表 =====
 CREATE TABLE IF NOT EXISTS chat_history (

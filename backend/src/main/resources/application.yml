@@ -196,6 +196,15 @@ app:
     max-upload-size: 50
     # 文档处理超时时间（秒）
     process-timeout: 300
+    # OCR 配置 (Tesseract, 处理扫描版 PDF)
+    ocr:
+      enabled: true
+      # Tesseract tessdata 目录路径
+      tesseract-data-path: C:/Program Files/Tesseract-OCR/tessdata
+      # OCR 识别语言 (chi_sim=简体中文, eng=英文, 用+连接)
+      language: chi_sim+eng
+      # PDF 页面渲染 DPI (越高越清晰但越慢, 建议 300)
+      render-dpi: 300
 
 # ===== 服务器配置 =====
 server:

@@ -45,7 +45,7 @@ public class QuizService {
     }
 
     public void batchCreate(List<Quiz> quizzes) {
-        quizMapper.insert(quizzes, quizzes.size());
+        quizMapper.insert(quizzes, 50);
         log.info("批量创建测试题完成: 数量={}", quizzes.size());
     }
 }

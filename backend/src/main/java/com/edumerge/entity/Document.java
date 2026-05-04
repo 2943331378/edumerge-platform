@@ -18,6 +18,9 @@ public class Document {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    @TableField("document_id")
+    private String documentId;
+
     private Long userId;
     private String title;
     private String description;
