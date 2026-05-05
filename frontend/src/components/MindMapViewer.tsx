@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
+import { useTheme } from "next-themes";
 import { Transformer } from "markmap-lib";
 import { Markmap } from "markmap-view";
 import type { INode, IPureNode } from "markmap-common";
@@ -23,15 +24,23 @@ export function MindMapViewer({ markdown, className = "" }: MindMapViewerProps) 
   const [collapsed, setCollapsed] = useState(false);
   const [svgSize, setSvgSize] = useState({ w: 1200, h: 800 });
 
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+
   const transformer = useRef(new Transformer());
 
-  /** 品牌色梯度: 深度1=蓝, 深度2=紫, 更深=灰 */
+  /** 品牌色梯度: 深度1=蓝, 深度2=紫, 更深=灰。深色主题使用高亮度色值 */
   const colorByDepth = useCallback((node: INode): string => {
     const depth = node.state?.depth ?? 0;
+    if (isDark) {
+      if (depth <= 1) return "oklch(0.72 0.22 255)";
+      if (depth === 2) return "oklch(0.7 0.22 285)";
+      return "oklch(0.68 0.04 260)";
+    }
     if (depth <= 1) return "oklch(0.48 0.22 255)";
     if (depth === 2) return "oklch(0.52 0.24 285)";
     return "oklch(0.55 0.03 260)";
-  }, []);
+  }, [isDark]);
 
   /** 线条粗细随深度递减 */
   const lineWidthByDepth = useCallback((node: INode): number => {
@@ -110,6 +119,13 @@ export function MindMapViewer({ markdown, className = "" }: MindMapViewerProps) 
     svg.setAttribute("viewBox", `0 0 ${svgSize.w} ${svgSize.h}`);
   }, [svgSize]);
 
+  // 主题切换时重新应用节点颜色
+  useEffect(() => {
+    if (!mmRef.current || !rootRef.current || !ready) return;
+    mmRef.current.setData(rootRef.current, mmOptions());
+    setTimeout(() => mmRef.current?.fit(), 100);
+  }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 点击节点后自动自适应
   useEffect(() => {
     const svg = svgRef.current;
@@ -142,8 +158,18 @@ export function MindMapViewer({ markdown, className = "" }: MindMapViewerProps) 
       .markmap-node:hover > circle {
         filter: brightness(1.2);
       }
+      .dark .markmap-foreign div {
+        color: #f1f5f9 !important;
+      }
+      .dark .markmap-link {
+        stroke: oklch(0.65 0.18 255 / 0.55) !important;
+      }
     `;
-    svgRef.current?.prepend(style);
+    document.head.appendChild(style);
+    return () => {
+      const el = document.getElementById(styleId);
+      if (el) el.remove();
+    };
   }, [ready]);
 
   const handleReset = useCallback(() => {
