@@ -42,4 +42,11 @@ public class FlashcardService {
             log.info("批量创建学习卡片完成: 数量={}", cards.size());
         }
     }
+
+    public List<Flashcard> listByDeckId(Long deckId) {
+        return flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getDeckId, deckId)
+                        .orderByAsc(Flashcard::getId));
+    }
 }

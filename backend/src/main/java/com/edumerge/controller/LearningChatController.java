@@ -52,6 +52,7 @@ public class LearningChatController {
             }
         }
         final String finalDocId = resolvedDocId;
+        final String finalSessionId = sessionIdStr;
 
         if (message == null || message.isBlank()) {
             SseEmitter err = new SseEmitter();
@@ -68,17 +69,16 @@ public class LearningChatController {
                         aiRagService.retrieveMatches(message, finalDocId);
 
                 if (matches.isEmpty()) {
-                    emit(emitter, Map.of("token", "在该材料中未找到相关内容。"));
+                    String fallback = "在该材料中未找到相关内容。";
+                    emit(emitter, Map.of("token", fallback));
                     emit(emitter, Map.of("sources", List.of()));
                     emitDone(emitter);
                     emitter.complete();
                     return;
                 }
 
-                List<dev.langchain4j.data.message.ChatMessage> messages =
-                        aiRagService.buildMessages(message, aiRagService.buildContext(matches));
-
-                aiRagService.getStreamingModel().generate(messages,
+                // 使用 chatStream 结合 ChatMemory, 自动管理对话记忆
+                aiRagService.chatStream(message, finalDocId, finalSessionId,
                         new StreamingResponseHandler<AiMessage>() {
                             @Override
                             public void onNext(String token) {
@@ -101,7 +101,8 @@ public class LearningChatController {
                             @Override
                             public void onError(Throwable error) {
                                 log.error("流式生成错误: {}", error.getMessage(), error);
-                                emit(emitter, Map.of("error", "生成回答失败: " + error.getMessage()));
+                                String errMsg = "生成回答失败: " + error.getMessage();
+                                emit(emitter, Map.of("error", errMsg));
                                 emitDone(emitter);
                                 emitter.complete();
                             }

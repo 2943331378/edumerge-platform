@@ -58,8 +58,10 @@ public class FlashcardController {
 
     @GetMapping
     public Result<List<Flashcard>> list(@RequestParam(required = false) Long docId,
-                                        @RequestParam(required = false) Long sessionId) {
+                                        @RequestParam(required = false) Long sessionId,
+                                        @RequestParam(required = false) Long deckId) {
         if (sessionId != null) docId = sessionService.resolveDocId(sessionId);
+        if (deckId != null) return Result.success(flashcardService.listByDeckId(deckId));
         return Result.success(docId != null ? flashcardService.listByDocId(docId) : List.of());
     }
 }

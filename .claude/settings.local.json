@@ -115,7 +115,10 @@
       "Bash(javap -public -cp ~/.m2/repository/dev/langchain4j/langchain4j-open-ai/0.28.0/langchain4j-open-ai-0.28.0.jar dev.langchain4j.model.openai.OpenAiModelName)",
       "Bash(MAVEN_OPTS=\"-Xmx1024m\" mvn compile)",
       "Bash(MAVEN_OPTS=\"-Xmx512m\" mvn compile)",
-      "Bash(javap -public -cp ~/.m2/repository/com/baomidou/mybatis-plus-core/3.5.7/mybatis-plus-core-3.5.7.jar com.baomidou.mybatisplus.core.mapper.BaseMapper)"
+      "Bash(javap -public -cp ~/.m2/repository/com/baomidou/mybatis-plus-core/3.5.7/mybatis-plus-core-3.5.7.jar com.baomidou.mybatisplus.core.mapper.BaseMapper)",
+      "Bash(mysql -u root -p123456 -h localhost -e \"USE edumerge; SHOW TABLES;\")",
+      "Bash(mysql -u root -p123456 -h localhost -e \"USE edumerge; SHOW COLUMNS FROM documents; SHOW COLUMNS FROM conversations 2>&1;\")",
+      "Bash(mysql -u root -p123456 -h localhost edumerge -e ' *)"
     ]
   }
 }

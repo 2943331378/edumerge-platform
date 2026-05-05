@@ -77,7 +77,7 @@ spring:
     publisher-returns: true
     listener:
       simple:
-        acknowledge-mode: manual
+        acknowledge-mode: auto
         concurrency: 5
         max-concurrency: 10
         prefetch: 1
@@ -175,8 +175,8 @@ langchain4j:
 app:
   # RAG 相关配置
   rag:
-    # 检索相似度阈值（0-1）
-    similarity-threshold: 0.7
+    # 检索相似度阈值（0-1, 超过此值才返回; 0.35 适合通用语义匹配）
+    similarity-threshold: 0.35
     # 返回的文档数量
     top-k: 5
     # 向量维度 (DashScope text-embedding-v3 = 1024)

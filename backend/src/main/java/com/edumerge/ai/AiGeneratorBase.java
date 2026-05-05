@@ -18,7 +18,7 @@ import java.util.List;
  * AI 生成器基类 — 提供 Milvus 检索、上下文拼装、JSON 提取等公共工具方法
  */
 @Slf4j
-abstract class AiGeneratorBase {
+public abstract class AiGeneratorBase {
 
     @Autowired
     protected EmbeddingModel embeddingModel;
@@ -32,14 +32,14 @@ abstract class AiGeneratorBase {
     @Value("${app.rag.similarity-threshold:0.7}")
     protected double similarityThreshold;
 
-    /** 从 Milvus 检索指定文档的核心语义块 */
+    /** 从 Milvus 检索指定文档的核心语义块 (生成任务不用 minScore 过滤, 直接取 top-K) */
     protected List<EmbeddingMatch<TextSegment>> retrieveTopChunks(String docUuid, int topK, String semanticQuery) {
         try {
             Embedding queryEmbedding = embeddingModel.embed(semanticQuery).content();
             EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
                     .queryEmbedding(queryEmbedding)
                     .maxResults(topK)
-                    .minScore(similarityThreshold)
+                    .minScore(0.0) // 生成任务不过滤, 确保能检索到文档内容
                     .filter(new IsEqualTo("document_id", docUuid))
                     .build();
             return embeddingStore.search(request).matches();

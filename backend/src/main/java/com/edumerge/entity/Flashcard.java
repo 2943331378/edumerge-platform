@@ -29,6 +29,9 @@ public class Flashcard {
     /** 关联源文档 ID (数据可追溯) */
     private Long docId;
 
+    /** 关联卡片组 ID */
+    private Long deckId;
+
     /** 创建用户 ID */
     private Long userId;
 

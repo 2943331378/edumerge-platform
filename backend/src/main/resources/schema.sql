@@ -117,12 +117,39 @@ CREATE TABLE IF NOT EXISTS system_logs (
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统日志表';
 
+-- ===== 对话会话表 =====
+CREATE TABLE IF NOT EXISTS conversations (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '会话ID',
+    session_id VARCHAR(64) NOT NULL UNIQUE COMMENT '前端对话UUID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    title VARCHAR(200) DEFAULT '新对话' COMMENT '对话标题',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_session_id (session_id),
+    INDEX idx_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='对话会话表';
+
+-- ===== 卡片组表 =====
+CREATE TABLE IF NOT EXISTS card_decks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '卡片组ID',
+    doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    title VARCHAR(200) NOT NULL COMMENT '组标题',
+    type VARCHAR(20) NOT NULL COMMENT 'FLASHCARD 或 QUIZ',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    INDEX idx_doc_id (doc_id),
+    INDEX idx_type (type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='卡片组表';
+
 -- ===== 学习卡片表 =====
 -- 数据素质: Flashcards 通过 doc_id 关联源文档, source_segment 记录内容出处,
 -- 实现学习资源的"可追溯性"与"组织管理", 符合数据要素治理要求
 CREATE TABLE IF NOT EXISTS flashcards (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '卡片ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    deck_id BIGINT COMMENT '关联卡片组ID',
     user_id BIGINT COMMENT '创建用户ID',
     question TEXT NOT NULL COMMENT '问题',
     answer TEXT NOT NULL COMMENT '答案',
@@ -148,6 +175,7 @@ CREATE TABLE IF NOT EXISTS flashcards (
 CREATE TABLE IF NOT EXISTS quizzes (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '测试题ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    deck_id BIGINT COMMENT '关联卡片组ID',
     user_id BIGINT COMMENT '创建用户ID',
     question TEXT NOT NULL COMMENT '问题',
     options JSON COMMENT '选项列表 (JSON格式, 如: ["A.选项1","B.选项2","C.选项3","D.选项4"])',

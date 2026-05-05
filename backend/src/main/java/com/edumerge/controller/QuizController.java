@@ -57,8 +57,10 @@ public class QuizController {
 
     @GetMapping
     public Result<List<Quiz>> list(@RequestParam(required = false) Long docId,
-                                    @RequestParam(required = false) Long sessionId) {
+                                    @RequestParam(required = false) Long sessionId,
+                                    @RequestParam(required = false) Long deckId) {
         if (sessionId != null) docId = sessionService.resolveDocId(sessionId);
+        if (deckId != null) return Result.success(quizService.listByDeckId(deckId));
         return Result.success(docId != null ? quizService.listByDocId(docId) : List.of());
     }
 }

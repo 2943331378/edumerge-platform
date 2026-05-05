@@ -48,4 +48,11 @@ public class QuizService {
         quizMapper.insert(quizzes, 50);
         log.info("批量创建测试题完成: 数量={}", quizzes.size());
     }
+
+    public List<Quiz> listByDeckId(Long deckId) {
+        return quizMapper.selectList(
+                new LambdaQueryWrapper<Quiz>()
+                        .eq(Quiz::getDeckId, deckId)
+                        .orderByAsc(Quiz::getId));
+    }
 }

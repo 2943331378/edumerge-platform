@@ -1,5 +1,7 @@
 package com.edumerge.config;
 
+import com.edumerge.ai.JpaChatMemoryStore;
+import com.edumerge.mapper.ChatHistoryMapper;
 import com.edumerge.store.MilvusEmbeddingStore;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
@@ -9,6 +11,9 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiTokenizer;
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import io.milvus.client.MilvusServiceClient;
 import io.milvus.param.MetricType;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +23,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 
 import java.time.Duration;
+import java.util.function.Function;
 
 /**
  * 向量存储及大模型配置类
@@ -131,5 +137,25 @@ public class MilvusVectorStoreConfig {
                 embeddingDimension,
                 MetricType.COSINE
         );
+    }
+
+    /**
+     * ChatMemoryStore — MySQL 持久化对话历史
+     */
+    @Bean
+    public ChatMemoryStore chatMemoryStore(ChatHistoryMapper chatHistoryMapper) {
+        return new JpaChatMemoryStore(chatHistoryMapper);
+    }
+
+    /**
+     * ChatMemoryProvider — 每个会话保留最近 20 条消息, 持久化到 MySQL
+     */
+    @Bean
+    public Function<String, ChatMemory> chatMemoryProvider(ChatMemoryStore chatMemoryStore) {
+        return (String memoryId) -> MessageWindowChatMemory.builder()
+                .id(memoryId)
+                .maxMessages(20)
+                .chatMemoryStore(chatMemoryStore)
+                .build();
     }
 }

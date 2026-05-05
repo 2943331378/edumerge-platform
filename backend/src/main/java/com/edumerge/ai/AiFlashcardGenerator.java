@@ -2,6 +2,7 @@ package com.edumerge.ai;
 
 import com.edumerge.entity.Flashcard;
 import com.edumerge.mapper.FlashcardMapper;
+import com.edumerge.service.CardDeckService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -31,7 +32,10 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
     @Autowired
     private FlashcardMapper flashcardMapper;
 
-    /** 根据文档内容自动生成学习卡片 */
+    @Autowired
+    private CardDeckService cardDeckService;
+
+    /** 根据文档内容自动生成学习卡片 (每次生成创建一个 Deck) */
     public List<Flashcard> generate(Long docId, Long userId, String docUuid) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 10,
                 "核心知识点 关键概念 重要内容 定义 原理 方法 总结");
@@ -43,23 +47,43 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         String llmResponse = callLLM(context);
         log.info("LLM 卡片生成响应: 长度={} 字符", llmResponse.length());
 
-        return parseAndSave(llmResponse, docId, userId, matches);
+        // 创建卡片组, 将本次生成的卡片绑定到该组
+        Long deckId = cardDeckService.create(docId, "FLASHCARD").getId();
+        return parseAndSave(llmResponse, docId, userId, deckId, matches);
     }
 
     private String callLLM(String context) {
-        SystemMessage system = new SystemMessage("""
-                你是一位资深教育专家。请分析提供的文档片段，提取5个核心知识点并转化为学习卡片。
+        String template = """
+                你是一个严谨的 AI 学习导师。请分析提供的文档片段，提取5个核心知识点并转化为学习卡片。
 
-                # 严格规则 (必须遵守)
-                1. **仅基于上下文**: 100%基于提供的文档片段内容，禁止编造文档中未提及的知识。
-                2. **精准提取**: 选择文档中最核心、最具有学习价值的知识点。
-                3. **简洁表达**: question应清晰明确，answer应准确简洁，单条卡片不超过200字。
+                # 绝对禁止 (违反将导致严重质量问题)
+                1. **禁止元数据问题**: 严禁提问文档结构、章节归属、页码位置、模块划分等。
+                   反面示例(禁止):
+                   - "'并发处理'属于哪个章节？"
+                   - "该规范位于文档的第几部分？"
+                   - "这段内容出现在哪个标题下？"
+                   - "文档中第X条规则是什么？" (只问序号不问含义)
+                2. **禁止废话问题**: 严禁提问可以用"是/否"回答、或答案仅为一个术语名称的问题。
+                   反面示例(禁止):
+                   - "'XXX'是重要的概念吗？" — 答案仅是"是"
+                   - "文档是否提到了YYY？" — 可用"是/否"回答
+
+                # 优先级要求
+                1. **文档为事实依据**: 每张卡片必须基于提供的文档上下文, 严禁编造文档外的知识。
+                2. **提取核心概念**: 聚焦"业务概念"、"技术原理"、"定义"或"规范规则"。
+                   正面示例(应模仿):
+                   - "Java 中保证并发安全的三个核心原则是什么？"
+                   - "什么是CAP定理？它在分布式系统设计中如何应用？"
+                   - "RESTful API 设计规范中，资源的命名应遵循什么规则？"
+                3. **精准简洁**: question 清晰明确, answer 准确有信息量, 单条卡片不超过200字。
 
                 # 输出格式
                 [{"question": "知识点问题1", "answer": "对应答案1"}]
 
-                # 文档参考内容
-                %s""".formatted(context));
+                # 文档上下文
+                {CONTEXT}
+                """;
+        SystemMessage system = new SystemMessage(template.replace("{CONTEXT}", context));
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
@@ -69,7 +93,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
     }
 
     private List<Flashcard> parseAndSave(String llmResponse, Long docId, Long userId,
-                                          List<EmbeddingMatch<TextSegment>> matches) {
+                                          Long deckId, List<EmbeddingMatch<TextSegment>> matches) {
         List<Flashcard> cards = new ArrayList<>();
         try {
             String json = extractJsonArray(llmResponse);
@@ -79,8 +103,8 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                 String q = item.getOrDefault("question", ""), a = item.getOrDefault("answer", "");
                 if (q.isBlank() || a.isBlank()) continue;
                 String src = i < matches.size() ? truncate(matches.get(i).embedded().text(), 1000) : "";
-                cards.add(Flashcard.builder().docId(docId).userId(userId).question(q).answer(a)
-                        .sourceSegment(src).status("ACTIVE").build());
+                cards.add(Flashcard.builder().docId(docId).deckId(deckId).userId(userId)
+                        .question(q).answer(a).sourceSegment(src).status("ACTIVE").build());
             }
             if (!cards.isEmpty()) {
                 flashcardMapper.insert(cards, 50); // 批量写入

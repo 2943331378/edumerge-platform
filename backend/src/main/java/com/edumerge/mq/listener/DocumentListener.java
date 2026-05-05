@@ -1,6 +1,8 @@
 package com.edumerge.mq.listener;
 
 import com.edumerge.config.RabbitMQConfig;
+import com.edumerge.entity.DocumentChunk;
+import com.edumerge.mapper.DocumentChunkMapper;
 import com.edumerge.mq.message.DocumentProcessMessage;
 import com.edumerge.service.DocumentService;
 import com.edumerge.store.MilvusEmbeddingStore;
@@ -41,6 +43,7 @@ public class DocumentListener {
     private final EmbeddingModel embeddingModel;
     private final MilvusEmbeddingStore embeddingStore;
     private final DocumentService documentService;
+    private final DocumentChunkMapper documentChunkMapper;
 
     @Value("${app.document.ocr.enabled:true}")
     private boolean ocrEnabled;
@@ -56,10 +59,12 @@ public class DocumentListener {
     @Autowired
     public DocumentListener(EmbeddingModel embeddingModel,
                             MilvusEmbeddingStore embeddingStore,
-                            DocumentService documentService) {
+                            DocumentService documentService,
+                            DocumentChunkMapper documentChunkMapper) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.documentService = documentService;
+        this.documentChunkMapper = documentChunkMapper;
     }
 
     @RabbitListener(queues = RabbitMQConfig.EMBEDDING_QUEUE)
@@ -70,9 +75,14 @@ public class DocumentListener {
 
         Path pdfPath = Path.of(filePath);
 
-        // 1. 校验文件存在
+        // 0. 幂等检查: 文档已处理完成或文件已删除, 直接跳过
         if (!Files.exists(pdfPath)) {
-            log.error("向量化失败: 文件不存在: {}", filePath);
+            log.info("文件已删除, 跳过: {}", filePath);
+            return;
+        }
+        com.edumerge.entity.Document existing = documentService.getByFilePath(filePath);
+        if (existing != null && "COMPLETED".equals(existing.getStatus())) {
+            log.info("文档已完成向量化, 跳过: id={}", existing.getId());
             return;
         }
 
@@ -97,6 +107,21 @@ public class DocumentListener {
                 return;
             }
 
+            // 3.5 保存切块到 MySQL document_chunks 表
+            com.edumerge.entity.Document doc = documentService.getByFilePath(filePath);
+            if (doc != null) {
+                for (int i = 0; i < segments.size(); i++) {
+                    DocumentChunk chunk = DocumentChunk.builder()
+                            .documentId(doc.getId())
+                            .chunkIndex(i)
+                            .content(segments.get(i).text())
+                            .embeddingStatus("PENDING")
+                            .build();
+                    documentChunkMapper.insert(chunk);
+                }
+                log.info("文档切块已入库: docId={}, 块数={}", doc.getId(), segments.size());
+            }
+
             // 4. 为每个块附加元数据 (document_id + chunk_index)
             List<TextSegment> enrichedSegments = new ArrayList<>();
             for (int i = 0; i < segments.size(); i++) {
@@ -118,6 +143,14 @@ public class DocumentListener {
             // 6. 存入 Milvus
             embeddingStore.addAll(embeddings, enrichedSegments);
             log.info("向量存储完成: documentId={}, 块数={}", documentId, enrichedSegments.size());
+
+            // 6.5 批量更新 document_chunks 状态为 COMPLETED
+            if (doc != null) {
+                documentChunkMapper.update(null,
+                        new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<DocumentChunk>()
+                                .eq(DocumentChunk::getDocumentId, doc.getId())
+                                .set(DocumentChunk::getEmbeddingStatus, "COMPLETED"));
+            }
 
             // 7. 更新 MySQL 文档状态为 COMPLETED
             updateDocStatus(filePath, "COMPLETED", enrichedSegments.size(), embeddings.size(), null);

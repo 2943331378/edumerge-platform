@@ -54,17 +54,14 @@ public class RagChatController {
 
         log.info("RAG 对话请求: message='{}', documentId='{}'", message, documentId);
 
-        AiRagService.AiRagResult result = aiRagService.chat(message, documentId);
+        AiRagService.AiRagResult result = aiRagService.chat(message, documentId, sessionIdStr);
 
         if (result.isSuccess()) {
-            chatHistoryService.save(message, result.getAnswer(),
-                    result.getSources() != null ? result.getSources().size() : 0, sessionIdStr);
             return Result.success("RAG 回答生成成功", Map.of(
                     "answer", result.getAnswer(),
                     "sources", result.getSources()
             ));
         } else {
-            chatHistoryService.save(message, result.getMessage(), 0, sessionIdStr);
             return Result.fail(result.getMessage());
         }
     }
