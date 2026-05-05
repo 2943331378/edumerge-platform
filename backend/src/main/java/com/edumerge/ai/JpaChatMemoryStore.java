@@ -42,29 +42,54 @@ public class JpaChatMemoryStore implements ChatMemoryStore {
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         String sessionId = memoryId.toString();
-        // 统计 DB 中已有记录数 (每条记录 = 1对 User+AI)
-        Long existingCount = chatHistoryMapper.selectCount(
-                new LambdaQueryWrapper<ChatHistory>()
-                        .eq(ChatHistory::getSessionId, sessionId));
+        if (sessionId.isBlank()) return;
 
-        // 消息成对存储: UserMessage → query, AiMessage → response
-        int pairCount = messages.size() / 2;
-        for (int i = (int) (long) existingCount; i < pairCount; i++) {
-            int userIdx = i * 2;
-            int aiIdx = userIdx + 1;
-            if (aiIdx >= messages.size()) break;
-            ChatMessage userMsg = messages.get(userIdx);
-            ChatMessage aiMsg = messages.get(aiIdx);
-            if (userMsg instanceof UserMessage && aiMsg instanceof AiMessage) {
-                ChatHistory record = ChatHistory.builder()
-                        .userId(1L)
-                        .sessionId(sessionId)
-                        .query(((UserMessage) userMsg).singleText())
-                        .response(((AiMessage) aiMsg).text())
-                        .retrievedDocuments(0)
-                        .build();
-                chatHistoryMapper.insert(record);
+        // 先不带 @TableLogic 过滤查一次原始数量
+        Long rawCount = chatHistoryMapper.selectCount(
+                new LambdaQueryWrapper<ChatHistory>()
+                        .eq(ChatHistory::getSessionId, sessionId)
+                        .eq(ChatHistory::getDeleted, 0)); // 显式指定 deleted=0, 绕过 @TableLogic NULL 陷阱
+
+        // 只统计非 SystemMessage 的对数
+        long userMsgCount = messages.stream().filter(m -> m instanceof UserMessage).count();
+        long aiMsgCount = messages.stream().filter(m -> m instanceof AiMessage).count();
+
+        log.info("ChatMemory persist: sessionId={}, rawCount={}, userMsgs={}, aiMsgs={}, total={}",
+                sessionId, rawCount, userMsgCount, aiMsgCount, messages.size());
+
+        // 增量插入 — 跳过已持久化的前 N 对
+        int pairCount = (int) Math.min(userMsgCount, aiMsgCount);
+        for (int i = (int) (long) rawCount; i < pairCount; i++) {
+            // 收集第 i 对 User + AI
+            int userFound = -1, aiFound = -1;
+            int uIdx = 0, aIdx = 0;
+            for (int j = 0; j < messages.size(); j++) {
+                ChatMessage m = messages.get(j);
+                if (m instanceof UserMessage && uIdx++ == i) userFound = j;
+                if (m instanceof AiMessage && aIdx++ == i) aiFound = j;
             }
+            if (userFound < 0 || aiFound < 0) break;
+            UserMessage userMsg = (UserMessage) messages.get(userFound);
+            AiMessage aiMsg = (AiMessage) messages.get(aiFound);
+            ChatHistory record = ChatHistory.builder()
+                    .userId(1L)
+                    .sessionId(sessionId)
+                    .query(userMsg.singleText())
+                    .response(aiMsg.text())
+                    .retrievedDocuments(0)
+                    .deleted(0)
+                    .build();
+            int rows = chatHistoryMapper.insert(record);
+            log.info("ChatHistory INSERT result={}, id={}, sessionId={}, query={}",
+                    rows, record.getId(), sessionId,
+                    userMsg.singleText().substring(0, Math.min(40, userMsg.singleText().length())));
+
+            // 立即验证: 用原始 SQL 查询确认写入
+            Long verifyCount = chatHistoryMapper.selectCount(
+                    new LambdaQueryWrapper<ChatHistory>()
+                            .eq(ChatHistory::getSessionId, sessionId)
+                            .eq(ChatHistory::getDeleted, 0));
+            log.info("Post-insert verify: sessionId={}, count={}", sessionId, verifyCount);
         }
     }
 

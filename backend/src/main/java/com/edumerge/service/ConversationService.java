@@ -26,7 +26,9 @@ public class ConversationService {
         Conversation existing = getBySessionId(sessionId);
         if (existing != null) return existing;
         Conversation c = Conversation.builder()
-                .sessionId(sessionId).userId(userId).title(title).build();
+                .sessionId(sessionId).userId(userId).title(title)
+                .deleted(0) // @TableLogic 不自动设值, 必须显式置 0
+                .build();
         conversationMapper.insert(c);
         log.info("对话会话已创建: sessionId={}, title={}", sessionId, title);
         return c;

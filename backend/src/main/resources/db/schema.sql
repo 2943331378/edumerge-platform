@@ -136,12 +136,27 @@ CREATE TABLE IF NOT EXISTS card_decks (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '卡片组ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
     title VARCHAR(200) NOT NULL COMMENT '组标题',
-    type VARCHAR(20) NOT NULL COMMENT 'FLASHCARD 或 QUIZ',
+    type VARCHAR(20) NOT NULL COMMENT 'FLASHCARD / QUIZ / MIND_MAP',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
     INDEX idx_doc_id (doc_id),
     INDEX idx_type (type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='卡片组表';
+
+-- ===== 思维导图表 =====
+-- 数据素质: MindMap 通过 doc_id 关联源文档, content 存储 Markdown 格式的层级知识结构,
+-- 实现"非结构化文档 → 结构化知识树"的转化, 体现数据治理与知识提取能力
+CREATE TABLE IF NOT EXISTS mind_maps (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '思维导图ID',
+    doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    deck_id BIGINT NOT NULL COMMENT '关联卡片组ID',
+    content TEXT NOT NULL COMMENT 'Markdown格式的树状思维导图',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (deck_id) REFERENCES card_decks(id) ON DELETE CASCADE,
+    INDEX idx_doc_id (doc_id),
+    INDEX idx_deck_id (deck_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='思维导图表';
 
 -- ===== 学习卡片表 =====
 -- 数据素质: Flashcards 通过 doc_id 关联源文档, source_segment 记录内容出处,

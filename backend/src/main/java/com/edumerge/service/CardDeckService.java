@@ -24,10 +24,15 @@ public class CardDeckService {
 
     /** 创建卡片组 */
     public CardDeck create(Long docId, String type) {
-        String title = LocalDateTime.now().format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) + " "
-                + ("FLASHCARD".equals(type) ? "核心概念提取" : "测试题生成");
+        String suffix = switch (type) {
+            case "FLASHCARD" -> "核心概念提取";
+            case "QUIZ" -> "测试题生成";
+            case "MIND_MAP" -> "思维导图";
+            default -> type;
+        };
+        String title = LocalDateTime.now().format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) + " " + suffix;
         CardDeck deck = CardDeck.builder()
-                .docId(docId).title(title).type(type).build();
+                .docId(docId).title(title).type(type).createdAt(LocalDateTime.now()).build();
         cardDeckMapper.insert(deck);
         log.info("卡片组已创建: id={}, docId={}, type={}, title={}", deck.getId(), docId, type, deck.getTitle());
         return deck;

@@ -37,6 +37,7 @@ public class ChatHistoryService {
                 .query(query)
                 .response(response)
                 .retrievedDocuments(retrievedCount)
+                .deleted(0)
                 .build();
         chatHistoryMapper.insert(history);
         return history;

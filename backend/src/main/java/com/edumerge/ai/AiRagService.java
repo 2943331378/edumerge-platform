@@ -1,5 +1,7 @@
 package com.edumerge.ai;
 
+import com.edumerge.entity.ChatHistory;
+import com.edumerge.mapper.ChatHistoryMapper;
 import com.edumerge.service.ConversationService;
 import com.edumerge.store.MilvusEmbeddingStore;
 import dev.langchain4j.data.embedding.Embedding;
@@ -43,6 +45,7 @@ public class AiRagService {
     private final StreamingChatLanguageModel streamingChatLanguageModel;
     private final Function<String, ChatMemory> chatMemoryProvider;
     private final ConversationService conversationService;
+    private final ChatHistoryMapper chatHistoryMapper;
 
     @Value("${app.rag.top-k:5}")
     private int topK;
@@ -56,13 +59,15 @@ public class AiRagService {
                         ChatLanguageModel chatLanguageModel,
                         StreamingChatLanguageModel streamingChatLanguageModel,
                         @Qualifier("chatMemoryProvider") Function<String, ChatMemory> chatMemoryProvider,
-                        ConversationService conversationService) {
+                        ConversationService conversationService,
+                        ChatHistoryMapper chatHistoryMapper) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.chatLanguageModel = chatLanguageModel;
         this.streamingChatLanguageModel = streamingChatLanguageModel;
         this.chatMemoryProvider = chatMemoryProvider;
         this.conversationService = conversationService;
+        this.chatHistoryMapper = chatHistoryMapper;
     }
 
     /** 同步 RAG 对话 — 带上下文记忆 */
@@ -85,13 +90,8 @@ public class AiRagService {
             Response<AiMessage> response = chatLanguageModel.generate(messages);
             String answer = response.content().text();
 
-            // 确保 conversation 存在 + 将本轮问答加入记忆
-            if (sessionId != null && !sessionId.isBlank()) {
-                conversationService.ensure(sessionId, 1L,
-                        userMessage.length() > 40 ? userMessage.substring(0, 40) + "..." : userMessage);
-            }
-            memory.add(new UserMessage(userMessage));
-            memory.add(new AiMessage(answer));
+            // 直接持久化 (绕过 LangChain4j 0.28.0 ChatMemory.add 消息丢失 bug)
+            saveExchange(sessionId, userMessage, answer);
 
             log.info("RAG 回答生成完成, 长度: {} 字符", answer.length());
             return AiRagResult.success(answer, sources);
@@ -114,8 +114,7 @@ public class AiRagService {
             String fallback = "在该材料中未找到相关内容。";
             handler.onNext(fallback);
             handler.onComplete(null);
-            memory.add(new UserMessage(userMessage));
-            memory.add(new AiMessage(fallback));
+            saveExchange(sessionId, userMessage, fallback);
             return matches;
         }
 
@@ -131,17 +130,15 @@ public class AiRagService {
             }
             @Override
             public void onComplete(Response<AiMessage> response) {
+                log.info("流式生成完成, 持久化: sessionId={}, answerLen={}", sessionId, fullAnswer.length());
                 handler.onComplete(response);
-                if (sessionId != null && !sessionId.isBlank()) {
-                    conversationService.ensure(sessionId, 1L,
-                            userMessage.length() > 40 ? userMessage.substring(0, 40) + "..." : userMessage);
-                }
-                memory.add(new UserMessage(userMessage));
-                memory.add(new AiMessage(fullAnswer.toString()));
+                saveExchange(sessionId, userMessage, fullAnswer.toString());
             }
             @Override
             public void onError(Throwable error) {
+                log.error("流式生成错误: sessionId={}", sessionId, error.getMessage());
                 handler.onError(error);
+                saveExchange(sessionId, userMessage, "生成失败: " + error.getMessage());
             }
         };
 
@@ -177,6 +174,24 @@ public class AiRagService {
 
     /** 获取流式模型 (供外部直接调用) */
     public StreamingChatLanguageModel getStreamingModel() { return streamingChatLanguageModel; }
+
+    /** 直接持久化一轮对话 (绕过 LangChain4j 0.28.0 ChatMemory.add 消息丢失 bug) */
+    private void saveExchange(String sessionId, String userMessage, String aiResponse) {
+        if (sessionId == null || sessionId.isBlank()) return;
+        try {
+            conversationService.ensure(sessionId, 1L,
+                    userMessage.length() > 40 ? userMessage.substring(0, 40) + "..." : userMessage);
+            ChatHistory record = ChatHistory.builder()
+                    .userId(1L).sessionId(sessionId)
+                    .query(userMessage).response(aiResponse)
+                    .retrievedDocuments(0).deleted(0)
+                    .build();
+            chatHistoryMapper.insert(record);
+            log.info("对话已持久化: sessionId={}, id={}", sessionId, record.getId());
+        } catch (Exception e) {
+            log.error("对话持久化失败: sessionId={}, error={}", sessionId, e.getMessage(), e);
+        }
+    }
 
     /** 拼接检索到的文本块作为上下文 */
     public String buildContext(List<EmbeddingMatch<TextSegment>> matches) {
