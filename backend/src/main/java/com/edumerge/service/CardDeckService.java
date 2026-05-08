@@ -28,6 +28,7 @@ public class CardDeckService {
             case "FLASHCARD" -> "核心概念提取";
             case "QUIZ" -> "测试题生成";
             case "MIND_MAP" -> "思维导图";
+            case "NOTE" -> "学习笔记";
             default -> type;
         };
         String title = LocalDateTime.now().format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) + " " + suffix;

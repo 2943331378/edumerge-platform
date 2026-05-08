@@ -29,7 +29,8 @@ export function ChatSidebar({ documents, onUpload, onDelete, className }: ChatSi
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
-    if (!["application/pdf"].includes(file.type)) return;
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    if (!extension || !["pdf", "doc", "docx", "ppt", "pptx", "txt"].includes(extension)) return;
     await onUpload(file);
   };
 
@@ -76,7 +77,7 @@ export function ChatSidebar({ documents, onUpload, onDelete, className }: ChatSi
           <input
             ref={fileRef}
             type="file"
-            accept="application/pdf"
+            accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
             onChange={handleChange}
             className="hidden"
           />

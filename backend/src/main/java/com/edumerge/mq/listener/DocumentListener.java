@@ -17,6 +17,16 @@ import dev.langchain4j.model.output.Response;
 import lombok.extern.slf4j.Slf4j;
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
+import org.apache.poi.hslf.usermodel.HSLFSlide;
+import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.hslf.usermodel.HSLFTextShape;
+import org.apache.poi.hwpf.HWPFDocument;
+import org.apache.poi.hwpf.extractor.WordExtractor;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextShape;
+import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
@@ -28,13 +38,18 @@ import org.springframework.stereotype.Component;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.Charset;
+import java.nio.charset.MalformedInputException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * 文档向量化消费者 — 监听向量化队列, 执行 PDF 解析(含 OCR) → 文本切块 → 向量化 → 存入 Milvus 全流程
+ * 文档向量化消费者 — 监听向量化队列, 执行文档解析 → 文本切块 → 向量化 → 存入 Milvus 全流程
  */
 @Slf4j
 @Component
@@ -73,10 +88,10 @@ public class DocumentListener {
         String filePath = message.getFilePath();
         log.info("收到向量化任务: documentId={}, filePath={}", documentId, filePath);
 
-        Path pdfPath = Path.of(filePath);
+        Path documentPath = Path.of(filePath);
 
         // 0. 幂等检查: 文档已处理完成或文件已删除, 直接跳过
-        if (!Files.exists(pdfPath)) {
+        if (!Files.exists(documentPath)) {
             log.info("文件已删除, 跳过: {}", filePath);
             return;
         }
@@ -87,14 +102,14 @@ public class DocumentListener {
         }
 
         try {
-            // 2. PDF 提取文本 (优先文字层, 扫描版自动 OCR 回退)
-            String text = extractPdfText(pdfPath);
+            // 2. 提取文本
+            String text = extractDocumentText(documentPath);
             if (text.isBlank()) {
-                log.warn("PDF 文本为空(含 OCR): documentId={}", documentId);
-                updateDocStatus(filePath, "FAILED", null, null, "无法提取文本(可能为加密或纯图 PDF)");
+                log.warn("文档文本为空: documentId={}", documentId);
+                updateDocStatus(filePath, "FAILED", null, null, "无法提取文本(可能为加密、图片型文档或不支持的文件格式)");
                 return;
             }
-            log.info("PDF 文本提取完成: documentId={}, 长度={} 字符", documentId, text.length());
+            log.info("文档文本提取完成: documentId={}, 长度={} 字符", documentId, text.length());
 
             // 3. 使用递归切分器切块 (chunkSize=500, overlap=50)
             DocumentSplitter splitter = DocumentSplitters.recursive(500, 50);
@@ -156,11 +171,116 @@ public class DocumentListener {
             updateDocStatus(filePath, "COMPLETED", enrichedSegments.size(), embeddings.size(), null);
 
         } catch (IOException e) {
-            log.error("PDF 解析失败: documentId={}, error={}", documentId, e.getMessage(), e);
+            log.error("文档解析失败: documentId={}, error={}", documentId, e.getMessage(), e);
             updateDocStatus(filePath, "FAILED", null, null, e.getMessage());
         } catch (Exception e) {
             log.error("向量化流程异常: documentId={}, error={}", documentId, e.getMessage(), e);
             updateDocStatus(filePath, "FAILED", null, null, e.getMessage());
+        }
+    }
+
+    /**
+     * 按文件扩展名分发文本提取逻辑
+     */
+    private String extractDocumentText(Path documentPath) throws IOException {
+        String extension = getExtension(documentPath);
+        return switch (extension) {
+            case "pdf" -> extractPdfText(documentPath);
+            case "docx" -> extractDocxText(documentPath);
+            case "doc" -> extractDocText(documentPath);
+            case "pptx" -> extractPptxText(documentPath);
+            case "ppt" -> extractPptText(documentPath);
+            case "txt" -> extractTxtText(documentPath);
+            default -> throw new IOException("不支持的文件类型: " + extension);
+        };
+    }
+
+    private String getExtension(Path path) {
+        String name = path.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 ? name.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
+    }
+
+    /**
+     * 提取 DOCX 文本
+     */
+    private String extractDocxText(Path docxPath) throws IOException {
+        try (InputStream input = Files.newInputStream(docxPath);
+             XWPFDocument document = new XWPFDocument(input);
+             XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+            return extractor.getText();
+        }
+    }
+
+    /**
+     * 提取旧版 DOC 文本
+     */
+    private String extractDocText(Path docPath) throws IOException {
+        try (InputStream input = Files.newInputStream(docPath);
+             HWPFDocument document = new HWPFDocument(input);
+             WordExtractor extractor = new WordExtractor(document)) {
+            return extractor.getText();
+        }
+    }
+
+    /**
+     * 提取 PPTX 文本
+     */
+    private String extractPptxText(Path pptxPath) throws IOException {
+        try (InputStream input = Files.newInputStream(pptxPath);
+             XMLSlideShow slideShow = new XMLSlideShow(input)) {
+            StringBuilder text = new StringBuilder();
+            int slideIndex = 1;
+            for (XSLFSlide slide : slideShow.getSlides()) {
+                text.append("【幻灯片").append(slideIndex++).append("】\n");
+                for (XSLFTextShape shape : slide.getShapes().stream()
+                        .filter(XSLFTextShape.class::isInstance)
+                        .map(XSLFTextShape.class::cast)
+                        .toList()) {
+                    appendIfNotBlank(text, shape.getText());
+                }
+                text.append("\n");
+            }
+            return text.toString();
+        }
+    }
+
+    /**
+     * 提取旧版 PPT 文本
+     */
+    private String extractPptText(Path pptPath) throws IOException {
+        try (InputStream input = Files.newInputStream(pptPath);
+             HSLFSlideShow slideShow = new HSLFSlideShow(input)) {
+            StringBuilder text = new StringBuilder();
+            int slideIndex = 1;
+            for (HSLFSlide slide : slideShow.getSlides()) {
+                text.append("【幻灯片").append(slideIndex++).append("】\n");
+                for (HSLFTextShape shape : slide.getShapes().stream()
+                        .filter(HSLFTextShape.class::isInstance)
+                        .map(HSLFTextShape.class::cast)
+                        .toList()) {
+                    appendIfNotBlank(text, shape.getText());
+                }
+                text.append("\n");
+            }
+            return text.toString();
+        }
+    }
+
+    /**
+     * 提取 TXT 文本 — 优先 UTF-8, 失败时回退到 GB18030
+     */
+    private String extractTxtText(Path txtPath) throws IOException {
+        try {
+            return Files.readString(txtPath, StandardCharsets.UTF_8);
+        } catch (MalformedInputException e) {
+            return Files.readString(txtPath, Charset.forName("GB18030"));
+        }
+    }
+
+    private void appendIfNotBlank(StringBuilder builder, String value) {
+        if (value != null && !value.isBlank()) {
+            builder.append(value).append("\n");
         }
     }
 

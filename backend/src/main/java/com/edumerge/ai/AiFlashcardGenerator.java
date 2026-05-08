@@ -38,7 +38,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
     /** 根据文档内容自动生成学习卡片 (每次生成创建一个 Deck) */
     public List<Flashcard> generate(Long docId, Long userId, String docUuid) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 10,
-                "核心知识点 关键概念 重要内容 定义 原理 方法 总结");
+                "核心知识点 关键概念 重要内容 定义 原理 方法 总结 key concepts important content definition principles methods summary");
         if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
 
         String context = buildContext(matches);
@@ -71,11 +71,13 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                 # 优先级要求
                 1. **文档为事实依据**: 每张卡片必须基于提供的文档上下文, 严禁编造文档外的知识。
                 2. **提取核心概念**: 聚焦"业务概念"、"技术原理"、"定义"或"规范规则"。
+                3. **中文输出**: question 和 answer 必须使用简体中文；如果文档是英文，请基于英文原文翻译、归纳和解释。
+                4. **术语保留**: 英文关键术语首次出现时保留英文原词，例如"自适应学习（adaptive learning）"。
                    正面示例(应模仿):
                    - "Java 中保证并发安全的三个核心原则是什么？"
                    - "什么是CAP定理？它在分布式系统设计中如何应用？"
                    - "RESTful API 设计规范中，资源的命名应遵循什么规则？"
-                3. **精准简洁**: question 清晰明确, answer 准确有信息量, 单条卡片不超过200字。
+                5. **精准简洁**: question 清晰明确, answer 准确有信息量, 单条卡片不超过200字。
 
                 # 输出格式
                 [{"question": "知识点问题1", "answer": "对应答案1"}]

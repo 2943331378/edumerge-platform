@@ -38,7 +38,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
     /** 根据文档内容自动生成测试题 (每次生成创建一个 Deck) */
     public List<Quiz> generate(Long docId, Long userId, String docUuid) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 15,
-                "核心概念 定义 原理 方法 应用场景 实践案例 技术细节 架构设计 关键要点 总结归纳");
+                "核心概念 定义 原理 方法 应用场景 实践案例 技术细节 架构设计 关键要点 总结归纳 key concepts definition principles methods use cases examples technical details architecture key points summary");
         if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
 
         String context = buildContext(matches);
@@ -70,7 +70,9 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 1. **文档为事实依据**: 必须以提供的文档上下文为唯一出题来源, 严禁编造。
                 2. **多维覆盖**: 题目应覆盖文档的不同章节/主题/概念层级。
                 3. **干扰项设计**: 每个题目的4个选项中需包含3个合理且有迷惑性的干扰项, 干扰项也应来自文档语义。
-                4. **难度分级**:
+                4. **中文输出**: question、options、correctAnswer 和 explanation 必须使用简体中文；如果文档是英文，请基于英文原文翻译、归纳和解释。
+                5. **术语保留**: 英文关键术语首次出现时保留英文原词，例如"学习分析（learning analytics）"。
+                6. **难度分级**:
                    - **basic** (2-3题): 基本定义、术语、原理的准确理解
                    - **application** (2-3题): 方法选择、流程判断、实践案例的分析应用
 

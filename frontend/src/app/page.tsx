@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { FlashcardView } from "@/components/FlashcardView";
 import { QuizView } from "@/components/QuizView";
 import { MindMapViewer } from "@/components/MindMapViewer";
+import { StudyNoteView } from "@/components/StudyNoteView";
 import {
   listSessions, uploadDocument,
   SessionRecord, MindMapRecord, getMindMap,
@@ -38,28 +39,43 @@ export default function Home() {
   const [mindMapData, setMindMapData] = useState<MindMapRecord | null>(null);
   const [mindMapLoading, setMindMapLoading] = useState(false);
 
-  useEffect(() => {
-    if (activeTab === "mindmap" && activeSession?.docId) {
-      setMindMapLoading(true);
-      getMindMap(activeSession.docId)
-        .then(setMindMapData)
-        .catch(() => setMindMapData(null))
-        .finally(() => setMindMapLoading(false));
-    }
-  }, [activeTab, activeSession?.docId]);
-
-  useEffect(() => { loadSessions(); }, []);
-
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     try {
       const items = await listSessions();
       setSessions(items);
-      if (!activeSession && items.length > 0) {
-        const first = items.find((s) => s.docStatus === "COMPLETED") ?? items[0];
-        setActiveSession(first);
-      }
+      setActiveSession((current) => {
+        if (current || items.length === 0) return current;
+        return items.find((s) => s.docStatus === "COMPLETED") ?? items[0];
+      });
     } catch { /* 静默 */ }
-  };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadMindMap = async () => {
+      if (activeTab !== "mindmap" || !activeSession?.docId) return;
+      setMindMapLoading(true);
+      try {
+        const data = await getMindMap(activeSession.docId);
+        if (!cancelled) setMindMapData(data);
+      } catch {
+        if (!cancelled) setMindMapData(null);
+      } finally {
+        if (!cancelled) setMindMapLoading(false);
+      }
+    };
+    void loadMindMap();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, activeSession?.docId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadSessions();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadSessions]);
 
   const handleSelectSession = useCallback((sessionId: number) => {
     const s = sessions.find((x) => x.id === sessionId);
@@ -71,8 +87,6 @@ export default function Home() {
   }, []);
 
   const handleUpload = useCallback(async (file: File) => {
-    const tempId = crypto.randomUUID();
-    const tempDoc: UploadedDoc = { id: tempId, sessionId: 0, name: file.name, size: file.size, status: "uploading" };
     setSessions((prev) => [
       ...prev,
       { id: 0, docId: 0, docUuid: null, title: file.name, status: "ACTIVE",
@@ -97,7 +111,7 @@ export default function Home() {
       toast.error(err instanceof Error ? err.message : "上传失败");
     }
     setUploading(false);
-  }, []);
+  }, [loadSessions]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -124,6 +138,12 @@ export default function Home() {
         )}
         {activeTab === "chat" && (
           <ChatRoom docUuid={activeSession?.docUuid ?? null} />
+        )}
+        {activeTab === "notes" && (
+          <StudyNoteView
+            docId={activeSession?.docId ?? null}
+            docStatus={activeSession?.docStatus ?? null}
+          />
         )}
         {activeTab === "flashcards" && (
           <FlashcardView

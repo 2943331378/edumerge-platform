@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS documents (
     description TEXT COMMENT '文档描述',
     file_name VARCHAR(255) NOT NULL COMMENT '原始文件名',
     file_size BIGINT COMMENT '文件大小（字节）',
-    file_type VARCHAR(20) COMMENT '文件类型：pdf, doc, docx, txt, md',
+    file_type VARCHAR(20) COMMENT '文件类型：pdf, doc, docx, ppt, pptx, txt, md',
     file_path VARCHAR(500) COMMENT '文件存储路径',
     status VARCHAR(20) DEFAULT 'UPLOADING' COMMENT '文档状态：UPLOADING, PROCESSING, COMPLETED, FAILED',
     status_message VARCHAR(500) COMMENT '状态信息',
@@ -136,12 +136,31 @@ CREATE TABLE IF NOT EXISTS card_decks (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '卡片组ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
     title VARCHAR(200) NOT NULL COMMENT '组标题',
-    type VARCHAR(20) NOT NULL COMMENT 'FLASHCARD 或 QUIZ',
+    type VARCHAR(20) NOT NULL COMMENT 'FLASHCARD / QUIZ / MIND_MAP / NOTE',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
     INDEX idx_doc_id (doc_id),
     INDEX idx_type (type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='卡片组表';
+
+-- ===== 学习笔记表 =====
+-- 数据素质: StudyNote 通过 doc_id 关联源文档, content 存储 Markdown 格式的学习笔记,
+-- 将非结构化文档转化为可复习、可追溯的中文学习资料
+CREATE TABLE IF NOT EXISTS study_notes (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '学习笔记ID',
+    doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    deck_id BIGINT NOT NULL COMMENT '关联卡片组ID',
+    title VARCHAR(200) NOT NULL COMMENT '笔记标题',
+    content LONGTEXT NOT NULL COMMENT 'Markdown格式的学习笔记',
+    source_summary LONGTEXT COMMENT '参考片段摘要',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (deck_id) REFERENCES card_decks(id) ON DELETE CASCADE,
+    INDEX idx_doc_id (doc_id),
+    INDEX idx_deck_id (deck_id),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学习笔记表';
 
 -- ===== 学习卡片表 =====
 -- 数据素质: Flashcards 通过 doc_id 关联源文档, source_segment 记录内容出处,

@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,7 +45,7 @@ public class DocumentController {
     }
 
     /**
-     * 上传 PDF 文档
+     * 上传学习资料
      */
     @PostMapping("/upload")
     public Result<Map<String, Object>> upload(@RequestParam("file") MultipartFile file) {
@@ -53,8 +54,9 @@ public class DocumentController {
         }
 
         String originalName = file.getOriginalFilename();
-        if (originalName == null || !originalName.toLowerCase().endsWith(".pdf")) {
-            return Result.fail("仅支持 PDF 文件");
+        String extension = getSupportedExtension(originalName);
+        if (extension == null) {
+            return Result.fail("仅支持 PDF、Word、PPT、TXT 文件");
         }
 
         try {
@@ -62,7 +64,7 @@ public class DocumentController {
             Path uploadPath = Path.of(uploadDir).toAbsolutePath().normalize();
             Files.createDirectories(uploadPath);
 
-            Path filePath = uploadPath.resolve(uuid + ".pdf");
+            Path filePath = uploadPath.resolve(uuid + "." + extension);
             file.transferTo(filePath.toFile());
 
             log.info("文件上传成功: uuid={}, name={}, size={}", uuid, originalName, file.getSize());
@@ -71,10 +73,10 @@ public class DocumentController {
             Document doc = Document.builder()
                     .userId(1L)
                     .documentId(uuid)
-                    .title(originalName.replaceAll("\\.pdf$", ""))
+                    .title(originalName.replaceAll("(?i)\\.[^.]+$", ""))
                     .fileName(originalName)
                     .fileSize(file.getSize())
-                    .fileType("pdf")
+                    .fileType(extension)
                     .filePath(filePath.toString())
                     .status("UPLOADING")
                     .build();
@@ -98,6 +100,17 @@ public class DocumentController {
             log.error("文件保存失败: {}", e.getMessage(), e);
             return Result.fail("文件保存失败: " + e.getMessage());
         }
+    }
+
+    private String getSupportedExtension(String fileName) {
+        if (fileName == null || !fileName.contains(".")) {
+            return null;
+        }
+        String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+        return switch (extension) {
+            case "pdf", "doc", "docx", "ppt", "pptx", "txt" -> extension;
+            default -> null;
+        };
     }
 
     /**

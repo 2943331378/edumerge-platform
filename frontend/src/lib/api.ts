@@ -147,13 +147,36 @@ export async function getMindMap(docId: number): Promise<MindMapRecord> {
   return request<MindMapRecord>(`/mindmap?docId=${docId}`);
 }
 
+// ===== 学习笔记 (StudyNote) =====
+
+export interface StudyNoteRecord {
+  id?: number;
+  deckId: number;
+  docId: number;
+  title: string;
+  content: string;
+  sourceSummary?: string;
+  createdAt: string;
+}
+
+export async function getStudyNote(docId: number): Promise<StudyNoteRecord> {
+  return request<StudyNoteRecord>(`/notes?docId=${docId}`);
+}
+
+export async function generateStudyNote(docId: number): Promise<StudyNoteRecord> {
+  return request<StudyNoteRecord>("/notes/generate", {
+    method: "POST",
+    body: JSON.stringify({ docId: String(docId) }),
+  });
+}
+
 // ===== 卡片组 (Deck) =====
 
 export interface DeckRecord {
   id: number;
   docId: number;
   title: string;
-  type: "FLASHCARD" | "QUIZ";
+  type: "FLASHCARD" | "QUIZ" | "MIND_MAP" | "NOTE";
   createdAt: string;
 }
 

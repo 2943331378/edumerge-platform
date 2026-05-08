@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, DragEvent, ChangeEvent, useRef } from "react";
+import { useState, ChangeEvent, useRef } from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   MessageSquare,
+  NotebookText,
   Layers,
   HelpCircle,
   GitFork,
@@ -17,7 +18,7 @@ import {
   PanelLeft,
 } from "lucide-react";
 
-export type NavTab = "chat" | "flashcards" | "quizzes" | "mindmap";
+export type NavTab = "chat" | "notes" | "flashcards" | "quizzes" | "mindmap";
 
 export interface UploadedDoc {
   id: string;
@@ -41,6 +42,7 @@ interface AppSidebarProps {
 
 const navItems: { id: NavTab; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "对话", icon: MessageSquare },
+  { id: "notes", label: "笔记", icon: NotebookText },
   { id: "flashcards", label: "卡片", icon: Layers },
   { id: "quizzes", label: "测试", icon: HelpCircle },
   { id: "mindmap", label: "导图", icon: GitFork },
@@ -61,7 +63,10 @@ export function AppSidebar({
 
   const handleFile = (file: File | null) => {
     if (!file) return;
-    if (file.type === "application/pdf") onUpload(file);
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    if (extension && ["pdf", "doc", "docx", "ppt", "pptx", "txt"].includes(extension)) {
+      onUpload(file);
+    }
   };
 
   return (
@@ -186,7 +191,7 @@ export function AppSidebar({
               <input
                 ref={fileRef}
                 type="file"
-                accept="application/pdf"
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 onChange={(e: ChangeEvent<HTMLInputElement>) => {
                   handleFile(e.target.files?.[0] ?? null);
                   if (fileRef.current) fileRef.current.value = "";

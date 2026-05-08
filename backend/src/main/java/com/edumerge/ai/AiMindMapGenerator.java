@@ -46,7 +46,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
     public MindMapResult generate(Long docId, Long userId, String docUuid) {
         // 步骤 1: 从 Milvus 检索文档核心内容 — 非结构化数据提取
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 20,
-                "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容 定义 原理 方法 总结");
+                "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容 定义 原理 方法 总结 document structure headings core topic key concepts hierarchy outline main content definition principles methods summary");
         if (matches.isEmpty()) {
             log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
             return MindMapResult.empty(docId);
@@ -96,6 +96,8 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                 3. 严禁编造文档中不存在的内容，必须以文档为依据
                 4. 每个 ### 和 - 节点必须是完整的短语或句子，不可仅为单个词
                 5. 层级之间不要有空行，保持紧凑的树状结构
+                6. 必须使用简体中文生成标题、分支和要点；如果文档是英文，请基于英文原文翻译、归纳和解释
+                7. 英文关键术语首次出现时保留英文原词，例如"个性化学习（personalized learning）"
 
                 # 文档上下文
                 {CONTEXT}
