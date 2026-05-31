@@ -4,13 +4,16 @@ import com.edumerge.ai.AiNoteGenerator;
 import com.edumerge.common.result.Result;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.StudyNote;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.StudyNoteService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -40,6 +43,16 @@ public class StudyNoteController {
         return Result.success(toMap(note));
     }
 
+    @GetMapping("/history")
+    public Result<List<Map<String, Object>>> getHistory(@RequestParam Long docId) {
+        List<StudyNote> notes = studyNoteService.listByDocId(docId);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (StudyNote note : notes) {
+            list.add(toMap(note));
+        }
+        return Result.success(list);
+    }
+
     @PostMapping("/generate")
     public Result<Map<String, Object>> generate(@RequestBody Map<String, String> body) {
         String docIdStr = body.get("docId");
@@ -60,7 +73,8 @@ public class StudyNoteController {
         }
 
         log.info("开始生成学习笔记: docId={}, docUuid={}", docId, doc.getDocumentId());
-        AiNoteGenerator.StudyNoteResult generated = aiNoteGenerator.generate(docId, 1L, doc.getDocumentId());
+        String requirements = body.get("requirements");
+        AiNoteGenerator.StudyNoteResult generated = aiNoteGenerator.generate(docId, SecurityUtils.getCurrentUserId(), doc.getDocumentId(), requirements);
         if (!generated.isSuccess()) {
             return Result.fail("学习笔记生成失败: 未从文档中提取到足够内容");
         }
@@ -71,6 +85,7 @@ public class StudyNoteController {
         data.put("title", generated.getTitle());
         data.put("content", generated.getContent());
         data.put("sourceSummary", generated.getSourceSummary());
+        data.put("requirements", generated.getRequirements());
         data.put("createdAt", java.time.LocalDateTime.now().toString());
         return Result.success(data);
     }
@@ -83,6 +98,7 @@ public class StudyNoteController {
         data.put("title", note.getTitle());
         data.put("content", note.getContent());
         data.put("sourceSummary", note.getSourceSummary());
+        data.put("requirements", note.getRequirements());
         data.put("createdAt", note.getCreatedAt() != null ? note.getCreatedAt().toString() : null);
         return data;
     }

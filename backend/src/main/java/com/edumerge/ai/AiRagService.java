@@ -2,7 +2,9 @@ package com.edumerge.ai;
 
 import com.edumerge.entity.ChatHistory;
 import com.edumerge.mapper.ChatHistoryMapper;
+import com.edumerge.mapper.DocumentMapper;
 import com.edumerge.service.ConversationService;
+import com.edumerge.service.FlowNoteService;
 import com.edumerge.store.MilvusEmbeddingStore;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.AiMessage;
@@ -46,6 +48,11 @@ public class AiRagService {
     private final Function<String, ChatMemory> chatMemoryProvider;
     private final ConversationService conversationService;
     private final ChatHistoryMapper chatHistoryMapper;
+    private final DocumentMapper documentMapper;
+    private final FlowNoteService flowNoteService;
+
+    // FlowNote 自动提取：每 5 轮对话触发一次
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> exchangeCounters = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Value("${app.rag.top-k:5}")
     private int topK;
@@ -60,7 +67,9 @@ public class AiRagService {
                         StreamingChatLanguageModel streamingChatLanguageModel,
                         @Qualifier("chatMemoryProvider") Function<String, ChatMemory> chatMemoryProvider,
                         ConversationService conversationService,
-                        ChatHistoryMapper chatHistoryMapper) {
+                        ChatHistoryMapper chatHistoryMapper,
+                        DocumentMapper documentMapper,
+                        FlowNoteService flowNoteService) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.chatLanguageModel = chatLanguageModel;
@@ -68,12 +77,27 @@ public class AiRagService {
         this.chatMemoryProvider = chatMemoryProvider;
         this.conversationService = conversationService;
         this.chatHistoryMapper = chatHistoryMapper;
+        this.documentMapper = documentMapper;
+        this.flowNoteService = flowNoteService;
     }
 
     /** 同步 RAG 对话 — 带上下文记忆 */
     public AiRagResult chat(String userMessage, String documentId, String sessionId) {
+        return chat(userMessage, documentId, sessionId, null, null);
+    }
+
+    /** 同步 RAG 对话 — 带上下文记忆 + 活动上下文 */
+    public AiRagResult chat(String userMessage, String documentId, String sessionId,
+                             Long docId, String activityType) {
+        return chat(userMessage, documentId, sessionId, docId, activityType, null);
+    }
+
+    /** 同步 RAG 对话 — 带上下文记忆 + 活动上下文 + 步骤上下文 */
+    public AiRagResult chat(String userMessage, String documentId, String sessionId,
+                             Long docId, String activityType, String contextHint) {
         try {
-            log.info("开始 RAG 流程: 问题='{}', 文档ID='{}', sessionId='{}'", userMessage, documentId, sessionId);
+            log.info("开始 RAG 流程: 问题='{}', 文档ID='{}', activityType='{}', contextHint='{}'",
+                    userMessage, documentId, activityType, contextHint);
             List<EmbeddingMatch<TextSegment>> matches = retrieveMatches(userMessage, documentId);
             if (matches.isEmpty()) {
                 return AiRagResult.empty("未在知识库中找到相关内容，无法回答该问题。");
@@ -84,14 +108,14 @@ public class AiRagService {
 
             // 加载对话记忆 + 拼装消息列表: System → Past Messages → Current User
             ChatMemory memory = chatMemoryProvider.apply(sessionId != null ? sessionId : "");
-            List<ChatMessage> messages = buildMessagesWithMemory(userMessage, context, memory);
+            List<ChatMessage> messages = buildMessagesWithMemory(userMessage, context, contextHint, memory);
 
             log.info("调用大模型生成回答 (记忆条数={})...", memory.messages().size());
             Response<AiMessage> response = chatLanguageModel.generate(messages);
             String answer = response.content().text();
 
             // 直接持久化 (绕过 LangChain4j 0.28.0 ChatMemory.add 消息丢失 bug)
-            saveExchange(sessionId, userMessage, answer);
+            saveExchange(sessionId, documentId, docId, userMessage, answer, activityType);
 
             log.info("RAG 回答生成完成, 长度: {} 字符", answer.length());
             return AiRagResult.success(answer, sources);
@@ -105,8 +129,25 @@ public class AiRagService {
     public List<EmbeddingMatch<TextSegment>> chatStream(String userMessage, String documentId,
                                                          String sessionId,
                                                          StreamingResponseHandler<AiMessage> handler) {
+        return chatStream(userMessage, documentId, sessionId, null, null, handler);
+    }
+
+    /** 流式 RAG 对话 — 带上下文记忆 + 活动上下文 */
+    public List<EmbeddingMatch<TextSegment>> chatStream(String userMessage, String documentId,
+                                                         String sessionId,
+                                                         Long docId, String activityType,
+                                                         StreamingResponseHandler<AiMessage> handler) {
+        return chatStream(userMessage, documentId, sessionId, docId, activityType, null, handler);
+    }
+
+    /** 流式 RAG 对话 — 带上下文记忆 + 活动上下文 + 步骤上下文 */
+    public List<EmbeddingMatch<TextSegment>> chatStream(String userMessage, String documentId,
+                                                         String sessionId,
+                                                         Long docId, String activityType,
+                                                         String contextHint,
+                                                         StreamingResponseHandler<AiMessage> handler) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveMatches(userMessage, documentId);
-        log.info("流式 RAG: 检索到 {} 个块", matches.size());
+        log.info("流式 RAG: 检索到 {} 个块, activityType={}, contextHint={}", matches.size(), activityType, contextHint);
 
         ChatMemory memory = chatMemoryProvider.apply(sessionId != null ? sessionId : "");
 
@@ -114,13 +155,17 @@ public class AiRagService {
             String fallback = "在该材料中未找到相关内容。";
             handler.onNext(fallback);
             handler.onComplete(null);
-            saveExchange(sessionId, userMessage, fallback);
+            saveExchange(sessionId, documentId, docId, userMessage, fallback, activityType);
             return matches;
         }
 
-        List<ChatMessage> messages = buildMessagesWithMemory(userMessage, buildContext(matches), memory);
+        List<ChatMessage> messages = buildMessagesWithMemory(userMessage, buildContext(matches), contextHint, memory);
 
-        // 流式 handler 包装 — 累积完整回答后写入记忆
+        // 流式 handler 包装
+        final String finalDocId = documentId;
+        final Long finalDocId2 = docId;
+        final String finalActivityType = activityType;
+        final String finalContextHint = contextHint;
         StringBuilder fullAnswer = new StringBuilder();
         StreamingResponseHandler<AiMessage> wrappedHandler = new StreamingResponseHandler<>() {
             @Override
@@ -132,13 +177,13 @@ public class AiRagService {
             public void onComplete(Response<AiMessage> response) {
                 log.info("流式生成完成, 持久化: sessionId={}, answerLen={}", sessionId, fullAnswer.length());
                 handler.onComplete(response);
-                saveExchange(sessionId, userMessage, fullAnswer.toString());
+                saveExchange(sessionId, finalDocId, finalDocId2, userMessage, fullAnswer.toString(), finalActivityType);
             }
             @Override
             public void onError(Throwable error) {
                 log.error("流式生成错误: sessionId={}", sessionId, error.getMessage());
                 handler.onError(error);
-                saveExchange(sessionId, userMessage, "生成失败: " + error.getMessage());
+                saveExchange(sessionId, finalDocId, finalDocId2, userMessage, "生成失败: " + error.getMessage(), finalActivityType);
             }
         };
 
@@ -176,20 +221,51 @@ public class AiRagService {
     public StreamingChatLanguageModel getStreamingModel() { return streamingChatLanguageModel; }
 
     /** 直接持久化一轮对话 (绕过 LangChain4j 0.28.0 ChatMemory.add 消息丢失 bug) */
-    private void saveExchange(String sessionId, String userMessage, String aiResponse) {
+    private void saveExchange(String sessionId, String documentId, Long docId,
+                               String userMessage, String aiResponse, String activityType) {
         if (sessionId == null || sessionId.isBlank()) return;
         try {
-            conversationService.ensure(sessionId, 1L,
-                    userMessage.length() > 40 ? userMessage.substring(0, 40) + "..." : userMessage);
+            Long userId = com.edumerge.security.SecurityUtils.getCurrentUserId();
+            conversationService.ensure(sessionId, userId,
+                    userMessage.length() > 40 ? userMessage.substring(0, 40) + "..." : userMessage, docId);
             ChatHistory record = ChatHistory.builder()
-                    .userId(1L).sessionId(sessionId)
+                    .userId(userId).sessionId(sessionId)
                     .query(userMessage).response(aiResponse)
                     .retrievedDocuments(0).deleted(0)
+                    .activityType(activityType)
                     .build();
             chatHistoryMapper.insert(record);
-            log.info("对话已持久化: sessionId={}, id={}", sessionId, record.getId());
+            log.info("对话已持久化: sessionId={}, id={}, activityType={}", sessionId, record.getId(), activityType);
+
+            // FlowNote 自动提取: 每5轮对话触发一次
+            tryAutoExtractFlowNote(sessionId, userId, documentId, docId);
         } catch (Exception e) {
             log.error("对话持久化失败: sessionId={}, error={}", sessionId, e.getMessage(), e);
+        }
+    }
+
+    /** FlowNote 自动提取：每积累 5 轮对话，AI 自动提取学习要点 */
+    private void tryAutoExtractFlowNote(String sessionId, Long userId, String documentId,
+                                         Long docId) {
+        try {
+            int count = exchangeCounters.merge(sessionId, 1, Integer::sum);
+            if (count % 5 != 0) return;
+
+            // 优先用 docId（数据库主键）查找文档，回退到 documentId (Milvus UUID)
+            com.edumerge.entity.Document doc = null;
+            if (docId != null) {
+                doc = documentMapper.selectById(docId);
+            } else if (documentId != null && !documentId.isBlank()) {
+                doc = documentMapper.selectOne(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.edumerge.entity.Document>()
+                                .eq(com.edumerge.entity.Document::getDocumentId, documentId));
+            }
+            if (doc == null || doc.getId() == null) return;
+
+            flowNoteService.extractFromChat(doc.getId(), doc.getDocumentId(), userId, sessionId, 10);
+            log.info("FlowNote 自动提取触发: sessionId={}, docId={}, exchangeCount={}", sessionId, doc.getId(), count);
+        } catch (Exception e) {
+            log.debug("FlowNote 自动提取跳过: {}", e.getMessage());
         }
     }
 
@@ -204,12 +280,11 @@ public class AiRagService {
         return sb.toString();
     }
 
-    /** 拼装: System Prompt (含检索上下文) + 历史对话记忆 + 当前用户问题 */
+    /** 拼装: System Prompt (含检索上下文+步骤上下文) + 历史对话记忆 + 当前用户问题 */
     public List<ChatMessage> buildMessagesWithMemory(String userQuestion, String context,
-                                                      ChatMemory memory) {
+                                                      String stepContext, ChatMemory memory) {
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(buildSystemMessage(context));
-        // 过滤掉记忆中的 SystemMessage (每轮 System 随上下文变化, 只保留对话)
+        messages.add(buildSystemMessage(context, stepContext));
         for (ChatMessage m : memory.messages()) {
             if (!(m instanceof SystemMessage)) {
                 messages.add(m);
@@ -219,9 +294,9 @@ public class AiRagService {
         return messages;
     }
 
-    /** 构建 System Prompt — 平衡文档约束与对话连贯性 */
-    public SystemMessage buildSystemMessage(String context) {
-        String template = context.isBlank()
+    /** 构建 System Prompt — 平衡文档约束与对话连贯性，注入步骤上下文 */
+    public SystemMessage buildSystemMessage(String context, String stepContext) {
+        String baseTemplate = context.isBlank()
             ? """
                你是一个严谨的 AI 学习导师。
                当前未在知识库中检索到与用户问题相关的文档内容。
@@ -243,9 +318,21 @@ public class AiRagService {
                8. **知识点提炼**: 当用户询问总结、解释、学习要点或"这篇文档讲了什么"时，优先按"中文概述"、"核心知识点"、"可复习问题"组织回答。
 
                # 文档上下文
-               {CONTEXT}
-               """;
-        String prompt = template.replace("{CONTEXT}", context);
+               {CONTEXT}""";
+
+        // 注入步骤级上下文（用户当前正在查看的内容）
+        if (stepContext != null && !stepContext.isBlank()) {
+            baseTemplate += """
+
+               # 用户当前活动上下文
+               {STEP_CONTEXT}
+               请结合此上下文理解用户的问题。如果用户使用"这个"、"这里"、"刚才那个"等指示代词，请根据上述活动上下文推断其所指。""";
+        }
+
+        String prompt = baseTemplate.replace("{CONTEXT}", context);
+        if (stepContext != null && !stepContext.isBlank()) {
+            prompt = prompt.replace("{STEP_CONTEXT}", stepContext);
+        }
         return new SystemMessage(prompt);
     }
 

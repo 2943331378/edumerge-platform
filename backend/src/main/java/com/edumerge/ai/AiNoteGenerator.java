@@ -31,7 +31,7 @@ public class AiNoteGenerator extends AiGeneratorBase {
     @Autowired
     private StudyNoteService studyNoteService;
 
-    public StudyNoteResult generate(Long docId, Long userId, String docUuid) {
+    public StudyNoteResult generate(Long docId, Long userId, String docUuid, String requirements) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 25,
                 "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 结论 复习重点 study notes summary chapter highlights key concepts main ideas methods principles conclusions review points");
         if (matches.isEmpty()) {
@@ -40,21 +40,20 @@ public class AiNoteGenerator extends AiGeneratorBase {
         }
 
         String context = buildContext(matches);
-        String content = cleanMarkdown(callLLM(context));
+        String content = cleanMarkdown(callLLM(context, requirements));
         if (content.isBlank()) {
             return StudyNoteResult.empty(docId);
         }
 
-        studyNoteService.deleteByDocId(docId);
         CardDeck deck = cardDeckService.create(docId, "NOTE");
         String title = LocalDateTime.now().format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) + " 学习笔记";
         String sourceSummary = buildSourceSummary(matches);
-        studyNoteService.create(docId, deck.getId(), title, content, sourceSummary);
+        studyNoteService.create(docId, deck.getId(), title, content, sourceSummary, requirements);
 
-        return StudyNoteResult.success(docId, deck.getId(), title, content, sourceSummary);
+        return StudyNoteResult.success(docId, deck.getId(), title, content, sourceSummary, requirements);
     }
 
-    private String callLLM(String context) {
+    private String callLLM(String context, String requirements) {
         String template = """
                 你是一个严谨的 AI 学习笔记助手。请基于提供的文档片段，生成一份适合学生复习的 Markdown 学习笔记。
 
@@ -84,12 +83,19 @@ public class AiNoteGenerator extends AiGeneratorBase {
                 - "可自测问题"给出 5 个问题，不要直接附答案。
                 - "参考片段"列出 [片段N]，只列真实使用到的片段编号。
 
+                {REQUIREMENTS}
                 # 文档上下文
                 {CONTEXT}
                 """;
 
+        String reqSection = (requirements != null && !requirements.isBlank())
+                ? "# 用户个性化要求\n请特别注意用户的以下要求：" + requirements.strip() + "\n\n"
+                : "";
+
         List<dev.langchain4j.data.message.ChatMessage> messages = new java.util.ArrayList<>();
-        messages.add(new SystemMessage(template.replace("{CONTEXT}", context)));
+        messages.add(new SystemMessage(template
+                .replace("{REQUIREMENTS}", reqSection)
+                .replace("{CONTEXT}", context)));
         messages.add(new UserMessage("请基于以上文档内容生成一份结构化中文学习笔记。"));
         Response<AiMessage> response = chatLanguageModel.generate(messages);
         return response.content().text();
@@ -123,24 +129,26 @@ public class AiNoteGenerator extends AiGeneratorBase {
         private final String title;
         private final String content;
         private final String sourceSummary;
+        private final String requirements;
 
         private StudyNoteResult(boolean success, Long docId, Long deckId,
-                                String title, String content, String sourceSummary) {
+                                String title, String content, String sourceSummary, String requirements) {
             this.success = success;
             this.docId = docId;
             this.deckId = deckId;
             this.title = title;
             this.content = content;
             this.sourceSummary = sourceSummary;
+            this.requirements = requirements;
         }
 
         public static StudyNoteResult success(Long docId, Long deckId, String title,
-                                              String content, String sourceSummary) {
-            return new StudyNoteResult(true, docId, deckId, title, content, sourceSummary);
+                                              String content, String sourceSummary, String requirements) {
+            return new StudyNoteResult(true, docId, deckId, title, content, sourceSummary, requirements);
         }
 
         public static StudyNoteResult empty(Long docId) {
-            return new StudyNoteResult(false, docId, null, null, null, null);
+            return new StudyNoteResult(false, docId, null, null, null, null, null);
         }
 
         public boolean isSuccess() { return success; }
@@ -149,5 +157,6 @@ public class AiNoteGenerator extends AiGeneratorBase {
         public String getTitle() { return title; }
         public String getContent() { return content; }
         public String getSourceSummary() { return sourceSummary; }
+        public String getRequirements() { return requirements; }
     }
 }

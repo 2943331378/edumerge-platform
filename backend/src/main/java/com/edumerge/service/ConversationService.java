@@ -21,16 +21,23 @@ public class ConversationService {
         this.conversationMapper = conversationMapper;
     }
 
-    /** 确保会话存在 — 不存在则创建, 存在则返回已有记录 */
-    public Conversation ensure(String sessionId, Long userId, String title) {
+    /** 确保会话存在 — 不存在则创建 (关联文档), 存在时更新 docId */
+    public Conversation ensure(String sessionId, Long userId, String title, Long docId) {
         Conversation existing = getBySessionId(sessionId);
-        if (existing != null) return existing;
+        if (existing != null) {
+            // 回填 docId（兼容历史数据 docId 为 NULL 的情况）
+            if (existing.getDocId() == null && docId != null) {
+                existing.setDocId(docId);
+                conversationMapper.updateById(existing);
+            }
+            return existing;
+        }
         Conversation c = Conversation.builder()
-                .sessionId(sessionId).userId(userId).title(title)
-                .deleted(0) // @TableLogic 不自动设值, 必须显式置 0
+                .sessionId(sessionId).userId(userId).docId(docId).title(title)
+                .deleted(0)
                 .build();
         conversationMapper.insert(c);
-        log.info("对话会话已创建: sessionId={}, title={}", sessionId, title);
+        log.info("对话会话已创建: sessionId={}, docId={}, title={}", sessionId, docId, title);
         return c;
     }
 
@@ -47,6 +54,15 @@ public class ConversationService {
         return conversationMapper.selectList(
                 new LambdaQueryWrapper<Conversation>()
                         .eq(Conversation::getUserId, userId)
+                        .orderByDesc(Conversation::getCreatedAt));
+    }
+
+    /** 按文档列出会话 */
+    public List<Conversation> listByDocId(Long userId, Long docId) {
+        return conversationMapper.selectList(
+                new LambdaQueryWrapper<Conversation>()
+                        .eq(Conversation::getUserId, userId)
+                        .eq(docId != null, Conversation::getDocId, docId)
                         .orderByDesc(Conversation::getCreatedAt));
     }
 

@@ -49,4 +49,15 @@ public class FlashcardService {
                         .eq(Flashcard::getDeckId, deckId)
                         .orderByAsc(Flashcard::getId));
     }
+
+    public void updateById(Flashcard card) {
+        flashcardMapper.updateById(card);
+        log.info("学习卡片已更新: id={}", card.getId());
+    }
+
+    public int deleteById(Long id) {
+        int rows = flashcardMapper.deleteById(id);
+        if (rows > 0) log.info("学习卡片已删除: id={}", id);
+        return rows;
+    }
 }

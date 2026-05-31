@@ -55,4 +55,15 @@ public class QuizService {
                         .eq(Quiz::getDeckId, deckId)
                         .orderByAsc(Quiz::getId));
     }
+
+    public void updateById(Quiz quiz) {
+        quizMapper.updateById(quiz);
+        log.info("测试题已更新: id={}", quiz.getId());
+    }
+
+    public int deleteById(Long id) {
+        int rows = quizMapper.deleteById(id);
+        if (rows > 0) log.info("测试题已删除: id={}", id);
+        return rows;
+    }
 }

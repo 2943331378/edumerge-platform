@@ -13,3 +13,17 @@ frontend/.env* # 忽略所有环境变量文件！
 # 操作系统/IDE
 .DS_Store
 *.log
+
+# 本地一次性 SSH 部署脚本（勿提交）
+scripts/_ssh_*.py
+
+# 运行时上传文件
+uploads/
+
+# 构建产物压缩包
+frontend.zip
+*.tar.gz
+
+# RAG 评估生成输出（可重新生成）
+scripts/eval_results.json
+scripts/eval_report.md

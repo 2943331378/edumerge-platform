@@ -10,27 +10,30 @@
  * - 数据治理: 通过 deck_id 外键实现题目与组的关联, 支持分组查询与清理
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, HelpCircle, RotateCw, ArrowLeft, Check, X, Trash2, Sparkle, GitFork } from "lucide-react";
+import { Sparkles, HelpCircle, RotateCw, ArrowLeft, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { DeckRecord, QuizItem } from "@/lib/api";
-import { listDecks, listQuizzesByDeck, generateQuizzes as generateApi, deleteDeck, getMindMap } from "@/lib/api";
+import type { DeckRecord, QuizItem, QuizAttemptRecord } from "@/lib/api";
+import { listDecks, listQuizzesByDeck, generateQuizzes as generateApi, deleteDeck, getMindMap, saveQuizAttempt, listQuizAttempts, updateQuiz, deleteQuiz } from "@/lib/api";
 
 interface Props {
   docId: number | null;
   docUuid: string | null;
   sessionId: number | null;
   onMindMapGenerated?: () => void;
+  onGenerated?: () => void;
+  onContextChange?: (hint: string) => void;
+  embedded?: boolean;
 }
 
 function isNewDeck(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 24 * 60 * 60 * 1000;
 }
 
-export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Props) {
+export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded }: Props) {
   const [view, setView] = useState<"decks" | "quiz">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
@@ -42,6 +45,37 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
   const [selected, setSelected] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [score, setScore] = useState(0);
+  const [attempts, setAttempts] = useState<QuizAttemptRecord[]>([]);
+  const [answers, setAnswers] = useState<{ quizId: number; selectedAnswer: string; correct: boolean }[]>([]);
+
+  // Wrong-answer review mode
+  const [reviewMode, setReviewMode] = useState(false);
+  const [reviewIdx, setReviewIdx] = useState(0);
+  const [reviewScore, setReviewScore] = useState(0);
+  const [reviewAnswers, setReviewAnswers] = useState<{ quizId: number; selectedAnswer: string; correct: boolean }[]>([]);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [reviewSelected, setReviewSelected] = useState<string | null>(null);
+
+  const [manageMode, setManageMode] = useState(false);
+  const [editingQuizId, setEditingQuizId] = useState<number | null>(null);
+  const [editQuizForm, setEditQuizForm] = useState({ question: "", options: "", answer: "", explanation: "" });
+  const [saving, setSaving] = useState(false);
+
+  const wrongQuizzes = quizzes.filter((q) => answers.some((a) => a.quizId === q.id && !a.correct));
+
+  const startReview = () => {
+    setReviewMode(true);
+    setReviewIdx(0);
+    setReviewScore(0);
+    setReviewAnswers([]);
+    setReviewSelected(null);
+    setReviewSubmitted(false);
+  };
+
+  const endReview = () => {
+    setReviewMode(false);
+    setReviewIdx(0);
+  };
 
   const mindMapProgressTexts = [
     "正在解构知识要素...",
@@ -51,10 +85,43 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
     "正在组织知识图谱...",
   ];
   const [mindMapTextIdx, setMindMapTextIdx] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const cancelGeneration = () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setLoading(false);
+      setMindMapGenerating(false);
+      toast.info("已取消生成");
+    }
+  };
+
+  // Report current quiz context to parent for chat context injection
+  useEffect(() => {
+    if (reviewMode && wrongQuizzes[reviewIdx]) {
+      const q = wrongQuizzes[reviewIdx];
+      onContextChange?.(`用户在回顾错题第${reviewIdx + 1}/${wrongQuizzes.length}题: "${q.question}"`);
+    } else if (view === "quiz" && quizzes[currentIdx]) {
+      const q = quizzes[currentIdx];
+      const status = submitted ? (selected === q.answer ? "已答对" : "已答错") : (selected ? "已选择答案" : "未作答");
+      onContextChange?.(`用户在测验第${currentIdx + 1}/${quizzes.length}题（${status}）: "${q.question}"`);
+    } else if (view === "decks") {
+      onContextChange?.("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, reviewMode, currentIdx, reviewIdx, selected, submitted, reviewSelected, reviewSubmitted, quizzes.length, wrongQuizzes.length, onContextChange]);
 
   const reloadDecks = async () => {
     if (!docId) return;
-    try { setDecks(await listDecks(docId, "QUIZ")); } catch { setDecks([]); }
+    try {
+      const [deckList, attemptList] = await Promise.all([
+        listDecks(docId, "QUIZ"),
+        listQuizAttempts(docId),
+      ]);
+      setDecks(deckList);
+      setAttempts(attemptList);
+    } catch { setDecks([]); setAttempts([]); }
   };
 
   // docId 变化时自动重载 deck 列表并回到列表视图
@@ -96,6 +163,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
       setSelected(null);
       setSubmitted(false);
       setScore(0);
+      setAnswers([]);
       setView("quiz");
     } catch { toast.error("加载测试题失败"); }
     setLoading(false);
@@ -104,16 +172,24 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
   /** 生成后自动加载列表并进入最新 Deck */
   const handleGenerate = async () => {
     if (!sessionId) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     try {
-      await generateApi(undefined, undefined, sessionId);
+      await generateApi(undefined, undefined, sessionId, controller.signal);
       const fresh = await listDecks(docId!, "QUIZ");
       setDecks(fresh);
+      onGenerated?.();
       toast.success("测试题生成成功");
       if (fresh.length > 0) {
         await enterDeck(fresh[0]);
       }
-    } catch { toast.error("测试题生成失败"); }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        toast.error("测试题生成失败");
+      }
+    }
+    abortRef.current = null;
     setLoading(false);
   };
 
@@ -132,14 +208,36 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
     if (!selected || submitted) return;
     setSubmitted(true);
     const quiz = quizzes[currentIdx];
-    if (quiz && selected === quiz.answer) setScore((s) => s + 1);
+    const isCorrect = quiz && selected === quiz.answer;
+    if (isCorrect) setScore((s) => s + 1);
+    if (quiz) {
+      setAnswers((prev) => [...prev, { quizId: quiz.id, selectedAnswer: selected!, correct: !!isCorrect }]);
+    }
   };
 
-  const goNext = () => {
+  const saveCurrentAttempt = async () => {
+    if (!docId || !currentDeck || answers.length === 0) return;
+    const correctCount = answers.filter((a) => a.correct).length;
+    try {
+      await saveQuizAttempt({
+        docId,
+        deckId: currentDeck.id,
+        totalQuestions: quizzes.length,
+        correctCount,
+        scorePercent: Math.round((correctCount / quizzes.length) * 100),
+        answerDetails: JSON.stringify(answers),
+      });
+      await reloadDecks();
+    } catch { /* ignore save errors */ }
+  };
+
+  const goNext = async () => {
     if (currentIdx < quizzes.length - 1) {
       setCurrentIdx((i) => i + 1);
       setSelected(null);
       setSubmitted(false);
+    } else {
+      await saveCurrentAttempt();
     }
   };
 
@@ -147,22 +245,31 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
   if (view === "decks") {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
-          <h2 className="text-sm font-medium text-foreground/80 flex items-center gap-2">
-            <HelpCircle className="h-4 w-4 text-muted-foreground" />
-            测试题组
-          </h2>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>
-              {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
-              {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
-            </Button>
-            <Button size="sm" className="rounded-xl gap-1.5 h-8" onClick={handleGenerate} disabled={loading || !sessionId}>
-              {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {loading ? "生成中..." : "一键生成"}
-            </Button>
+        {!embedded && (
+          <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
+            <h2 className="text-sm font-medium text-foreground/80 flex items-center gap-2">
+              <HelpCircle className="h-4 w-4 text-muted-foreground" />
+              测试题组
+            </h2>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>
+                {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
+                {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
+              </Button>
+              {loading ? (
+                <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
+                  <XCircle className="h-3.5 w-3.5" />
+                  取消生成
+                </Button>
+              ) : (
+                <Button size="sm" className="rounded-xl gap-1.5 h-8" onClick={handleGenerate} disabled={!sessionId}>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  一键生成
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 思维导图生成进度条 */}
         {mindMapGenerating && (
@@ -192,48 +299,96 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
                   AI 将从文档中提取核心概念生成测试题，帮助你验证学习效果
                 </p>
               </div>
-              <Button onClick={handleGenerate} disabled={loading || !sessionId} className="rounded-xl gap-2 h-10">
-                {loading
-                  ? <><RotateCw className="h-4 w-4 animate-spin" />生成中...</>
-                  : <><Sparkles className="h-4 w-4" />一键生成学习任务</>}
-              </Button>
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <RotateCw className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">AI 正在生成...</span>
+                  <Button variant="outline" size="sm" className="rounded-xl h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
+                    <XCircle className="h-3.5 w-3.5 mr-1" />取消
+                  </Button>
+                </div>
+              ) : (
+                <Button onClick={handleGenerate} disabled={!sessionId} className="rounded-xl gap-2 h-10">
+                  <Sparkles className="h-4 w-4" />一键生成学习任务
+                </Button>
+              )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-5xl mx-auto">
-              {decks.map((deck) => (
-                <Card
-                  key={deck.id}
-                  className="group relative cursor-pointer rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:border-primary/30 transition-all"
-                  onClick={() => enterDeck(deck)}
-                >
-                  <button
-                    onClick={(e) => handleDeleteDeck(e, deck.id)}
-                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded-md p-1 transition-opacity z-10"
-                    title="删除此测试题组"
+            <div className="space-y-6 max-w-5xl mx-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {decks.map((deck) => (
+                  <Card
+                    key={deck.id}
+                    className="group relative cursor-pointer rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:border-primary/30 transition-all"
+                    onClick={() => enterDeck(deck)}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteDeck(e, deck.id)}
+                      className="absolute top-3 right-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded-md p-1 transition-opacity z-10"
+                      title="删除此测试题组"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
 
-                  <CardContent className="p-5 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30">
-                        <HelpCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <CardContent className="p-5 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30">
+                          <HelpCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                        </div>
+                        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">QUIZ</span>
                       </div>
-                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">QUIZ</span>
-                    </div>
-                    <p className="text-sm font-medium text-foreground/85 leading-snug pr-6">{deck.title}</p>
-                    <div className="flex items-center gap-2">
-                      <p className="text-[11px] text-muted-foreground/50">{new Date(deck.createdAt).toLocaleString("zh-CN")}</p>
-                      {isNewDeck(deck.createdAt) && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-md">
-                          <Sparkle className="h-2.5 w-2.5" />
-                          New
+                      <p className="text-sm font-medium text-foreground/85 leading-snug pr-6">{deck.title}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-[11px] text-muted-foreground/50">{new Date(deck.createdAt).toLocaleString("zh-CN")}</p>
+                        {isNewDeck(deck.createdAt) && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-md">
+                            <Sparkle className="h-2.5 w-2.5" />
+                            New
+                          </span>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* 答题历史 */}
+              {attempts.length > 0 && (
+                <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
+                  <h3 className="text-xs font-semibold text-foreground/70 mb-3 flex items-center gap-1.5">
+                    <Target className="h-3 w-3" />
+                    答题历史
+                  </h3>
+                  <div className="space-y-1.5">
+                    {attempts.slice(0, 10).map((a) => (
+                      <div
+                        key={a.id}
+                        className="flex items-center justify-between rounded-lg px-3 py-2 text-xs bg-background/50"
+                      >
+                        <span className="text-muted-foreground">
+                          {new Date(a.createdAt).toLocaleString("zh-CN")}
                         </span>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                        <span className="text-muted-foreground/60">
+                          {a.correctCount}/{a.totalQuestions} 正确
+                        </span>
+                        <span
+                          className={cn(
+                            "font-semibold tabular-nums",
+                            a.scorePercent >= 80
+                              ? "text-emerald-600"
+                              : a.scorePercent >= 60
+                                ? "text-amber-600"
+                                : "text-destructive",
+                          )}
+                        >
+                          {a.scorePercent}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -242,27 +397,159 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
   }
 
   // ═══════════════ 答题详情视图 ═══════════════
-  const quiz = quizzes[currentIdx];
+  const quiz = reviewMode ? wrongQuizzes[reviewIdx] : quizzes[currentIdx];
+  const activeIdx = reviewMode ? reviewIdx : currentIdx;
+  const totalItems = reviewMode ? wrongQuizzes.length : quizzes.length;
+  const activeSelected = reviewMode ? reviewSelected : selected;
+  const activeSubmitted = reviewMode ? reviewSubmitted : submitted;
+
+  const handleReviewSelect = (opt: string) => {
+    if (reviewSubmitted) return;
+    setReviewSelected(opt);
+  };
+
+  const handleReviewSubmit = () => {
+    if (!reviewSelected || reviewSubmitted) return;
+    setReviewSubmitted(true);
+    const isCorrect = quiz && reviewSelected === quiz.answer;
+    if (isCorrect) setReviewScore((s) => s + 1);
+    if (quiz) {
+      setReviewAnswers((prev) => [...prev, { quizId: quiz.id, selectedAnswer: reviewSelected, correct: !!isCorrect }]);
+    }
+  };
+
+  const reviewGoNext = () => {
+    if (reviewIdx < wrongQuizzes.length - 1) {
+      setReviewIdx((i) => i + 1);
+      setReviewSelected(null);
+      setReviewSubmitted(false);
+    }
+  };
+
+  const handleSelectOpt = reviewMode ? handleReviewSelect : handleSelect;
+  const handleSubmitOpt = reviewMode ? handleReviewSubmit : handleSubmit;
+  const handleGoNext = () => {
+    if (reviewMode) {
+      reviewGoNext();
+    } else {
+      goNext();
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/20 shrink-0">
-        <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs gap-1.5" onClick={() => { setView("decks"); reloadDecks(); }}>
-          <ArrowLeft className="h-3 w-3" />
-          返回测试题组
-        </Button>
-        <span className="text-[11px] text-muted-foreground/40">/</span>
-        <span className="text-[11px] text-muted-foreground truncate max-w-[200px]">{currentDeck?.title ?? ""}</span>
-        {submitted && (
-          <span className="ml-auto text-[11px] text-muted-foreground">得分: {score}/{currentIdx + 1}</span>
-        )}
-      </div>
+      {!embedded && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/20 shrink-0">
+          <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs gap-1.5" onClick={() => { if (reviewMode) { endReview(); } else { setView("decks"); reloadDecks(); } }}>
+            <ArrowLeft className="h-3 w-3" />
+            {reviewMode ? "返回成绩" : "返回测试题组"}
+          </Button>
+          <span className="text-[11px] text-muted-foreground/40">/</span>
+          <span className="text-[11px] text-muted-foreground truncate max-w-[200px]">
+            {reviewMode ? "错题回顾" : (currentDeck?.title ?? "")}
+          </span>
+          {!reviewMode && !manageMode && (
+            <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs gap-1.5 ml-auto" onClick={() => setManageMode(true)}>
+              管理题目
+            </Button>
+          )}
+          {manageMode && (
+            <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs gap-1.5 ml-auto" onClick={() => setManageMode(false)}>
+              返回答题
+            </Button>
+          )}
+          {!reviewMode && !manageMode && submitted && (
+            <span className="ml-auto text-[11px] text-muted-foreground">得分: {score}/{currentIdx + 1}</span>
+          )}
+          {reviewMode && (
+            <span className="ml-auto text-[11px] text-muted-foreground">错题 {reviewIdx + 1}/{wrongQuizzes.length}</span>
+          )}
+        </div>
+      )}
 
+      {manageMode ? (
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-3xl mx-auto space-y-3">
+            <p className="text-xs text-muted-foreground/60 mb-4">共 {quizzes.length} 道题目，点击编辑修改题目内容</p>
+            {quizzes.map((quiz, i) => (
+              <Card key={quiz.id ?? i} className="rounded-xl border-border/50 bg-card/80 shadow-sm">
+                {editingQuizId === quiz.id ? (
+                  <CardContent className="p-4 space-y-2">
+                    <textarea value={editQuizForm.question} onChange={e => setEditQuizForm(f => ({...f, question: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="题目" rows={2} />
+                    <textarea value={editQuizForm.options} onChange={e => setEditQuizForm(f => ({...f, options: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="每行一个选项" rows={4} />
+                    <textarea value={editQuizForm.answer} onChange={e => setEditQuizForm(f => ({...f, answer: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="正确答案（与选项文本完全一致）" rows={2} />
+                    <input value={editQuizForm.explanation} onChange={e => setEditQuizForm(f => ({...f, explanation: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="解析（可选）" />
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditingQuizId(null)} disabled={saving}>取消</Button>
+                      <Button size="sm" className="h-6 text-xs" disabled={saving} onClick={async () => {
+                        setSaving(true);
+                        try {
+                          await updateQuiz(quiz.id, {
+                            question: editQuizForm.question,
+                            options: editQuizForm.options.split("\n").filter(o => o.trim()),
+                            answer: editQuizForm.answer,
+                            explanation: editQuizForm.explanation,
+                          });
+                          setQuizzes(prev => prev.map(q => q.id === quiz.id ? { ...q, question: editQuizForm.question, options: editQuizForm.options.split("\n").filter(o => o.trim()), answer: editQuizForm.answer, explanation: editQuizForm.explanation } : q));
+                          setEditingQuizId(null);
+                          toast.success("已保存");
+                        } catch { toast.error("保存失败"); }
+                        setSaving(false);
+                      }}>{saving ? "保存中..." : "保存"}</Button>
+                    </div>
+                  </CardContent>
+                ) : (
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 space-y-1">
+                        <span className="text-[10px] font-medium text-primary/60 uppercase tracking-wider">Q{i + 1}</span>
+                        <p className="text-xs text-foreground/85 leading-relaxed">{quiz.question}</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {quiz.options.map((opt) => (
+                            <span key={opt} className={`text-[10px] px-1.5 py-0.5 rounded ${opt === quiz.answer ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground/70'}`}>{opt}</span>
+                          ))}
+                        </div>
+                        {quiz.explanation && (
+                          <p className="text-[10px] text-muted-foreground/50 mt-1">解析: {quiz.explanation}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button type="button" onClick={() => {
+                          setEditingQuizId(quiz.id);
+                          let optionsStr = "";
+                          try {
+                            const raw = (quiz as unknown as Record<string, unknown>).options;
+                            const parsed = typeof raw === "string" ? JSON.parse(raw as string) : raw;
+                            optionsStr = Array.isArray(parsed) ? parsed.join("\n") : String(raw ?? "");
+                          } catch { optionsStr = String((quiz as unknown as Record<string, unknown>).options ?? ""); }
+                          setEditQuizForm({ question: quiz.question, options: optionsStr, answer: quiz.answer, explanation: quiz.explanation ?? "" });
+                        }}
+                          className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button type="button" onClick={() => { if (confirm("确定删除这道题目？")) { deleteQuiz(quiz.id).then(() => { setQuizzes(prev => prev.filter(q => q.id !== quiz.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
+                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
+            ))}
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground/50">
-            <span>{currentIdx + 1} / {quizzes.length}</span>
+            <span>{activeIdx + 1} / {totalItems}</span>
             {quiz?.difficulty && <span>{quiz.difficulty >= 4 ? "综合应用" : "基础概念"}</span>}
+            {reviewMode && <span className="text-amber-500 font-medium">错题回顾</span>}
           </div>
 
           <Card className="rounded-2xl border-border/60 shadow-sm">
@@ -273,22 +560,22 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
 
           <div className="space-y-2">
             {quiz?.options.map((opt) => {
-              const isSelected = selected === opt;
-              const showCorrect = submitted && opt === quiz.answer;
-              const showWrong = submitted && isSelected && opt !== quiz.answer;
+              const isSelected = activeSelected === opt;
+              const showCorrect = activeSubmitted && opt === quiz.answer;
+              const showWrong = activeSubmitted && isSelected && opt !== quiz.answer;
               return (
                 <button
                   key={opt}
-                  onClick={() => handleSelect(opt)}
-                  disabled={submitted}
+                  onClick={() => handleSelectOpt(opt)}
+                  disabled={activeSubmitted}
                   className={cn(
                     "w-full text-left px-4 py-3 rounded-xl border text-sm transition-all",
-                    !submitted && "hover:border-primary/40 hover:bg-muted/40 cursor-pointer",
-                    submitted && "cursor-default",
-                    isSelected && !submitted && "border-primary bg-primary/5",
+                    !activeSubmitted && "hover:border-primary/40 hover:bg-muted/40 cursor-pointer",
+                    activeSubmitted && "cursor-default",
+                    isSelected && !activeSubmitted && "border-primary bg-primary/5",
                     showCorrect && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300",
                     showWrong && "border-destructive bg-destructive/5 text-destructive",
-                    !isSelected && !showCorrect && submitted && "text-muted-foreground/50"
+                    !isSelected && !showCorrect && activeSubmitted && "text-muted-foreground/50"
                   )}
                 >
                   <div className="flex items-center gap-2">
@@ -302,25 +589,47 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
           </div>
 
           <div className="flex items-center gap-3 pt-2">
-            {!submitted ? (
-              <Button className="rounded-xl h-9" disabled={!selected} onClick={handleSubmit}>提交答案</Button>
+            {!activeSubmitted ? (
+              <Button className="rounded-xl h-9" disabled={!activeSelected} onClick={handleSubmitOpt}>
+                {reviewMode ? "确认答案" : "提交答案"}
+              </Button>
             ) : (
               <>
-                <Button variant="outline" className="rounded-xl h-9" onClick={handleGenerate} disabled={loading}>
-                  {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
-                  开启新任务
-                </Button>
-                {currentIdx < quizzes.length - 1 && (
-                  <Button className="rounded-xl h-9" onClick={goNext}>下一题</Button>
+                {!reviewMode && (
+                  <Button variant="outline" className="rounded-xl h-9" onClick={handleGenerate} disabled={loading}>
+                    {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                    开启新任务
+                  </Button>
+                )}
+                {activeIdx < totalItems - 1 && (
+                  <Button className="rounded-xl h-9" onClick={handleGoNext}>
+                    {reviewMode ? "下一错题" : "下一题"}
+                  </Button>
+                )}
+                {activeIdx === totalItems - 1 && activeSubmitted && (
+                  <>
+                    <p className="text-sm font-medium text-foreground/80">
+                      {reviewMode
+                        ? `错题完成! 重新正确 ${reviewScore}/${wrongQuizzes.length}`
+                        : `完成! 正确率 ${Math.round((score / quizzes.length) * 100)}%`}
+                    </p>
+                    {reviewMode && (
+                      <Button variant="ghost" size="sm" className="rounded-lg text-xs h-8" onClick={endReview}>
+                        返回成绩
+                      </Button>
+                    )}
+                  </>
                 )}
               </>
             )}
-            {submitted && currentIdx === quizzes.length - 1 && (
-              <p className="text-sm font-medium text-foreground/80">完成! 正确率 {Math.round((score / quizzes.length) * 100)}%</p>
+            {!reviewMode && submitted && currentIdx === quizzes.length - 1 && wrongQuizzes.length > 0 && (
+              <Button variant="outline" size="sm" className="rounded-lg text-xs h-8 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300" onClick={startReview}>
+                回顾 {wrongQuizzes.length} 道错题
+              </Button>
             )}
           </div>
 
-          {submitted && quiz?.explanation && (
+          {activeSubmitted && quiz?.explanation && (
             <Card className="rounded-2xl border-border/40 bg-muted/10">
               <CardContent className="p-4">
                 <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">解析</span>
@@ -330,6 +639,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated }: Prop
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -12,10 +12,11 @@ import { toast } from "sonner";
 interface MindMapViewerProps {
   markdown: string;
   className?: string;
+  onContextChange?: (hint: string) => void;
 }
 
 /** markmap 思维导图渲染器: 支持 zoom/pan/折叠/导出 */
-export function MindMapViewer({ markdown, className = "" }: MindMapViewerProps) {
+export function MindMapViewer({ markdown, className = "", onContextChange }: MindMapViewerProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const mmRef = useRef<Markmap | null>(null);
@@ -26,6 +27,10 @@ export function MindMapViewer({ markdown, className = "" }: MindMapViewerProps) 
 
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+
+  useEffect(() => {
+    onContextChange?.("用户正在查看思维导图");
+  }, [onContextChange]);
 
   const transformer = useRef(new Transformer());
 

@@ -38,6 +38,15 @@ public class RagChatController {
         String message = body.get("message");
         String documentId = body.get("documentId");
         String sessionIdStr = body.get("sessionId");
+        String docIdStr = body.get("docId");
+        String activityType = body.get("activityType");
+        String contextHint = body.get("contextHint");
+
+        // 解析 docId
+        Long docId = null;
+        if (docIdStr != null && !docIdStr.isBlank()) {
+            try { docId = Long.parseLong(docIdStr); } catch (NumberFormatException ignored) {}
+        }
 
         // sessionId 优先: 解析为 documentUuid
         if (sessionIdStr != null && !sessionIdStr.isBlank()) {
@@ -54,7 +63,7 @@ public class RagChatController {
 
         log.info("RAG 对话请求: message='{}', documentId='{}'", message, documentId);
 
-        AiRagService.AiRagResult result = aiRagService.chat(message, documentId, sessionIdStr);
+        AiRagService.AiRagResult result = aiRagService.chat(message, documentId, sessionIdStr, docId, activityType, contextHint);
 
         if (result.isSuccess()) {
             return Result.success("RAG 回答生成成功", Map.of(
@@ -69,5 +78,15 @@ public class RagChatController {
     @GetMapping("/history")
     public Result<List<ChatHistory>> history(@RequestParam(required = false) String sessionId) {
         return Result.success(chatHistoryService.listBySession(sessionId, 100));
+    }
+
+    @PutMapping("/history/{id}/feedback")
+    public Result<Void> feedback(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
+        Integer isHelpful = body.get("isHelpful");
+        if (isHelpful == null || (isHelpful != 0 && isHelpful != 1)) {
+            return Result.fail("isHelpful 必须为 0 或 1");
+        }
+        chatHistoryService.markHelpful(id, isHelpful);
+        return Result.success("感谢反馈", null);
     }
 }

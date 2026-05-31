@@ -1,11 +1,14 @@
 # ===== 生产环境配置 (application-prod.yml) =====
 # 启用此配置: spring.profiles.active=prod
+# 所有主机地址通过环境变量注入，适配 Docker Compose / K8s 部署
 
 spring:
+  sql.init.mode: never  # 生产环境由 MySQL 初始化脚本建表，避免重复执行 DDL
   datasource:
-    url: jdbc:mysql://mysql-prod-server:3306/edumerge?useUnicode=true&characterEncoding=utf-8&useSSL=true&serverTimezone=UTC&allowPublicKeyRetrieval=false
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    # 宝塔宿主机部署默认 127.0.0.1；Docker 全栈部署通过环境变量覆盖为 mysql
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:edumerge}?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:edumerge}
+    password: ${MYSQL_PASSWORD:}
     hikari:
       minimum-idle: 10
       maximum-pool-size: 50
@@ -13,30 +16,35 @@ spring:
 
   data:
     redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT}
-      password: ${REDIS_PASSWORD}
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       lettuce:
         pool:
           max-active: 50
           max-idle: 20
 
   rabbitmq:
-    host: ${RABBITMQ_HOST}
-    port: ${RABBITMQ_PORT}
-    username: ${RABBITMQ_USERNAME}
-    password: ${RABBITMQ_PASSWORD}
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
 
 milvus:
-  host: ${MILVUS_HOST}
+  host: ${MILVUS_HOST:milvus-standalone}
   port: 19530
+  database: ${MILVUS_DATABASE:default}
   timeout: 60000
 
+# 生产环境仍使用 DeepSeek (通过环境变量可切换为其他兼容 API)
 langchain4j:
-  # 使用 OpenAI 或其他生产级模型
   openai:
-    api-key: ${OPENAI_API_KEY}
-    model: gpt-4
+    api-key: ${DEEPSEEK_API_KEY}
+    base-url: ${LLM_BASE_URL:https://api.deepseek.com/v1}
+    model: ${LLM_MODEL:deepseek-v4-pro}
+    embedding-model: ${EMBEDDING_MODEL:text-embedding-v3}
+    embedding-base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    embedding-api-key: ${AI_API_KEY}
 
 logging:
   level:

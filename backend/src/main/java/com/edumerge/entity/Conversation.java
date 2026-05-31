@@ -22,6 +22,10 @@ public class Conversation {
     private String sessionId;
 
     private Long userId;
+
+    @TableField("doc_id")
+    private Long docId;
+
     private String title;
 
     @TableLogic

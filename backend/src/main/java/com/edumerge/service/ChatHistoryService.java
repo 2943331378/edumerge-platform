@@ -29,7 +29,7 @@ public class ChatHistoryService {
         if (sessionId != null && !sessionId.isBlank()) {
             // 首次对话时自动创建 conversation 记录
             String title = query.length() > 40 ? query.substring(0, 40) + "..." : query;
-            conversationService.ensure(sessionId, 1L, title);
+            conversationService.ensure(sessionId, 1L, title, null);
         }
         ChatHistory history = ChatHistory.builder()
                 .userId(1L)
@@ -41,6 +41,16 @@ public class ChatHistoryService {
                 .build();
         chatHistoryMapper.insert(history);
         return history;
+    }
+
+    /** 标记反馈 */
+    public void markHelpful(Long id, int isHelpful) {
+        ChatHistory record = chatHistoryMapper.selectById(id);
+        if (record != null) {
+            record.setIsHelpful(isHelpful);
+            chatHistoryMapper.updateById(record);
+            log.info("对话反馈已记录: id={}, isHelpful={}", id, isHelpful);
+        }
     }
 
     /** 按会话查询最近对话历史 */

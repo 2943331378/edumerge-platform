@@ -10,12 +10,12 @@
  * - 数据治理: 通过 deck_id 外键实现卡片与组的关联, 支持批量删除与分组查询
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork } from "lucide-react";
+import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X } from "lucide-react";
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
-import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap } from "@/lib/api";
+import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard } from "@/lib/api";
 import { toast } from "sonner";
 
 interface Props {
@@ -23,6 +23,9 @@ interface Props {
   docUuid: string | null;
   sessionId: number | null;
   onMindMapGenerated?: () => void;
+  onGenerated?: () => void;
+  onContextChange?: (hint: string) => void;
+  embedded?: boolean;
 }
 
 /** 判断 deck 是否在 24h 内新建 */
@@ -30,8 +33,8 @@ function isNewDeck(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 24 * 60 * 60 * 1000;
 }
 
-export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated }: Props) {
-  const [view, setView] = useState<"decks" | "cards">("decks");
+export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded }: Props) {
+  const [view, setView] = useState<"decks" | "preview" | "cards">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [cards, setCards] = useState<FlashcardItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,6 +52,32 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated }:
     "正在组织知识图谱...",
   ];
   const [mindMapTextIdx, setMindMapTextIdx] = useState(0);
+  const [editingCardId, setEditingCardId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ question: "", answer: "", explanation: "" });
+  const [saving, setSaving] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const cancelGeneration = () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setLoading(false);
+      setMindMapGenerating(false);
+      toast.info("已取消生成");
+    }
+  };
+
+  // Report current card context to parent for chat context injection
+  useEffect(() => {
+    if (view === "cards" && cards[currentIdx]) {
+      const card = cards[currentIdx];
+      const side = flipped ? "答案" : "问题";
+      onContextChange?.(`用户在复习闪卡第${currentIdx + 1}/${cards.length}张（${side}面）: "${card.question}"`);
+    } else if (view === "decks") {
+      onContextChange?.("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, currentIdx, flipped, cards.length, onContextChange]);
 
   const reloadDecks = async () => {
     if (!docId) return;
@@ -97,20 +126,29 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated }:
     setLoading(false);
   };
 
-  /** 生成后自动加载列表并进入最新 Deck */
+  /** 生成后进入预览模式 */
   const handleGenerate = async () => {
     if (!sessionId) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     try {
-      await generateApi(undefined, undefined, sessionId);
+      await generateApi(undefined, undefined, sessionId, controller.signal);
       const fresh = await listDecks(docId!, "FLASHCARD");
       setDecks(fresh);
+      onGenerated?.();
       toast.success("学习卡片生成成功");
-      // 自动进入最新创建的 Deck
       if (fresh.length > 0) {
-        await enterDeck(fresh[0]);
+        setCurrentDeck(fresh[0]);
+        setCards(await listFlashcardsByDeck(fresh[0].id));
+        setView("preview");
       }
-    } catch { toast.error("卡片生成失败"); }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        toast.error("卡片生成失败");
+      }
+    }
+    abortRef.current = null;
     setLoading(false);
   };
 
@@ -143,10 +181,17 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated }:
               {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
               {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
             </Button>
-            <Button size="sm" className="rounded-xl gap-1.5 h-8" onClick={handleGenerate} disabled={loading || !sessionId}>
-              {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {loading ? "生成中..." : "一键生成"}
-            </Button>
+            {loading ? (
+              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
+                <XCircle className="h-3.5 w-3.5" />
+                取消生成
+              </Button>
+            ) : (
+              <Button size="sm" className="rounded-xl gap-1.5 h-8" onClick={handleGenerate} disabled={!sessionId}>
+                <Sparkles className="h-3.5 w-3.5" />
+                一键生成
+              </Button>
+            )}
           </div>
         </div>
 
@@ -179,11 +224,19 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated }:
                   AI 将从文档中提取核心知识点生成卡片组，帮助你高效记忆
                 </p>
               </div>
-              <Button onClick={handleGenerate} disabled={loading || !sessionId} className="rounded-xl gap-2 h-10">
-                {loading
-                  ? <><RotateCw className="h-4 w-4 animate-spin" />生成中...</>
-                  : <><Sparkles className="h-4 w-4" />一键生成学习任务</>}
-              </Button>
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <RotateCw className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">AI 正在生成...</span>
+                  <Button variant="outline" size="sm" className="rounded-xl h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
+                    <XCircle className="h-3.5 w-3.5 mr-1" />取消
+                  </Button>
+                </div>
+              ) : (
+                <Button onClick={handleGenerate} disabled={!sessionId} className="rounded-xl gap-2 h-10">
+                  <Sparkles className="h-4 w-4" />一键生成学习任务
+                </Button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-5xl mx-auto">
@@ -230,12 +283,107 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated }:
     );
   }
 
+  // ═══════════════ 预览视图 (生成后检视) ═══════════════
+  if (view === "preview") {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
+          <div>
+            <h2 className="text-sm font-medium text-foreground/80 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              生成预览
+            </h2>
+            <p className="text-[11px] text-muted-foreground/60">{currentDeck?.title} · {cards.length} 张卡片</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs border-destructive/20 text-destructive hover:bg-destructive/10" onClick={async () => {
+              if (currentDeck) {
+                try {
+                  await deleteDeck(currentDeck.id);
+                  setDecks((prev) => prev.filter((d) => d.id !== currentDeck.id));
+                  toast.success("已放弃该组卡片");
+                  setView("decks");
+                } catch { toast.error("删除失败"); }
+              }
+            }}>
+              <Trash2 className="h-3.5 w-3.5" />
+              放弃重来
+            </Button>
+            <Button size="sm" className="rounded-xl gap-1.5 h-8 text-xs" onClick={() => {
+              setCurrentIdx(0);
+              setFlipped(false);
+              setView("cards");
+            }}>
+              <Sparkle className="h-3.5 w-3.5" />
+              开始学习
+            </Button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-4xl mx-auto">
+            {cards.map((card, i) => (
+              <Card key={card.id ?? i} className="relative group rounded-xl border-border/50 bg-card/80 shadow-sm">
+                {/* Hover actions */}
+                <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                  <button type="button" onClick={() => { setEditingCardId(card.id); setEditForm({ question: card.question, answer: card.answer, explanation: card.explanation ?? "" }); }}
+                    className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button type="button" onClick={() => { if (confirm("确定删除这张卡片？")) { deleteFlashcard(card.id).then(() => { setCards(prev => prev.filter(c => c.id !== card.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
+                    className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {editingCardId === card.id ? (
+                  <CardContent className="p-4 space-y-2">
+                    <textarea value={editForm.question} onChange={e => setEditForm(f => ({...f, question: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="问题" rows={2} />
+                    <textarea value={editForm.answer} onChange={e => setEditForm(f => ({...f, answer: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="答案" rows={2} />
+                    <input value={editForm.explanation} onChange={e => setEditForm(f => ({...f, explanation: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="解析（可选）" />
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditingCardId(null)} disabled={saving}>取消</Button>
+                      <Button size="sm" className="h-6 text-xs" disabled={saving} onClick={async () => {
+                        setSaving(true);
+                        try {
+                          await updateFlashcard(card.id, { question: editForm.question, answer: editForm.answer, explanation: editForm.explanation });
+                          setCards(prev => prev.map(c => c.id === card.id ? { ...c, question: editForm.question, answer: editForm.answer, explanation: editForm.explanation } : c));
+                          setEditingCardId(null);
+                          toast.success("已保存");
+                        } catch { toast.error("保存失败"); }
+                        setSaving(false);
+                      }}>{saving ? "保存中..." : "保存"}</Button>
+                    </div>
+                  </CardContent>
+                ) : (
+                  <CardContent className="p-4 space-y-2">
+                    <div>
+                      <span className="text-[10px] font-medium text-primary/60 uppercase tracking-wider">Q{i + 1}</span>
+                      <p className="text-xs text-foreground/85 mt-0.5 leading-relaxed">{card.question}</p>
+                    </div>
+                    <div className="border-t border-border/30 pt-2">
+                      <span className="text-[10px] font-medium text-emerald-500/60 uppercase tracking-wider">A</span>
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{card.answer}</p>
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ═══════════════ 卡片详情视图 (翻转学习) ═══════════════
   const card = cards[currentIdx];
   return (
     <div className="flex flex-col h-full">
-      {/* 面包屑导航 */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/20 shrink-0">
+      {!embedded && (
+        /* 面包屑导航 */
+        <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/20 shrink-0">
         <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs gap-1.5" onClick={() => { setView("decks"); reloadDecks(); }}>
           <ArrowLeft className="h-3 w-3" />
           返回卡片组
@@ -243,6 +391,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated }:
         <span className="text-[11px] text-muted-foreground/40">/</span>
         <span className="text-[11px] text-muted-foreground truncate max-w-[200px]">{currentDeck?.title ?? ""}</span>
       </div>
+      )}
 
       {/* 翻转卡片 — 大尺寸展示 */}
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-4 sm:px-8">

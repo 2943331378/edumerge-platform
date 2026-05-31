@@ -23,10 +23,12 @@ import io.milvus.param.MetricType;
 import io.milvus.param.R;
 import io.milvus.param.RpcStatus;
 import io.milvus.param.index.CreateIndexParam;
+import io.milvus.param.index.DescribeIndexParam;
 import io.milvus.param.collection.CreateCollectionParam;
 import io.milvus.param.collection.FieldType;
 import io.milvus.param.collection.HasCollectionParam;
 import io.milvus.param.collection.LoadCollectionParam;
+import io.milvus.param.dml.DeleteParam;
 import io.milvus.param.dml.InsertParam;
 import io.milvus.param.dml.SearchParam;
 import io.milvus.response.SearchResultsWrapper;
@@ -55,7 +57,9 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
     private final String collectionName;
     private final int embeddingDimension;
     private final MetricType metricType;
+    /** 集合与索引是否已就绪（避免每次写入重复 createIndex 导致长时间阻塞） */
     private final AtomicBoolean initialized = new AtomicBoolean(false);
+    private final AtomicBoolean indexReady = new AtomicBoolean(false);
 
     public MilvusEmbeddingStore(MilvusServiceClient milvusClient,
                                 String collectionName,
@@ -68,6 +72,34 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
     }
 
     /**
+     * Milvus 启动初期 RPC 通道可能未就绪，短暂重试避免向量化任务失败
+     */
+    private <T> R<T> callMilvusWithRetry(String operation, java.util.function.Supplier<R<T>> call) {
+        int maxAttempts = 8;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            R<T> result = call.get();
+            if (result.getStatus() == 0) {
+                return result;
+            }
+            String message = result.getMessage() != null ? result.getMessage() : "";
+            boolean retryable = message.toLowerCase().contains("not ready")
+                    || message.toLowerCase().contains("deadline")
+                    || message.toLowerCase().contains("unavailable");
+            if (!retryable || attempt == maxAttempts) {
+                return result;
+            }
+            log.warn("Milvus {} 未就绪，{}s 后重试 ({}/{}): {}", operation, attempt * 2, attempt, maxAttempts, message);
+            try {
+                Thread.sleep(2000L * attempt);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Milvus 重试被中断: " + operation, e);
+            }
+        }
+        throw new RuntimeException("Milvus 调用失败: " + operation);
+    }
+
+    /**
      * 确保 Milvus 集合已创建，若不存在则自动创建
      */
     private void ensureCollection() {
@@ -76,11 +108,11 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
         synchronized (this) {
             if (initialized.get()) return;
 
-            R<Boolean> exists = milvusClient.hasCollection(
+            R<Boolean> exists = callMilvusWithRetry("hasCollection", () -> milvusClient.hasCollection(
                     HasCollectionParam.newBuilder()
                             .withCollectionName(collectionName)
                             .build()
-            );
+            ));
 
             if (Boolean.TRUE.equals(exists.getData())) {
                 log.info("Milvus 集合 [{}] 已存在", collectionName);
@@ -127,12 +159,12 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
                     .withDimension(embeddingDimension)
                     .build());
 
-            R<RpcStatus> createResult = milvusClient.createCollection(
+            R<RpcStatus> createResult = callMilvusWithRetry("createCollection", () -> milvusClient.createCollection(
                     CreateCollectionParam.newBuilder()
                             .withCollectionName(collectionName)
                             .withFieldTypes(fields)
                             .build()
-            );
+            ));
 
             if (createResult.getStatus() != 0) {
                 throw new RuntimeException("创建 Milvus 集合失败: " + createResult.getMessage());
@@ -145,34 +177,66 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
     }
 
     /**
-     * 创建索引并加载集合到内存, 使其可检索
+     * 确保索引存在并加载集合（仅首次执行 createIndex，避免重复建索引卡死）
      */
     private void loadCollection() {
-        // 1. 创建向量字段索引 (Milvus 要求先建索引再加载)
-        R<RpcStatus> indexResult = milvusClient.createIndex(
-                CreateIndexParam.newBuilder()
-                        .withCollectionName(collectionName)
-                        .withFieldName(FIELD_EMBEDDING)
-                        .withIndexType(IndexType.IVF_FLAT)
-                        .withMetricType(metricType)
-                        .withExtraParam("{\"nlist\":128}")
-                        .build()
-        );
-        if (indexResult.getStatus() != 0) {
-            throw new RuntimeException("创建 Milvus 索引失败: " + indexResult.getMessage());
+        if (!indexReady.get()) {
+            synchronized (this) {
+                if (!indexReady.get()) {
+                    if (!indexExists()) {
+                        log.info("Milvus 集合 [{}] 正在创建向量索引...", collectionName);
+                        R<RpcStatus> indexResult = milvusClient.createIndex(
+                                CreateIndexParam.newBuilder()
+                                        .withCollectionName(collectionName)
+                                        .withFieldName(FIELD_EMBEDDING)
+                                        .withIndexType(IndexType.IVF_FLAT)
+                                        .withMetricType(metricType)
+                                        .withExtraParam("{\"nlist\":128}")
+                                        .build()
+                        );
+                        if (indexResult.getStatus() != 0) {
+                            String msg = indexResult.getMessage();
+                            // 索引已存在时跳过（兼容重复调用）
+                            if (msg == null || !msg.toLowerCase().contains("already")) {
+                                throw new RuntimeException("创建 Milvus 索引失败: " + msg);
+                            }
+                            log.warn("Milvus 索引已存在，跳过创建: {}", msg);
+                        } else {
+                            log.info("Milvus 集合 [{}] 索引创建成功", collectionName);
+                        }
+                    } else {
+                        log.info("Milvus 集合 [{}] 索引已存在，跳过创建", collectionName);
+                    }
+                    indexReady.set(true);
+                }
+            }
         }
-        log.info("Milvus 集合 [{}] 索引创建成功", collectionName);
 
-        // 2. 加载集合到内存
         R<RpcStatus> loadResult = milvusClient.loadCollection(
                 LoadCollectionParam.newBuilder()
                         .withCollectionName(collectionName)
                         .build()
         );
         if (loadResult.getStatus() != 0) {
-            throw new RuntimeException("加载 Milvus 集合失败: " + loadResult.getMessage());
+            String msg = loadResult.getMessage();
+            if (msg == null || !msg.toLowerCase().contains("already")) {
+                throw new RuntimeException("加载 Milvus 集合失败: " + msg);
+            }
+            log.warn("Milvus 集合 [{}] 已在内存中: {}", collectionName, msg);
+        } else {
+            log.info("Milvus 集合 [{}] 已加载到内存", collectionName);
         }
-        log.info("Milvus 集合 [{}] 加载成功", collectionName);
+    }
+
+    /** 检查 embedding 字段是否已有索引 */
+    private boolean indexExists() {
+        R<?> response = milvusClient.describeIndex(
+                DescribeIndexParam.newBuilder()
+                        .withCollectionName(collectionName)
+                        .withFieldName(FIELD_EMBEDDING)
+                        .build()
+        );
+        return response.getStatus() == 0;
     }
 
     @Override
@@ -234,6 +298,7 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
     }
 
     private List<String> addAllInternal(List<Embedding> embeddings, List<TextSegment> textSegments) {
+        log.info("Milvus 批量写入开始: 集合={}, 条数={}", collectionName, embeddings.size());
         ensureCollection();
 
         List<String> ids = new ArrayList<>(embeddings.size());
@@ -268,17 +333,18 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
         fields.add(new InsertParam.Field(FIELD_TEXT, textValues));
         fields.add(new InsertParam.Field(FIELD_EMBEDDING, vectorValues));
 
-        R<MutationResult> result = milvusClient.insert(
+        R<MutationResult> result = callMilvusWithRetry("insert", () -> milvusClient.insert(
                 InsertParam.newBuilder()
                         .withCollectionName(collectionName)
                         .withFields(fields)
                         .build()
-        );
+        ));
 
         if (result.getStatus() != 0) {
             throw new RuntimeException("Milvus 插入向量失败: " + result.getMessage());
         }
 
+        log.info("Milvus 批量写入完成: 集合={}, 条数={}", collectionName, embeddings.size());
         return ids;
     }
 
@@ -356,6 +422,25 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
         }
 
         return new EmbeddingSearchResult<>(matches);
+    }
+
+    /**
+     * 按文档 ID 删除所有相关向量
+     */
+    public void deleteByDocumentId(String documentId) {
+        ensureCollection();
+        String expr = FIELD_DOCUMENT_ID + " == \"" + documentId + "\"";
+        log.info("Milvus 删除向量: collection={}, expr={}", collectionName, expr);
+        R<MutationResult> result = milvusClient.delete(
+                DeleteParam.newBuilder()
+                        .withCollectionName(collectionName)
+                        .withExpr(expr)
+                        .build()
+        );
+        if (result.getStatus() != 0) {
+            throw new RuntimeException("Milvus 删除向量失败: " + result.getMessage());
+        }
+        log.info("Milvus 向量删除完成: collection={}, documentId={}", collectionName, documentId);
     }
 
     /**

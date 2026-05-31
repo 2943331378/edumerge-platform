@@ -102,6 +102,8 @@ public class DocumentListener {
         }
 
         try {
+            updateDocStatus(filePath, "PROCESSING", null, null, null);
+
             // 2. 提取文本
             String text = extractDocumentText(documentPath);
             if (text.isBlank()) {
@@ -119,6 +121,7 @@ public class DocumentListener {
 
             if (segments.isEmpty()) {
                 log.warn("文本切块后无内容: documentId={}", documentId);
+                updateDocStatus(filePath, "FAILED", null, null, "文本切块后无有效内容");
                 return;
             }
 
@@ -155,7 +158,8 @@ public class DocumentListener {
             }
             log.info("向量化完成: documentId={}, 向量数={}", documentId, embeddings.size());
 
-            // 6. 存入 Milvus
+            // 6. 存入 Milvus（此前在此处因重复 createIndex 可能长时间阻塞）
+            log.info("开始写入 Milvus: documentId={}, 块数={}", documentId, enrichedSegments.size());
             embeddingStore.addAll(embeddings, enrichedSegments);
             log.info("向量存储完成: documentId={}, 块数={}", documentId, enrichedSegments.size());
 

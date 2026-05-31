@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Slf4j
 @Service
 public class StudyNoteService {
@@ -26,13 +28,21 @@ public class StudyNoteService {
                         .last("LIMIT 1"));
     }
 
-    public StudyNote create(Long docId, Long deckId, String title, String content, String sourceSummary) {
+    public List<StudyNote> listByDocId(Long docId) {
+        return studyNoteMapper.selectList(
+                new LambdaQueryWrapper<StudyNote>()
+                        .eq(StudyNote::getDocId, docId)
+                        .orderByDesc(StudyNote::getCreatedAt));
+    }
+
+    public StudyNote create(Long docId, Long deckId, String title, String content, String sourceSummary, String requirements) {
         StudyNote note = StudyNote.builder()
                 .docId(docId)
                 .deckId(deckId)
                 .title(title)
                 .content(content)
                 .sourceSummary(sourceSummary)
+                .requirements(requirements)
                 .build();
         studyNoteMapper.insert(note);
         log.info("学习笔记已创建: id={}, docId={}, deckId={}, contentLen={}",

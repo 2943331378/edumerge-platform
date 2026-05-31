@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS study_notes (
     title VARCHAR(200) NOT NULL COMMENT '笔记标题',
     content LONGTEXT NOT NULL COMMENT 'Markdown格式的学习笔记',
     source_summary LONGTEXT COMMENT '参考片段摘要',
+    requirements VARCHAR(500) COMMENT '用户自定义生成要求',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
@@ -230,8 +231,109 @@ CREATE TABLE IF NOT EXISTS quizzes (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='测试题表';
 
+-- ===== 测验答题记录表 =====
+-- 持久化用户答题结果，支持错题回顾与学习进度追踪
+CREATE TABLE IF NOT EXISTS quiz_attempts (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '记录ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    deck_id BIGINT NOT NULL COMMENT '关联卡片组ID',
+    total_questions INT NOT NULL COMMENT '总题数',
+    correct_count INT NOT NULL COMMENT '正确数',
+    score_percent DOUBLE COMMENT '正确率 (%)',
+    answer_details JSON COMMENT '答题详情 [{quizId, selectedAnswer, correct}]',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_doc_id (doc_id),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='测验答题记录表';
+
+-- ===== FlowNote 持续学习日志表 =====
+-- CuFlow 风格: 自动从对话中提取结构化笔记，分类组织，支持复习标记
+CREATE TABLE IF NOT EXISTS flow_notes (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '条目ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    session_id VARCHAR(64) COMMENT '关联对话会话ID',
+    category VARCHAR(20) NOT NULL COMMENT '分类: KEY_POINT | QUESTION | EXAMPLE | REVIEW',
+    title VARCHAR(300) NOT NULL COMMENT '条目标题',
+    content LONGTEXT NOT NULL COMMENT 'Markdown 正文',
+    source_segment LONGTEXT COMMENT '源文档片段引用',
+    source_type VARCHAR(20) NOT NULL DEFAULT 'AI_GENERATED' COMMENT '来源: AI_GENERATED | USER_WRITTEN | CHAT_EXTRACTED',
+    chat_history_id BIGINT COMMENT '关联原始对话记录ID',
+    is_reviewed TINYINT DEFAULT 0 COMMENT '是否已复习: 0=未复习 1=已复习',
+    reviewed_at DATETIME COMMENT '最近复习时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_doc_id (doc_id),
+    INDEX idx_session_id (session_id),
+    INDEX idx_category (category),
+    INDEX idx_is_reviewed (is_reviewed),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='FlowNote 学习日志表';
+
 -- ===== 初始化示例数据 =====
+-- 默认管理员账号: admin / admin123
+-- 密码需通过注册接口由 BCrypt 加密写入，或使用以下 hash 直接插入:
+-- BCrypt hash for "admin123": $2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+-- 注意: 如果已有 admin 用户且密码为明文，则无法通过 BCrypt 验证，需删除后重新注册
 INSERT IGNORE INTO users (username, email, password, display_name, status)
-VALUES ('admin', 'admin@edumerge.com', 'admin123', '管理员', 1);
+VALUES ('admin', 'admin@edumerge.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '管理员', 1);
+
+-- ===== chat_history 活动上下文字段 (v2.1) =====
+ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS activity_type VARCHAR(20) DEFAULT NULL
+    COMMENT '活动上下文: notes/mindmap/flashcards/quiz/flownote';
+
+-- ===== 知识图谱 (v2.2) =====
+CREATE TABLE IF NOT EXISTS knowledge_concepts (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '概念ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    name VARCHAR(200) NOT NULL COMMENT '概念名称',
+    definition TEXT COMMENT '概念定义',
+    importance_score DOUBLE DEFAULT 0.0 COMMENT '重要程度 1-10',
+    document_count INT DEFAULT 0 COMMENT '涉及的文档数',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_kg_user_id (user_id),
+    INDEX idx_kg_importance (importance_score)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识概念表';
+
+CREATE TABLE IF NOT EXISTS concept_documents (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关联ID',
+    concept_id BIGINT NOT NULL COMMENT '概念ID',
+    doc_id BIGINT NOT NULL COMMENT '文档ID',
+    doc_uuid VARCHAR(64) COMMENT 'Milvus文档UUID',
+    chunk_index INT COMMENT '具体切片索引',
+    mention_text TEXT COMMENT '提及该概念的原文片段',
+    relevance_score DOUBLE DEFAULT 1.0 COMMENT '概念在该文档中的相关度',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (concept_id) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    INDEX idx_cd_concept_id (concept_id),
+    INDEX idx_cd_doc_id (doc_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='概念-文档关联表';
+
+CREATE TABLE IF NOT EXISTS concept_relationships (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关系ID',
+    concept_id_a BIGINT NOT NULL COMMENT '源概念ID',
+    concept_id_b BIGINT NOT NULL COMMENT '目标概念ID',
+    relationship_type VARCHAR(50) NOT NULL COMMENT '关系类型: IS_A/PART_OF/RELATES_TO/PREREQUISITE/CONTRADICTS/APPLIES_TO',
+    description TEXT COMMENT '关系描述',
+    strength DOUBLE DEFAULT 1.0 COMMENT '关系强度 0.0-1.0',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (concept_id_a) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
+    FOREIGN KEY (concept_id_b) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
+    INDEX idx_cr_concept_a (concept_id_a),
+    INDEX idx_cr_concept_b (concept_id_b)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='概念关系表';
 
 COMMIT;

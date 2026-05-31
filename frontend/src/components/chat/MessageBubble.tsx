@@ -6,7 +6,9 @@ import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { User, Bot, ChevronDown, ChevronUp, FileText, Copy, Check, RefreshCw, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
+import { createFlowNote, markChatHelpful } from "@/lib/api";
+import { User, Bot, ChevronDown, ChevronUp, FileText, Copy, Check, RefreshCw, AlertCircle, ThumbsUp, ThumbsDown, BookmarkPlus } from "lucide-react";
 
 export interface SourceRef {
   index: number;
@@ -17,11 +19,13 @@ export interface SourceRef {
 }
 
 export interface MessageData {
+  id?: string;
   role: "user" | "assistant";
   content: string;
   sources?: SourceRef[];
   loading?: boolean;
   error?: boolean;
+  chatHistoryId?: number;
 }
 
 /** 代码块组件 — 带复制按钮 */
@@ -60,11 +64,52 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   );
 }
 
-export function MessageBubble({ message, onRetry }: { message: MessageData; onRetry?: () => void }) {
+function scoreLabel(score: number): string {
+  if (score >= 0.9) return "高度相关";
+  if (score >= 0.75) return "相关";
+  return "部分相关";
+}
+
+export function MessageBubble({ message, onRetry, docId }: { message: MessageData; onRetry?: () => void; docId?: number | null }) {
   const isUser = message.role === "user";
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [feedback, setFeedback] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
   const isLoading = message.loading === true && !message.content;
   const isError = message.error === true;
+
+  const handleFeedback = async (isHelpful: number) => {
+    if (feedback !== null || !message.chatHistoryId) return;
+    setFeedback(isHelpful);
+    try {
+      await markChatHelpful(message.chatHistoryId, isHelpful);
+      toast.success("感谢反馈");
+    } catch {
+      setFeedback(null);
+    }
+  };
+
+  const handleSaveToNotes = async () => {
+    if (saving) return;
+    if (!docId) {
+      toast.info("请先选择文档后再保存笔记");
+      return;
+    }
+    setSaving(true);
+    try {
+      const title = message.content.slice(0, 30).replace(/\n/g, " ");
+      await createFlowNote({
+        docId,
+        category: "KEY_POINT",
+        title: title || "对话要点",
+        content: message.content,
+      });
+      toast.success("已保存为学习日志");
+    } catch {
+      toast.error("保存失败");
+    }
+    setSaving(false);
+  };
 
   return (
     <div className={cn("flex gap-3 px-6 py-4", !isUser && "bg-muted/20")}>
@@ -156,6 +201,49 @@ export function MessageBubble({ message, onRetry }: { message: MessageData; onRe
               </Button>
             )}
 
+            {/* Action buttons (AI only, not loading, not error) */}
+            {!isUser && !isLoading && !isError && message.content && (
+              <div className="flex items-center gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSaveToNotes}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors"
+                  title="保存为学习日志"
+                >
+                  <BookmarkPlus className="h-3 w-3" />
+                  {saving ? "保存中..." : "保存为笔记"}
+                </button>
+                {message.chatHistoryId && (
+                  <>
+                    <span className="text-muted-foreground/20">|</span>
+                    <button
+                      type="button"
+                      onClick={() => handleFeedback(1)}
+                      disabled={feedback !== null}
+                      className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] transition-colors ${
+                        feedback === 1 ? "text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20" : "text-muted-foreground/50 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                      }`}
+                      title="有帮助"
+                    >
+                      <ThumbsUp className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleFeedback(0)}
+                      disabled={feedback !== null}
+                      className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] transition-colors ${
+                        feedback === 0 ? "text-destructive bg-destructive/10" : "text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10"
+                      }`}
+                      title="无帮助"
+                    >
+                      <ThumbsDown className="h-3 w-3" />
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Sources section (AI only) */}
             {!isUser && message.sources && message.sources.length > 0 && (
               <div className="pt-1">
@@ -183,8 +271,11 @@ export function MessageBubble({ message, onRetry }: { message: MessageData; onRe
                           <span className="font-medium text-foreground/80">
                             段落 {s.index}
                           </span>
-                          <span className="text-[10px] text-muted-foreground">
-                            相关度: {(s.score * 100).toFixed(0)}%
+                          <span className={cn(
+                            "text-[10px]",
+                            s.score >= 0.9 ? "text-emerald-500" : s.score >= 0.75 ? "text-amber-500" : "text-muted-foreground",
+                          )}>
+                            {scoreLabel(s.score)}
                           </span>
                         </div>
                         <p className="text-muted-foreground leading-relaxed line-clamp-3">

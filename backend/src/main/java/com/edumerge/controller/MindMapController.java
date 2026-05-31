@@ -5,6 +5,7 @@ import com.edumerge.common.result.Result;
 import com.edumerge.entity.CardDeck;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.MindMap;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.CardDeckService;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.MindMapService;
@@ -64,7 +65,7 @@ public class MindMapController {
         }
 
         log.info("开始生成思维导图: docId={}, docUuid={}", docId, docUuid);
-        AiMindMapGenerator.MindMapResult genResult = aiMindMapGenerator.generate(docId, 1L, docUuid);
+        AiMindMapGenerator.MindMapResult genResult = aiMindMapGenerator.generate(docId, SecurityUtils.getCurrentUserId(), docUuid);
 
         if (!genResult.isSuccess()) {
             return Result.fail("思维导图生成失败: 未从文档中提取到足够的内容");

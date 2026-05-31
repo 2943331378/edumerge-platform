@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { MessageBubble } from "./MessageBubble";
 import type { MessageData } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
-import { chatStream, chatHistory, listConversations, deleteConversation } from "@/lib/api";
-import { ArrowDown, Plus, Trash2, MessageSquare } from "lucide-react";
+import { chatStream, chatHistory, listConversations, deleteConversation, renameConversation } from "@/lib/api";
+import { ArrowDown, Plus, Trash2, MessageSquare, Sparkles } from "lucide-react";
 
 const CONVOS_KEY = "chat_conversations";
 const ACTIVE_KEY = "active_chat_id";
@@ -25,6 +25,9 @@ interface Message extends MessageData {
 
 interface ChatRoomProps {
   docUuid: string | null;
+  docId: number | null;
+  activityType: string | null;
+  contextHint: string | null;
 }
 
 /** 读写 localStorage 中的会话列表 */
@@ -39,7 +42,7 @@ function saveConversations(list: Conversation[]) {
   localStorage.setItem(CONVOS_KEY, JSON.stringify(list));
 }
 
-export function ChatRoom({ docUuid }: ChatRoomProps) {
+export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoomProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,12 +57,16 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastQuery = useRef<string>("");
   const titledRef = useRef(false); // 是否已用首条消息命名
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
 
-  // 初始化: 从后端加载会话列表, 后端无数据时创建本地会话
+  // 初始化 + docId 变化时加载该文档的会话列表
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const remote = await listConversations();
+        const remote = await listConversations(docId ?? undefined);
+        if (cancelled) return;
         if (remote.length > 0) {
           const list: Conversation[] = remote.map((r) => ({
             id: r.sessionId,
@@ -68,29 +75,45 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
           }));
           saveConversations(list);
           setConversations(list);
-          const active = localStorage.getItem(ACTIVE_KEY);
-          setActiveId(active && list.find((c) => c.id === active) ? active : list[0].id);
+          setActiveId(list[0].id);
+          setMessages([]);
           return;
         }
-      } catch { /* 后端不可用时回退 localStorage */ }
+      } catch { /* fallback */ }
+      if (cancelled) return;
 
-      // 回退: localStorage
-      const list = loadConversations();
-      let active = localStorage.getItem(ACTIVE_KEY);
-      if (!active || !list.find((c) => c.id === active)) {
-        active = createConversation(list);
-      }
-      setConversations(list);
-      setActiveId(active);
+      const newId = crypto.randomUUID();
+      const c: Conversation = { id: newId, title: "新对话", createdAt: new Date().toISOString() };
+      setConversations([c]);
+      setActiveId(newId);
+      setMessages([]);
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [docId]);
 
-  // 活跃会话变化 → 加载历史
+  // 活跃会话变化 → 加载历史（带取消机制）
   useEffect(() => {
     if (!activeId) return;
+    let cancelled = false;
     localStorage.setItem(ACTIVE_KEY, activeId);
     titledRef.current = false;
-    loadHistory(activeId);
+    setHistoryLoading(true);
+    (async () => {
+      try {
+        const items = await chatHistory(activeId);
+        if (cancelled) return;
+        if (!Array.isArray(items)) { setHistoryLoading(false); return; }
+        const msgs: Message[] = [];
+        for (const h of items) {
+          msgs.push({ id: `q-${h.id}`, role: "user", content: h.query, chatHistoryId: h.id });
+          msgs.push({ id: `a-${h.id}`, role: "assistant", content: h.response, chatHistoryId: h.id });
+        }
+        setMessages(msgs);
+        setTimeout(() => scrollToBottom(false), 50);
+      } catch { /* 静默 */ }
+      if (!cancelled) setHistoryLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, [activeId]);
 
   const createConversation = (list?: Conversation[]) => {
@@ -151,22 +174,6 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
     setShowScrollBtn(dist > 120);
   }, []);
 
-  const loadHistory = async (sid: string) => {
-    setHistoryLoading(true);
-    try {
-      const items = await chatHistory(sid);
-      if (!Array.isArray(items)) return;
-      const msgs: Message[] = [];
-      for (const h of items) {
-        msgs.push({ id: `q-${h.id}`, role: "user", content: h.query });
-        msgs.push({ id: `a-${h.id}`, role: "assistant", content: h.response });
-      }
-      setMessages(msgs);
-      setTimeout(() => scrollToBottom(false), 50);
-    } catch { /* 静默 */ }
-    setHistoryLoading(false);
-  };
-
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -204,7 +211,7 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
     abortRef.current = controller;
 
     try {
-      const stream = await chatStream(text, docUuid ?? undefined, activeId);
+      const stream = await chatStream(text, docUuid ?? undefined, activeId, docId ?? undefined, activityType ?? undefined, contextHint ?? undefined);
       const reader = stream.getReader();
       if (!reader) throw new Error("不支持流式读取");
 
@@ -268,7 +275,7 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
       setLoading(false);
       abortRef.current = null;
     }
-  }, [docUuid, activeId]);
+  }, [docUuid, docId, activityType, contextHint, activeId]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -293,10 +300,22 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
     <div className="flex flex-col h-full">
       {/* 会话列表 Header */}
       <div className="flex items-center gap-1.5 px-4 py-2 border-b bg-muted/20 overflow-x-auto shrink-0">
-        {conversations.map((c) => (
+        {conversations.map((c) => {
+          const isRenaming = renamingId === c.id;
+          const handleRename = async () => {
+            const title = renameTitle.trim();
+            if (!title || title === c.title) { setRenamingId(null); return; }
+            try {
+              await renameConversation(c.id, title);
+              setConversations((prev) => prev.map((x) => x.id === c.id ? { ...x, title } : x));
+              saveConversations(loadConversations().map((x) => x.id === c.id ? { ...x, title } : x));
+            } catch { toast.error("重命名失败"); }
+            setRenamingId(null);
+          };
+          return (
           <div
             key={c.id}
-            onClick={() => handleSelectConv(c.id)}
+            onClick={() => { if (!isRenaming) handleSelectConv(c.id); }}
             className={`group flex items-center gap-1 shrink-0 rounded-lg px-3 py-1.5 text-xs cursor-pointer transition-colors select-none
               ${c.id === activeId
                 ? "bg-background shadow-sm text-foreground font-medium"
@@ -304,7 +323,23 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
               }`}
           >
             <MessageSquare className="h-3 w-3 shrink-0 opacity-50" />
-            <span className="max-w-[140px] truncate">{c.title}</span>
+            {isRenaming ? (
+              <input
+                value={renameTitle}
+                onChange={(e) => setRenameTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleRename(); if (e.key === "Escape") setRenamingId(null); }}
+                onBlur={handleRename}
+                autoFocus
+                className="w-[120px] bg-background border border-primary/30 rounded px-1 py-0 text-xs outline-none"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span
+                className="max-w-[140px] truncate"
+                onDoubleClick={() => { setRenamingId(c.id); setRenameTitle(c.title); }}
+                title="双击重命名"
+              >{c.title}</span>
+            )}
             <button
               onClick={(e) => handleDeleteConv(e, c.id)}
               className="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded p-0.5 transition-opacity"
@@ -313,7 +348,7 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
               <Trash2 className="h-2.5 w-2.5" />
             </button>
           </div>
-        ))}
+        )})}
         <Button
           variant="ghost"
           size="icon"
@@ -345,17 +380,11 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
               </div>
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/60">
-                <span className="text-2xl">📚</span>
-              </div>
-              <p className="text-sm font-medium">智融 EduMerge AI</p>
-              <p className="text-xs text-muted-foreground/60">上传学习资料后开始提问</p>
-            </div>
+            <EmptyState activityType={activityType} docId={docId} contextHint={contextHint} onSelectQuestion={(q) => { if (!loading) doSend(q); }} />
           ) : (
             <div className="mx-auto max-w-3xl">
               {messages.map((m) => (
-                <MessageBubble key={m.id} message={m} onRetry={handleRetry} />
+                <MessageBubble key={m.id} message={m} onRetry={handleRetry} docId={docId} />
               ))}
               <div ref={bottomRef} className="h-1" />
             </div>
@@ -383,6 +412,98 @@ export function ChatRoom({ docUuid }: ChatRoomProps) {
         onStop={handleStop}
         loading={loading}
       />
+    </div>
+  );
+}
+
+const SUGGESTED_QUESTIONS: Record<string, string[]> = {
+  notes: [
+    "这篇文章的核心论点是什么？",
+    "作者用了哪些论据支持他的观点？",
+    "这篇文章和我之前学的有什么关联？",
+  ],
+  mindmap: [
+    "导图中的某个主题能展开讲讲吗？",
+    "这些概念之间的逻辑关系是怎样的？",
+    "能用一句话总结这张导图的核心吗？",
+  ],
+  flashcards: [
+    "能举个实际应用的例子吗？",
+    "这个概念为什么重要？",
+    "考试一般会怎么考察这个知识点？",
+  ],
+  quiz: [
+    "为什么其他选项不正确？",
+    "能再详细解释一下这道题的原理吗？",
+    "这类题型有什么解题技巧？",
+  ],
+  flownote: [
+    "我应该重点复习哪些内容？",
+    "这些知识点有什么内在联系？",
+    "哪些内容我可能还没完全掌握？",
+  ],
+};
+
+function getContextualQuestions(activityType: string | null, contextHint: string | null): string[] {
+  const fallback = (activityType && SUGGESTED_QUESTIONS[activityType])
+    ? SUGGESTED_QUESTIONS[activityType]
+    : ["这篇文档主要讲了什么？", "帮我整理一下核心知识点", "生成一份学习笔记"];
+  if (!contextHint) return fallback;
+  const quoteMatch = contextHint.match(/"([^"]+)"/);
+  const topic = quoteMatch ? quoteMatch[1] : "";
+  if (!topic || topic.length > 50) return fallback;
+  if (activityType === "flashcards") {
+    return [`关于"${topic}"，能举个实际应用的例子吗？`, `"${topic}"和其他概念有什么联系？`, `考试一般会怎么考察"${topic}"？`];
+  }
+  if (activityType === "quiz") {
+    return [`能详细解释一下"${topic}"的原理吗？`, `"${topic}"有哪些常见的误区？`, `关于"${topic}"，还有其他类似的题型吗？`];
+  }
+  if (activityType === "notes") {
+    return [`能再详细解释一下"${topic}"吗？`, `"${topic}"的核心要点是什么？`, `关于"${topic}"，有哪些需要特别注意的地方？`];
+  }
+  return [`能详细解释一下"${topic}"吗？`, `"${topic}"在实际中如何应用？`, `"${topic}"和其他概念有什么联系？`];
+}
+
+function EmptyState({
+  activityType,
+  docId,
+  contextHint,
+  onSelectQuestion,
+}: {
+  activityType: string | null;
+  docId: number | null;
+  contextHint: string | null;
+  onSelectQuestion: (text: string) => void;
+}) {
+  const questions = getContextualQuestions(activityType, contextHint);
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-5 text-muted-foreground px-6">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/60">
+        <span className="text-2xl">📚</span>
+      </div>
+      <div className="text-center space-y-1">
+        <p className="text-sm font-medium">智融 EduMerge AI</p>
+        <p className="text-xs text-muted-foreground/60">
+          {!docId
+            ? "上传学习资料后开始提问"
+            : "试试下面的问题，或直接输入你的疑问"}
+        </p>
+      </div>
+      <div className="flex flex-col gap-1.5 w-full max-w-xs">
+        {questions.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => onSelectQuestion(q)}
+            disabled={false}
+            className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-muted/40 active:scale-[0.98] transition-all"
+          >
+            <Sparkles className="h-3 w-3 shrink-0 text-primary/50" />
+            <span>{q}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

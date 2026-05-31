@@ -27,6 +27,10 @@ public class ChatHistory {
     private Integer tokensUsed;
     private Integer isHelpful;
 
+    /** 活动上下文: notes/mindmap/flashcards/quiz/flownote */
+    @TableField("activity_type")
+    private String activityType;
+
     @TableLogic
     private Integer deleted;
 

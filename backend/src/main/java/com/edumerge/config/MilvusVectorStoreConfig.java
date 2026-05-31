@@ -103,7 +103,7 @@ public class MilvusVectorStoreConfig {
                 .apiKey(apiKey)
                 .modelName(chatModelName)
                 .temperature(0.1)
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(300))
                 .tokenizer(tokenizer())
                 .build();
     }
@@ -119,7 +119,7 @@ public class MilvusVectorStoreConfig {
                 .apiKey(apiKey)
                 .modelName(chatModelName)
                 .temperature(0.1)
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(300))
                 .tokenizer(tokenizer())
                 .build();
     }

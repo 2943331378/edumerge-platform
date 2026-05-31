@@ -2,12 +2,14 @@ package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
 import com.edumerge.entity.Conversation;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.ConversationService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @RestController
@@ -22,8 +24,20 @@ public class ConversationController {
     }
 
     @GetMapping
-    public Result<List<Conversation>> list() {
-        return Result.success(conversationService.listByUserId(1L));
+    public Result<List<Conversation>> list(@RequestParam(required = false) Long docId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (docId != null) {
+            return Result.success(conversationService.listByDocId(userId, docId));
+        }
+        return Result.success(conversationService.listByUserId(userId));
+    }
+
+    @PutMapping("/{sessionId}")
+    public Result<Void> rename(@PathVariable String sessionId, @RequestBody Map<String, String> body) {
+        String title = body.get("title");
+        if (title == null || title.isBlank()) return Result.fail("标题不能为空");
+        conversationService.updateTitle(sessionId, title.trim());
+        return Result.success("已重命名", null);
     }
 
     @DeleteMapping("/{sessionId}")

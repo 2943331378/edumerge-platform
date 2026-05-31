@@ -41,8 +41,17 @@ public class LearningChatController {
         String message = body.get("message");
         String documentId = body.get("documentId");
         String sessionIdStr = body.get("sessionId");
+        String docIdStr = body.get("docId");
+        String activityType = body.get("activityType");
+        String contextHint = body.get("contextHint");
 
-        // sessionId 优先: 解析为 documentUuid 用于 Milvus 过滤
+        // 解析 docId（数据库主键，用于 FlowNote 精确关联）
+        Long docId = null;
+        if (docIdStr != null && !docIdStr.isBlank()) {
+            try { docId = Long.parseLong(docIdStr); } catch (NumberFormatException ignored) {}
+        }
+        final Long finalDocId2 = docId;
+
         String resolvedDocId = documentId;
         if (sessionIdStr != null && !sessionIdStr.isBlank()) {
             try {
@@ -53,6 +62,8 @@ public class LearningChatController {
         }
         final String finalDocId = resolvedDocId;
         final String finalSessionId = sessionIdStr;
+        final String finalActivityType = activityType;
+        final String finalContextHint = contextHint;
 
         if (message == null || message.isBlank()) {
             SseEmitter err = new SseEmitter();
@@ -60,33 +71,48 @@ public class LearningChatController {
             return err;
         }
 
-        SseEmitter emitter = new SseEmitter(120_000L);
+        SseEmitter emitter = new SseEmitter(300_000L);
         log.info("流式对话请求: message='{}', documentId='{}'", message, finalDocId);
 
+        // 客户端断开时标记取消，避免后台任务继续占用资源
+        final boolean[] cancelled = {false};
+        emitter.onTimeout(() -> {
+            cancelled[0] = true;
+            log.warn("SSE 超时 (300s), 客户端可能已断开");
+        });
+        emitter.onError(throwable -> {
+            cancelled[0] = true;
+            log.warn("SSE 连接错误: {}", throwable.getMessage());
+        });
+        emitter.onCompletion(() -> log.debug("SSE 连接正常关闭"));
+
         CompletableFuture.runAsync(() -> {
+            if (cancelled[0]) return;
             try {
                 List<EmbeddingMatch<TextSegment>> matches =
                         aiRagService.retrieveMatches(message, finalDocId);
 
+                if (cancelled[0]) { emitter.complete(); return; }
+
                 if (matches.isEmpty()) {
-                    String fallback = "在该材料中未找到相关内容。";
-                    emit(emitter, Map.of("token", fallback));
+                    emit(emitter, Map.of("token", "在该材料中未找到相关内容。"));
                     emit(emitter, Map.of("sources", List.of()));
                     emitDone(emitter);
                     emitter.complete();
                     return;
                 }
 
-                // 使用 chatStream 结合 ChatMemory, 自动管理对话记忆
                 aiRagService.chatStream(message, finalDocId, finalSessionId,
+                        finalDocId2, finalActivityType, finalContextHint,
                         new StreamingResponseHandler<AiMessage>() {
                             @Override
                             public void onNext(String token) {
-                                emit(emitter, Map.of("token", token));
+                                if (!cancelled[0]) emit(emitter, Map.of("token", token));
                             }
 
                             @Override
                             public void onComplete(Response<AiMessage> response) {
+                                if (cancelled[0]) { emitter.complete(); return; }
                                 List<Map<String, Object>> sources = matches.stream()
                                         .map(m -> Map.<String, Object>of(
                                                 "index", matches.indexOf(m) + 1,
@@ -101,7 +127,7 @@ public class LearningChatController {
                             @Override
                             public void onError(Throwable error) {
                                 log.error("流式生成错误: {}", error.getMessage(), error);
-                                String errMsg = "生成回答失败: " + error.getMessage();
+                                String errMsg = error.getMessage() != null ? error.getMessage() : "未知错误";
                                 emit(emitter, Map.of("error", errMsg));
                                 emitDone(emitter);
                                 emitter.complete();
@@ -109,7 +135,7 @@ public class LearningChatController {
                         });
             } catch (Exception e) {
                 log.error("流式对话异常: {}", e.getMessage(), e);
-                emit(emitter, Map.of("error", "系统异常: " + e.getMessage()));
+                emit(emitter, Map.of("error", "系统异常: " + (e.getMessage() != null ? e.getMessage() : "未知错误")));
                 emitDone(emitter);
                 emitter.complete();
             }

@@ -25,6 +25,7 @@ public class StudyNote {
     private String title;
     private String content;
     private String sourceSummary;
+    private String requirements;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

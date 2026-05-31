@@ -3,22 +3,16 @@
 import { useState, ChangeEvent, useRef } from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
-  MessageSquare,
-  NotebookText,
-  Layers,
-  HelpCircle,
-  GitFork,
   Upload,
   FileText,
   PanelLeftClose,
   PanelLeft,
+  X,
+  Search,
 } from "lucide-react";
-
-export type NavTab = "chat" | "notes" | "flashcards" | "quizzes" | "mindmap";
 
 export interface UploadedDoc {
   id: string;
@@ -30,36 +24,31 @@ export interface UploadedDoc {
 }
 
 interface AppSidebarProps {
-  activeTab: NavTab;
-  onTabChange: (tab: NavTab) => void;
   documents: UploadedDoc[];
   activeSessionId: number | null;
   onSelectSession: (sessionId: number) => void;
   onUpload: (file: File) => Promise<void>;
+  onDeleteDocument: (sessionId: number) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
 
-const navItems: { id: NavTab; label: string; icon: typeof MessageSquare }[] = [
-  { id: "chat", label: "对话", icon: MessageSquare },
-  { id: "notes", label: "笔记", icon: NotebookText },
-  { id: "flashcards", label: "卡片", icon: Layers },
-  { id: "quizzes", label: "测试", icon: HelpCircle },
-  { id: "mindmap", label: "导图", icon: GitFork },
-];
-
 export function AppSidebar({
-  activeTab,
-  onTabChange,
   documents,
   activeSessionId,
   onSelectSession,
   onUpload,
+  onDeleteDocument,
   collapsed,
   onToggleCollapse,
 }: AppSidebarProps) {
   const [dragging, setDragging] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const filteredDocs = documents.filter((doc) =>
+    searchQuery ? doc.name.toLowerCase().includes(searchQuery.toLowerCase()) : true,
+  );
 
   const handleFile = (file: File | null) => {
     if (!file) return;
@@ -70,16 +59,31 @@ export function AppSidebar({
   };
 
   return (
-    <aside
-      className={cn(
-        "relative flex h-full flex-col shrink-0 overflow-hidden border-r border-border",
-        "bg-white/70 dark:bg-slate-900/80 backdrop-blur-xl",
-        "transition-all duration-300 ease-in-out",
-        collapsed ? "w-[64px]" : "w-[260px]",
+    <>
+      {/* Mobile backdrop */}
+      {!collapsed && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+          onClick={onToggleCollapse}
+        />
       )}
-    >
+
+      <aside
+        className={cn(
+          "relative flex h-full flex-col shrink-0 overflow-hidden border-r border-border",
+          "bg-white/70 dark:bg-slate-900/80 backdrop-blur-xl",
+          "transition-all duration-300 ease-in-out",
+          // Desktop: inline sidebar
+          "hidden md:flex",
+          collapsed ? "w-[64px]" : "w-[260px]",
+          // Mobile: overlay sidebar
+          "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:flex max-md:w-[260px]",
+          collapsed ? "max-md:-translate-x-full" : "max-md:translate-x-0",
+        )}
+      >
       {/* 折叠按钮 — 侧边栏下半部分右侧边缘 */}
       <button
+        type="button"
         onClick={onToggleCollapse}
         className={cn(
           "absolute -right-3.5 bottom-20 z-50 flex h-9 w-9 items-center justify-center rounded-full",
@@ -125,38 +129,6 @@ export function AppSidebar({
         )}
       </div>
 
-      {/* Navigation */}
-      <nav className={cn("px-3 py-4 space-y-1", collapsed && "px-1.5")}>
-        {navItems.map((item) => {
-          const active = activeTab === item.id;
-          return (
-            <Button
-              key={item.id}
-              variant="ghost"
-              className={cn(
-                "w-full justify-start gap-3 rounded-xl transition-all duration-200",
-                collapsed ? "h-10 px-0 justify-center" : "h-9 px-3",
-                active
-                  ? [
-                      "bg-gradient-to-r from-primary/15 via-primary/10 to-transparent",
-                      "text-primary shadow-[0_0_12px_-4px] shadow-primary/20",
-                      "ring-1 ring-primary/20",
-                      "font-medium",
-                    ]
-                  : "text-muted-foreground hover:text-foreground hover:bg-white/10 dark:hover:bg-white/5",
-              )}
-              onClick={() => onTabChange(item.id)}
-              title={collapsed ? item.label : undefined}
-            >
-              <item.icon
-                className={cn("h-4 w-4 shrink-0", active && "text-primary")}
-              />
-              {!collapsed && <span className="text-[13px]">{item.label}</span>}
-            </Button>
-          );
-        })}
-      </nav>
-
       {/* Upload zone + Document list */}
       {!collapsed && (
         <>
@@ -191,6 +163,7 @@ export function AppSidebar({
               <input
                 ref={fileRef}
                 type="file"
+                aria-label="上传学习资料"
                 accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 onChange={(e: ChangeEvent<HTMLInputElement>) => {
                   handleFile(e.target.files?.[0] ?? null);
@@ -201,15 +174,36 @@ export function AppSidebar({
             </div>
           </div>
 
+          {/* Search */}
+          {documents.length > 3 && (
+            <div className="px-3 pb-1">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="搜索文档..."
+                  className="w-full rounded-lg border border-border/50 bg-muted/30 pl-7 pr-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/30 focus:bg-muted/50 transition-all"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Document list */}
           <ScrollArea className="flex-1">
             <div className="px-2 pb-2 space-y-0.5">
+              {filteredDocs.length === 0 && documents.length > 0 && (
+                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
+                  无匹配文档
+                </p>
+              )}
               {documents.length === 0 && (
                 <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
                   尚无文档
                 </p>
               )}
-              {documents.map((doc) => {
+              {filteredDocs.map((doc) => {
                 const isActive =
                   doc.sessionId > 0 && activeSessionId === doc.sessionId;
                 return (
@@ -235,6 +229,17 @@ export function AppSidebar({
                       )}
                     />
                     <span className="flex-1 truncate">{doc.name}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteDocument(doc.sessionId);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                      title="删除文档"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
                     <span
                       className={cn(
                         "inline-block h-1.5 w-1.5 rounded-full shrink-0 ring-1 ring-white/20",
@@ -270,5 +275,6 @@ export function AppSidebar({
         <ThemeToggle />
       </div>
     </aside>
+    </>
   );
 }

@@ -4,6 +4,7 @@ import com.edumerge.common.result.Result;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.Session;
 import com.edumerge.mapper.SessionMapper;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.SessionService;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +35,7 @@ public class SessionController {
 
     @GetMapping
     public Result<List<Map<String, Object>>> list() {
-        List<Session> sessions = sessionService.listByUserId(1L);
+        List<Session> sessions = sessionService.listByUserId(SecurityUtils.getCurrentUserId());
         List<Map<String, Object>> result = new ArrayList<>();
         for (Session s : sessions) {
             Document doc = documentService.getById(s.getDocId());

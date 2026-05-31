@@ -13,17 +13,11 @@ spring:
       max-file-size: 50MB
       max-request-size: 60MB
 
-  # ===== 服务器配置 =====
-  server:
-    port: 8080
-    servlet:
-      context-path: /api
-
   # ===== MySQL 数据库配置 =====
   datasource:
-    url: jdbc:mysql://localhost:3306/edumerge?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: root
-    password: 123456
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:edumerge}?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
     # 连接池配置（HikariCP）
     hikari:
@@ -50,9 +44,9 @@ spring:
   # ===== Redis 缓存配置 =====
   data:
     redis:
-      host: localhost
-      port: 6379
-      password: ""
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       timeout: 2000ms
       database: 0
       lettuce:
@@ -61,17 +55,15 @@ spring:
           max-idle: 10
           min-idle: 5
           max-wait: -1ms
-      # 连接超时和读写超时
       client-type: lettuce
 
   # ===== RabbitMQ 消息队列配置 =====
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
     virtual-host: /
-    # 连接池配置
     connection-timeout: 10000
     publisher-confirm-type: correlated
     publisher-returns: true
@@ -81,7 +73,6 @@ spring:
         concurrency: 5
         max-concurrency: 10
         prefetch: 1
-    # 确保消息不会丢失
     template:
       retry:
         enabled: true
@@ -107,21 +98,15 @@ spring:
 
 # ===== MyBatis-Plus 配置 =====
 mybatis-plus:
-  # mapper.xml 文件路径
   mapper-locations: classpath:/mapper/**/*.xml
-  # 实体类所在的包
   type-aliases-package: com.edumerge.**.entity
-  # 开启驼峰命名法映射
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
     call-setters-on-nulls: true
-  # MyBatis-Plus 全局配置
   global-config:
     db-config:
-      # 主键类型: AUTO(自增), INPUT(输入), ASSIGN_ID(雪花算法), ASSIGN_UUID(UUID)
       id-type: auto
-      # 逻辑删除配置
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
@@ -147,21 +132,13 @@ logging:
 
 # ===== Milvus 向量数据库配置 =====
 milvus:
-  host: localhost
+  host: ${MILVUS_HOST:localhost}
   port: 19530
   database: edumerge
-  # 超时时间（单位：毫秒）
   timeout: 30000
 
 # ===== LangChain4j 配置 =====
 langchain4j:
-  # 模型提供商配置（根据实际选择）
-  # model-provider: ollama
-  # Ollama 本地模型配置
-  # ollama:
-  #   url: http://localhost:11434
-  #   model: llama2 # 或其他本地模型名称
-  # 如果使用 OpenAI 或其他云服务，替换为对应配置
   openai:
     api-key: ${DEEPSEEK_API_KEY}
     base-url: https://api.deepseek.com/v1
@@ -173,45 +150,35 @@ langchain4j:
 
 # ===== 应用自定义配置 =====
 app:
-  # RAG 相关配置
+  jwt:
+    secret: ${JWT_SECRET:edumerge-jwt-secret-key-2026-for-hs256}
+    expiration-ms: 86400000  # 24h
+
   rag:
-    # 检索相似度阈值（0-1, 超过此值才返回; 0.35 适合通用语义匹配）
     similarity-threshold: 0.35
-    # 返回的文档数量
     top-k: 5
-    # 向量维度 (DashScope text-embedding-v3 = 1024)
     embedding-dimension: 1024
-    # 文本分块大小（字符数）
     chunk-size: 1000
-    # 分块重叠大小
     chunk-overlap: 100
 
-  # 文档处理配置
   document:
-    # 上传文件存储目录 (绝对路径或相对于应用启动目录)
-    upload-dir: E:/EduMerge/uploads
-    # 支持的文档类型
+    # 上传文件存储目录 — 通过环境变量 APP_UPLOAD_DIR 覆盖
+    upload-dir: ${APP_UPLOAD_DIR:E:/EduMerge/uploads}
     allowed-types: pdf,doc,docx,txt,md
-    # 最大上传大小（MB）
     max-upload-size: 50
-    # 文档处理超时时间（秒）
     process-timeout: 300
-    # OCR 配置 (Tesseract, 处理扫描版 PDF)
     ocr:
       enabled: true
-      # Tesseract tessdata 目录路径
-      tesseract-data-path: C:/Program Files/Tesseract-OCR/tessdata
-      # OCR 识别语言 (chi_sim=简体中文, eng=英文, 用+连接)
+      # Tesseract tessdata 目录 — 通过环境变量 TESSERACT_DATA_PATH 覆盖
+      tesseract-data-path: ${TESSERACT_DATA_PATH:C:/Program Files/Tesseract-OCR/tessdata}
       language: chi_sim+eng
-      # PDF 页面渲染 DPI (越高越清晰但越慢, 建议 300)
       render-dpi: 300
 
 # ===== 服务器配置 =====
 server:
-  port: 8080
+  port: 8085
   servlet:
     context-path: /api
-  # 错误处理
   error:
     include-message: always
     include-binding-errors: always

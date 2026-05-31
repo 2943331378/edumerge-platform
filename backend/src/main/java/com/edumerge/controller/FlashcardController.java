@@ -3,6 +3,7 @@ package com.edumerge.controller;
 import com.edumerge.ai.AiFlashcardGenerator;
 import com.edumerge.common.result.Result;
 import com.edumerge.entity.Flashcard;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.FlashcardService;
 import com.edumerge.service.SessionService;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +53,7 @@ public class FlashcardController {
 
         if (docIdStr == null || docUuid == null) return Result.fail("docId/sessionId 和 docUuid 不能为空");
 
-        List<Flashcard> cards = aiFlashcardGenerator.generate(Long.parseLong(docIdStr), 1L, docUuid);
+        List<Flashcard> cards = aiFlashcardGenerator.generate(Long.parseLong(docIdStr), SecurityUtils.getCurrentUserId(), docUuid);
         return cards.isEmpty() ? Result.fail("未检索到文档内容，生成失败") : Result.success("学习卡片生成成功", cards);
     }
 
@@ -63,5 +64,20 @@ public class FlashcardController {
         if (sessionId != null) docId = sessionService.resolveDocId(sessionId);
         if (deckId != null) return Result.success(flashcardService.listByDeckId(deckId));
         return Result.success(docId != null ? flashcardService.listByDocId(docId) : List.of());
+    }
+
+    @PutMapping("/{id}")
+    public Result<Void> update(@PathVariable Long id, @RequestBody Flashcard card) {
+        if (card.getQuestion() != null && card.getQuestion().isBlank()) return Result.fail("问题不能为空");
+        if (card.getAnswer() != null && card.getAnswer().isBlank()) return Result.fail("答案不能为空");
+        card.setId(id);
+        flashcardService.updateById(card);
+        return Result.success("卡片已更新", null);
+    }
+
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        if (flashcardService.deleteById(id) == 0) return Result.fail("卡片不存在");
+        return Result.success("卡片已删除", null);
     }
 }

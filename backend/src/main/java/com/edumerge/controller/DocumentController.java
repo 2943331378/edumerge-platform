@@ -4,6 +4,7 @@ import com.edumerge.common.result.Result;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.Session;
 import com.edumerge.mq.producer.EmbeddingProducer;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.SessionService;
 import lombok.extern.slf4j.Slf4j;
@@ -71,7 +72,7 @@ public class DocumentController {
 
             // 委托 Service 层处理业务逻辑
             Document doc = Document.builder()
-                    .userId(1L)
+                    .userId(SecurityUtils.getCurrentUserId())
                     .documentId(uuid)
                     .title(originalName.replaceAll("(?i)\\.[^.]+$", ""))
                     .fileName(originalName)
@@ -83,9 +84,10 @@ public class DocumentController {
             documentService.create(doc);
 
             // 上传时同步创建会话, 用户可立即进入
-            Session session = sessionService.create(1L, doc.getId(), doc.getTitle());
+            Long userId = SecurityUtils.getCurrentUserId();
+            Session session = sessionService.create(userId, doc.getId(), doc.getTitle());
 
-            boolean sent = embeddingProducer.sendEmbeddingTask(uuid, filePath.toString(), originalName, 1L);
+            boolean sent = embeddingProducer.sendEmbeddingTask(uuid, filePath.toString(), originalName, userId);
 
             return Result.success(sent ? "上传成功，正在异步处理" : "上传成功，消息队列不可用，稍后重试",
                     Map.of(
@@ -119,5 +121,34 @@ public class DocumentController {
     @GetMapping
     public Result<List<Document>> list() {
         return Result.success(documentService.listRecent());
+    }
+
+    /**
+     * 查询文档的所有切片 — 用于数据要素评测集 (Golden Dataset) 构建
+     * 将非结构化数据以切片粒度暴露给评测脚本，支持精确溯源
+     */
+    @GetMapping("/{docId}/chunks")
+    public Result<List<com.edumerge.entity.DocumentChunk>> chunks(@PathVariable Long docId) {
+        Document doc = documentService.getById(docId);
+        if (doc == null) {
+            return Result.fail("文档不存在");
+        }
+        return Result.success(documentService.listChunks(docId));
+    }
+
+    /**
+     * 删除文档及其关联的全部数据（文件、向量、切片、会话）
+     */
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        try {
+            documentService.delete(id);
+            return Result.success("文档已删除", null);
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
+        } catch (Exception e) {
+            log.error("文档删除失败: id={}", id, e);
+            return Result.fail("文档删除失败: " + e.getMessage());
+        }
     }
 }
