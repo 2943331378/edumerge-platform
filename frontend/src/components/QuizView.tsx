@@ -625,7 +625,15 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
         <div className="max-w-2xl mx-auto px-4 py-4 sm:px-6 sm:py-8 space-y-4 sm:space-y-6">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground/50">
             <span>{activeIdx + 1} / {totalItems}</span>
-            {quiz?.difficulty && <span>{quiz.difficulty >= 4 ? "综合应用" : "基础概念"}</span>}
+            <div className="flex items-center gap-2">
+              {quiz?.quizType === "FILL_BLANK" && (
+                <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">填空题</span>
+              )}
+              {quiz?.quizType === "SINGLE" && (
+                <span className="inline-flex items-center rounded-md bg-purple-50 dark:bg-purple-900/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">选择题</span>
+              )}
+              {quiz?.difficulty && <span>{quiz.difficulty >= 4 ? "综合应用" : "基础概念"}</span>}
+            </div>
             {reviewMode && <span className="text-amber-500 font-medium">错题回顾</span>}
           </div>
 
@@ -635,35 +643,72 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
             </CardContent>
           </Card>
 
-          <div className="space-y-2">
-            {quiz?.options.map((opt) => {
-              const isSelected = activeSelected === opt;
-              const showCorrect = activeSubmitted && opt === quiz.answer;
-              const showWrong = activeSubmitted && isSelected && opt !== quiz.answer;
-              return (
-                <button
-                  key={opt}
-                  onClick={() => handleSelectOpt(opt)}
+          {/* 填空题 — 文字输入 */}
+          {quiz?.quizType === "FILL_BLANK" ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={activeSelected ?? ""}
+                  onChange={(e) => handleSelectOpt(e.target.value)}
                   disabled={activeSubmitted}
+                  placeholder="输入你的答案..."
                   className={cn(
-                    "w-full text-left px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl border text-[13px] sm:text-sm transition-all",
-                    !activeSubmitted && "hover:border-primary/40 hover:bg-muted/40 cursor-pointer",
-                    activeSubmitted && "cursor-default",
-                    isSelected && !activeSubmitted && "border-primary bg-primary/5",
-                    showCorrect && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300",
-                    showWrong && "border-destructive bg-destructive/5 text-destructive",
-                    !isSelected && !showCorrect && activeSubmitted && "text-muted-foreground/50"
+                    "flex-1 rounded-xl border px-4 py-2.5 text-sm outline-none transition-all",
+                    !activeSubmitted && "border-border/60 bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/10",
+                    activeSubmitted && activeSelected === quiz?.answer && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20",
+                    activeSubmitted && activeSelected !== quiz?.answer && "border-destructive bg-destructive/5",
                   )}
-                >
-                  <div className="flex items-center gap-2">
-                    {showCorrect && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
-                    {showWrong && <X className="h-4 w-4 shrink-0 text-destructive" />}
-                    <span>{opt}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  onKeyDown={(e) => { if (e.key === "Enter" && !activeSubmitted && activeSelected) handleSubmitOpt(); }}
+                  aria-label="填空题答案输入"
+                />
+              </div>
+              {activeSubmitted && (
+                <div className={cn(
+                  "flex items-center gap-2 rounded-xl px-4 py-3 text-sm",
+                  activeSelected === quiz?.answer
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300"
+                    : "bg-destructive/5 text-destructive"
+                )}>
+                  {activeSelected === quiz?.answer
+                    ? <><Check className="h-4 w-4 shrink-0" /><span>正确！</span></>
+                    : <><X className="h-4 w-4 shrink-0" /><span>正确答案: <strong>{quiz?.answer}</strong></span></>
+                  }
+                </div>
+              )}
+            </div>
+          ) : (
+            /* 选择题 — 选项按钮 */
+            <div className="space-y-2">
+              {quiz?.options.map((opt) => {
+                const isSelected = activeSelected === opt;
+                const showCorrect = activeSubmitted && opt === quiz.answer;
+                const showWrong = activeSubmitted && isSelected && opt !== quiz.answer;
+                return (
+                  <button
+                    key={opt}
+                    onClick={() => handleSelectOpt(opt)}
+                    disabled={activeSubmitted}
+                    className={cn(
+                      "w-full text-left px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl border text-[13px] sm:text-sm transition-all",
+                      !activeSubmitted && "hover:border-primary/40 hover:bg-muted/40 cursor-pointer",
+                      activeSubmitted && "cursor-default",
+                      isSelected && !activeSubmitted && "border-primary bg-primary/5",
+                      showCorrect && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300",
+                      showWrong && "border-destructive bg-destructive/5 text-destructive",
+                      !isSelected && !showCorrect && activeSubmitted && "text-muted-foreground/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      {showCorrect && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
+                      {showWrong && <X className="h-4 w-4 shrink-0 text-destructive" />}
+                      <span>{opt}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <div className="flex items-center gap-3 pt-2">
             {!activeSubmitted ? (

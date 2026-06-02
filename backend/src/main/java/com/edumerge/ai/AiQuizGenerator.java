@@ -67,7 +67,17 @@ public class AiQuizGenerator extends AiGeneratorBase {
 
     private String callLLM(String context, String existingHint) {
         String template = """
-                你是一个严谨的 AI 学习导师。请分析提供的文档片段，生成5道高质量单选题。
+                你是一个严谨的 AI 学习导师。请分析提供的文档片段，生成5道高质量测试题，包含选择题和填空题两种题型。
+
+                # 题型分配 (必须严格遵守)
+                - **选择题 (SINGLE)**: 3道，每题4个选项，含3个有迷惑性的干扰项
+                - **填空题 (FILL_BLANK)**: 2道，题干中用"____"标记空白处，答案为简短精确的关键词或短语
+
+                # 填空题设计要求
+                1. 空白处应是文档中的关键概念、术语、数值或核心短语，不能是虚词或连接词
+                2. 答案必须简短精确（2-8个字），不能是长句
+                3. 题干中只留一个"____"空白，确保唯一正确答案
+                4. 示例: "KMP算法中，next数组的值表示的是模式串前缀和后缀的____长度。" → 答案: "最长公共"
 
                 # 绝对禁止 (违反将导致严重质量问题)
                 1. **禁止元数据问题**: 严禁测试文档结构、章节归属、页码位置、模块划分等。
@@ -83,8 +93,8 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 # 优先级要求
                 1. **文档为事实依据**: 必须以提供的文档上下文为唯一出题来源, 严禁编造。
                 2. **多维覆盖**: 题目应覆盖文档的不同章节/主题/概念层级。
-                3. **干扰项设计**: 每个题目的4个选项中需包含3个合理且有迷惑性的干扰项, 干扰项也应来自文档语义。
-                4. **中文输出**: question、options、correctAnswer 和 explanation 必须使用简体中文；如果文档是英文，请基于英文原文翻译、归纳和解释。
+                3. **干扰项设计**: 选择题的4个选项中需包含3个合理且有迷惑性的干扰项, 干扰项也应来自文档语义。
+                4. **中文输出**: 所有内容必须使用简体中文；如果文档是英文，请基于英文原文翻译、归纳和解释。
                 5. **术语保留**: 英文关键术语首次出现时保留英文原词，例如"学习分析（learning analytics）"。
                 6. **难度分级**:
                    - **basic** (2-3题): 基本定义、术语、原理的准确理解
@@ -93,10 +103,13 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 # JSON格式约束 (严格)
                 {"deckTitle": "根据文档内容生成的简短标题(10字以内)",
                  "quizzes": [
-                   {"question":"...","options":["A. ...","B. ...","C. ...","D. ..."],
-                    "correctAnswer":"A. ...","explanation":"...","difficulty":"basic"}
+                   {"type":"SINGLE","question":"...","options":["A. ...","B. ...","C. ...","D. ..."],
+                    "correctAnswer":"A. ...","explanation":"...","difficulty":"basic"},
+                   {"type":"FILL_BLANK","question":"KMP算法中，next数组的值表示的是模式串前缀和后缀的____长度。",
+                    "correctAnswer":"最长公共","explanation":"...","difficulty":"basic"}
                  ]}
 
+                选择题的 options 必须有4项；填空题的 options 必须为空数组[]。
                 deckTitle 要求: 提炼文档核心主题, 如"Java并发编程测试"、"机器学习基础测验"、"分布式系统设计题"。
 
                 # 文档上下文
@@ -109,7 +122,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
-        messages.add(new UserMessage("请基于以上文档内容，生成5道单选题，涵盖基础概念和综合应用两个维度。"));
+        messages.add(new UserMessage("请基于以上文档内容，生成5道测试题（3道选择题 + 2道填空题），涵盖基础概念和综合应用两个维度。"));
         Response<AiMessage> response = chatLanguageModel.generate(messages);
         return response.content().text();
     }
@@ -127,7 +140,15 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 String q = (String) item.getOrDefault("question", "");
                 if (q.isBlank()) continue;
 
-                String optionsJson = objectMapper.writeValueAsString(item.getOrDefault("options", List.of()));
+                String type = (String) item.getOrDefault("type", "SINGLE");
+                boolean isFillBlank = "FILL_BLANK".equalsIgnoreCase(type);
+
+                // 填空题 options 为空数组，选择题正常解析
+                Object rawOptions = item.getOrDefault("options", List.of());
+                @SuppressWarnings("unchecked")
+                List<String> optionList = rawOptions instanceof List ? (List<String>) rawOptions : List.of();
+                String optionsJson = objectMapper.writeValueAsString(optionList);
+
                 String answer = (String) item.getOrDefault("correctAnswer", "");
                 String explanation = (String) item.getOrDefault("explanation", "");
                 String difficulty = (String) item.getOrDefault("difficulty", "basic");
@@ -135,7 +156,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
 
                 quizzes.add(Quiz.builder().docId(docId).deckId(deckId).userId(userId).question(q)
                         .options(optionsJson).answer(answer).explanation(explanation)
-                        .sourceSegment(src).quizType("SINGLE")
+                        .sourceSegment(src).quizType(isFillBlank ? "FILL_BLANK" : "SINGLE")
                         .difficulty("application".equals(difficulty) ? 4 : 2).status("ACTIVE").build());
             }
             if (!quizzes.isEmpty()) {
