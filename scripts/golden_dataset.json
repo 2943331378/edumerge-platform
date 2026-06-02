@@ -1,0 +1,250 @@
+[
+  {
+    "id": 1,
+    "question": "《智能社会研究》期刊的创刊时间和出版周期是什么？",
+    "context": "智能社会研究 2024 年第 5 期 (双月刊) 2024 年 9 月 10 日出版 2022 年 11 月 10 日创刊 总第 12 期",
+    "ground_truth": "该期刊创刊于2022年11月10日，为双月刊。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 2,
+    "question": "《如何应对 AIGC 时代的教育挑战》一文的作者和关键词是什么？",
+    "context": "如何应对 AIGC 时代的教育挑战 ———技术在教育领域应用的国际经验和启示 朱　 赫　 李　 升∗ 关键词:生成式人工智能　 教育领域　 国际经验",
+    "ground_truth": "作者为朱赫和李升，关键词包括生成式人工智能、教育领域、国际经验。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 3,
+    "question": "根据摘要，AIGC具备哪些主要特征？",
+    "context": "AIGC 具备生成式、智能化和个性化等特征,极大地改变了现代社会的教育实践,但也面临不确定性的现实挑战。",
+    "ground_truth": "AIGC具备生成式、智能化和个性化等特征。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 4,
+    "question": "文中将生成式人工智能（AIGC）主要分为哪两大类？",
+    "context": "随后发展起来的生成式人工智能(artificial intelligence generated content,AIGC)主要分为两大类,一类是对话型人工智能(AI),另一类是图像生成 AI。",
+    "ground_truth": "一类是对话型人工智能，另一类是图像生成AI。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 5,
+    "question": "OpenAI在2023年3月14日发布的GPT-4具有什么能力？",
+    "context": "2023 年 3 月 14 日,GPT 4 发布。 OpenAI 这样描述 GPT 4:“这是一个大规模、多模态模型,可以接受图像和文本输入,并产生文本输出,而且在各种专业和学术基准上表现出接近人类水平的表现,能够以大约前 10%考生的分数标准通过模拟律师考试。”",
+    "ground_truth": "GPT-4是一个大规模、多模态模型，可接受图像和文本输入并产生文本输出，在专业和学术基准上表现接近人类，能以约前10%考生的分数标准通过模拟律师考试。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 6,
+    "question": "2023年11月6日OpenAI开发者大会公布了什么计划？",
+    "context": "同年 11 月 6 日,OpenAI 开发者大会上公布了 GPTs 商店计划,现今已推出了更多用途的由开发者自主开发的 GPT 软件,拓宽了在各个领域的具体应用场景",
+    "ground_truth": "公布了GPTs商店计划，允许开发者自主开发更多用途的GPT软件。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 7,
+    "question": "对于ChatGPT和AIGC在教育领域的应用，学者们持有哪几种不同观点？",
+    "context": "一些学者认为,ChatGPT 和类似的 AIGC 在教育和研究领域的应用充满潜力;相反,另一部分人则将其视为教育界的潜在危险。 相对温和的观点认为,不应简单禁止高等教育机构使用类似工具。",
+    "ground_truth": "有学者认为充满潜力，有学者视为潜在危险，还有温和观点认为不应简单禁止。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 8,
+    "question": "联合国教科文组织针对AIGC应用于教育领域发布了什么指南？",
+    "context": "联合国教科文组织(UNESCO)也发布了一系列政策指南———如《人工智能与教育:政策制定者指南》,以及一份专门针对 AIGC 应用于教育领域的入门指南",
+    "ground_truth": "发布了《人工智能与教育:政策制定者指南》和一份专门针对AIGC应用于教育领域的入门指南。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 9,
+    "question": "当前我国高校对师生使用AIGC技术的权限情况如何？",
+    "context": "尽管当前我国高校尚未对师生开放 AIGC 技术的使用权限,但对 AIGC的教育应用及展望已在讨论",
+    "ground_truth": "当前我国高校尚未对师生开放AIGC技术的使用权限。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 10,
+    "question": "本文的研究目的是什么？",
+    "context": "因此,本文重在总结当前国际社会关于 AIGC 在教育领域的实践经验及治理政策,在此基础上分析 AIGC 在我国教育领域应用的可行方向。",
+    "ground_truth": "旨在总结国际社会在AIGC教育领域的实践经验与治理政策，并分析我国教育领域应用的可行方向。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 11,
+    "question": "在教育领域应用AIGC方面，美国教育部教育技术办公室推出了什么措施？",
+    "context": "美国教育部教育技术办公室推出了 AI 教育应用七项建议",
+    "ground_truth": "推出了AI教育应用七项建议。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 12,
+    "question": "英国教育部针对在教育中使用AIGC发布了什么？",
+    "context": "英国教育部发布了在教育中使用 AIGC 的指导意见",
+    "ground_truth": "发布了在教育中使用AIGC的指导意见。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 13,
+    "question": "欧盟将哪项行动计划作为数字教育战略核心，并在AIGC出现后补充了内容？",
+    "context": "欧盟将《数字教育行动计划(2021—2027)》作为战略核心,并在 AIGC 出现后于《人工智能白皮书》中补充了相关内容",
+    "ground_truth": "将《数字教育行动计划（2021—2027）》作为战略核心，并在《人工智能白皮书》中补充了相关内容。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 14,
+    "question": "新加坡政府于2024年为AIGC发布了什么框架草案？",
+    "context": "新加坡政府于 2024 年通过信息通信媒体发展管理局( IMDA)和人工智能验证基金会(AIVF),为 AIGC 发布了一个 AI 治理框架模型草案",
+    "ground_truth": "发布了一个AI治理框架模型草案。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 15,
+    "question": "日本于2023年推出了什么与AI相关的指南？",
+    "context": "日本于 2023 年推出了 AI 安全和伦理指南",
+    "ground_truth": "推出了AI安全和伦理指南。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 16,
+    "question": "在AI与教育的关系上，美国、新加坡等国的政策共同提出了什么核心协作理念？",
+    "context": "美国、新加坡的政策均提出了“人与科技的协作” (humans-in-the-loop)理念",
+    "ground_truth": "共同提出了“人与科技的协作”（humans-in-the-loop）理念。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 17,
+    "question": "在AIGC应用中，发达国家如何强调教育工作者的角色？",
+    "context": "发达国家普遍强调教育工作者在 AIGC 应用中的主导地位,并着重通过教育工作者的积极参与和专业培训,确保 AI 技术得以负责任地使用",
+    "ground_truth": "普遍强调教育工作者在AIGC应用中的主导地位，并通过其积极参与和专业培训确保AI技术负责任地使用。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 18,
+    "question": "英国为帮助教育工作者运用AI技术，提供了哪些内容的培训？",
+    "context": "英国通过提供有针对性的培训和支持,帮助教育工作者充分理解 AI 技术的潜力和风险,并掌握如何在教育实践中有效运用 AI 技术,其培训内容广泛,涵盖 AI 基础知识、教学应用场景、AI 工具有效性评估,以及减少 AI 应用的潜在风险等。",
+    "ground_truth": "培训涵盖AI基础知识、教学应用场景、AI工具有效性评估以及减少AI应用的潜在风险等内容。",
+    "document_id": "6cac8223e5c4405e8fb60ae5f24c6c0e",
+    "chunk_indices": []
+  },
+  {
+    "id": 19,
+    "question": "中国古代神话中，哪些故事出自《山海经》？",
+    "context": "一、上古：神话中国浪漫主义文学源头\n1.鲧禹治水、精卫填海、夸父逐日、黄帝擒蚩尤出自《山海经》",
+    "ground_truth": "鲧禹治水、精卫填海、夸父逐日、黄帝擒蚩尤出自《山海经》。",
+    "document_id": "02ead8c0c1fa4e8b8e092da6cb78042e",
+    "chunk_indices": []
+  },
+  {
+    "id": 20,
+    "question": "《诗经》在中国文学史上的地位和开创的传统是什么？",
+    "context": "1.诗歌：《诗经》是我国第一部诗歌总集，开创了我国现实主义诗歌传统，是我国现实主义诗歌的源头",
+    "ground_truth": "《诗经》是我国第一部诗歌总集，开创了我国现实主义诗歌传统，是现实主义诗歌的源头。",
+    "document_id": "02ead8c0c1fa4e8b8e092da6cb78042e",
+    "chunk_indices": []
+  },
+  {
+    "id": 21,
+    "question": "“楚辞”作为诗集名称是由谁在什么时候编辑的？它的代表作家有哪些？",
+    "context": "2.“楚辞”最早见于《史记》，《楚辞》作为诗集名称，指西汉末年刘向编辑的一部楚辞体诗歌集，是我国浪\n漫主义诗歌的源头\n（1）屈原《离骚》、《九歌》（《国殇》）、《九章》《天问》\n（2）宋玉:《九辩》",
+    "ground_truth": "《楚辞》作为诗集名称，指西汉末年刘向编辑的楚辞体诗歌集，代表作家有屈原（作品如《离骚》《九歌》等）和宋玉（《九辩》）。",
+    "document_id": "02ead8c0c1fa4e8b8e092da6cb78042e",
+    "chunk_indices": []
+  },
+  {
+    "id": 22,
+    "question": "建安文学中的“三曹”指哪三位？他们分别有什么代表作品？",
+    "context": "1.建安文学：\n（1）三曹：曹操《短歌行》《观沧海》《蒿里行》、曹丕《燕歌行》、曹植《洛神赋》",
+    "ground_truth": "三曹指曹操、曹丕、曹植。曹操代表作有《短歌行》《观沧海》《蒿里行》，曹丕有《燕歌行》，曹植有《洛神赋》。",
+    "document_id": "02ead8c0c1fa4e8b8e092da6cb78042e",
+    "chunk_indices": []
+  },
+  {
+    "id": 23,
+    "question": "唐代中期的新乐府运动主要参与诗人有哪些？",
+    "context": "1.新乐府运动：白居易、元稹、张籍、李绅、",
+    "ground_truth": "新乐府运动的主要参与诗人有白居易、元稹、张籍、李绅。",
+    "document_id": "02ead8c0c1fa4e8b8e092da6cb78042e",
+    "chunk_indices": []
+  },
+  {
+    "id": 24,
+    "question": "数字教育行动计划（2021-2027）的两大战略重点是什么？",
+    "context": "The Digital Education Action Plan (2021-2027) has two strategic priorities: To foster a high-performing digital 1 education ecosystem, we need: [...] To enhance digital skills and 2 competences for the digital age:",
+    "ground_truth": "战略重点一是培育高绩效的数字教育生态系统，战略重点二是增强数字时代的技能和能力。",
+    "document_id": "c5862f6b56104c2b93f8ce1a60136168",
+    "chunk_indices": []
+  },
+  {
+    "id": 25,
+    "question": "为培育高绩效的数字教育生态系统，行动计划提出了哪些关键要素？",
+    "context": "• infrastructure, connectivity and digital equipment • effective digital capacity planning and development, including effective and up-to-date organisational capabilities • digitally-competent and -confident educators and education & training staff • high-quality content, user-friendly tools and secure platforms, respecting privacy and ethical standards",
+    "ground_truth": "需要基础设施、连接和数字设备，有效的数字能力规划与发展，具备数字能力和信心的教育工作者，以及高质量内容、用户友好工具和尊重隐私与伦理标准的安全平台。",
+    "document_id": "c5862f6b56104c2b93f8ce1a60136168",
+    "chunk_indices": []
+  },
+  {
+    "id": 26,
+    "question": "行动计划提出了什么措施来促进数字素养和打击虚假信息？",
+    "context": "ACTIONS TO TAKE • Launch a Strategic dialogue with Member States to facilitate successful digital education • Develop common guidelines to foster digital literacy and fight disinformation",
+    "ground_truth": "制定共同指南，以促进数字素养并打击虚假信息。",
+    "document_id": "c5862f6b56104c2b93f8ce1a60136168",
+    "chunk_indices": []
+  },
+  {
+    "id": 27,
+    "question": "公开咨询结果显示，COVID-19危机对数字教育的使用产生了怎样的影响？",
+    "context": "Almost 60% of respondents to the open public consultation on the Digital Education Action Plan3 had not used distance and online learning before the crisis 95% of respondents consider that the coronavirus crisis marks a turning point for how digital technology is used in education and training",
+    "ground_truth": "近60%的受访者在危机前未曾使用远程和在线学习，95%的受访者认为疫情是数字技术应用于教育的一个转折点。",
+    "document_id": "c5862f6b56104c2b93f8ce1a60136168",
+    "chunk_indices": []
+  },
+  {
+    "id": 28,
+    "question": "欧洲数字教育中心（European Digital Education Hub）的主要功能是什么？",
+    "context": "by creating a new European Digital Education Hub to: ‣ link national and regional digital education initiatives and actors ‣ support cross-sector collaboration and new models for exchange of digital learning content, addressing issues such as common standards, interoperability, accessibility and quality-assurance The Hub will serve as a think-tank, supporting the development of policy and practice, and monitor the development of digital education in Europe, including the implementation of the new Digital Education Action Plan.",
+    "ground_truth": "该中心将链接各国数字教育倡议和参与者，支持跨部门合作与数字学习内容交换，作为智库支持政策与实践发展，并监测欧洲数字教育进展。",
+    "document_id": "c5862f6b56104c2b93f8ce1a60136168",
+    "chunk_indices": []
+  },
+  {
+    "id": 29,
+    "question": "智联银龄项目主要解决空巢老人面临的哪些核心痛点？",
+    "context": "项目目标：解决空巢老人居家安全隐患、情感孤独、照护资源不足三大痛点，实现“老人安心、子女放心、政府省心”。",
+    "ground_truth": "项目主要解决空巢老人的居家安全隐患、情感孤独和照护资源不足三大核心痛点。",
+    "document_id": "829638f071a04029bca8449cd01f8bfc",
+    "chunk_indices": []
+  },
+  {
+    "id": 30,
+    "question": "该项目在软件系统架构上采用什么设计，并通过哪个框架实现自然语言处理与情感分析？",
+    "context": "后端基于Spring Boot构建整体架构，整合Spring AI框架实现深度的自然语言处理与情感分析能力，对多源异构数据进行时序建模、心理健康评估、周度健康趋势分析及异常事件回溯。",
+    "ground_truth": "系统采用前后端分离的现代化架构设计，后端基于Spring Boot构建，整合Spring AI框架实现自然语言处理与情感分析。",
+    "document_id": "829638f071a04029bca8449cd01f8bfc",
+    "chunk_indices": []
+  },
+  {
+    "id": 31,
+    "question": "项目在商业模式上规划了哪三个阶段的发展路径？",
+    "context": "起步期：以智能硬件套装切入开封本地社区市场。凭借河南方言情感交互的差异化优势，快速建立用户认知，实现首轮现金流回笼。成长期：设备铺设积累的用户数据形成核心资产。面向子女端推出健康报告订阅服务，面向养老机构输出管理工具，完成从“卖硬件”到“卖服务”的商业模式跃迁。扩张期：打通家庭、社区、医疗三方数据接口，通过服务佣金与生态合作构建区域性智慧养老闭环。",
+    "ground_truth": "商业模式分为起步期（销售智能硬件切入市场）、成长期（推出健康报告订阅和管理工具，转向卖服务）和扩张期（打通多方数据接口，构建区域性智慧养老闭环）。",
+    "document_id": "829638f071a04029bca8449cd01f8bfc",
+    "chunk_indices": []
+  }
+]
