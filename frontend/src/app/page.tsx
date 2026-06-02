@@ -11,23 +11,25 @@ import { ChatDrawer } from "@/components/chat/ChatDrawer";
 import { AppSidebar, type UploadedDoc } from "@/components/app-sidebar";
 import { LearningPath, type StepDef } from "@/components/learning-path";
 import { StudyNoteView } from "@/components/StudyNoteView";
-import { MindMapViewer } from "@/components/MindMapViewer";
+import { MindMapView } from "@/components/MindMapView";
 import { FlashcardView } from "@/components/FlashcardView";
 import { QuizView } from "@/components/QuizView";
 import { FlowNoteView } from "@/components/FlowNoteView";
 import { KnowledgeGraphPage } from "@/components/KnowledgeGraphPage";
+import { DocumentOutlineView } from "@/components/DocumentOutlineView";
 import { StatsDashboard } from "@/components/StatsDashboard";
 import { useAuth } from "@/lib/auth-context";
+import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import {
   Upload, NotebookText, GitFork, Layers, HelpCircle,
   MessageSquare, ChevronLeft, ChevronRight,
-  FileText, Loader2, X, BarChart3, Menu, Search, LogOut, User, BookOpen, Sparkles, GitBranch,
+  FileText, Loader2, X, BarChart3, Menu, Search, LogOut, User, BookOpen, GitBranch,
 } from "lucide-react";
 import type { SessionRecord, MindMapRecord, StudyNoteRecord } from "@/lib/api";
-import { listSessions, uploadDocument, deleteDocument, getMindMap, listDecks } from "@/lib/api";
+import { listSessions, uploadDocument, deleteDocument } from "@/lib/api";
 
 const STEPS: StepDef[] = [
-  { id: 1, label: "上传材料", icon: Upload },
+  { id: 1, label: "文档大纲", icon: Upload },
   { id: 2, label: "生成笔记", icon: NotebookText },
   { id: 3, label: "查看导图", icon: GitFork },
   { id: 4, label: "练卡片",   icon: Layers },
@@ -44,6 +46,14 @@ const STEP_ACTIVITY_MAP: Record<number, string | null> = {
   6: "flownote",
 };
 
+/** 大纲生成类型 → 目标步骤映射 */
+const OUTLINE_STEP_MAP: Record<string, number> = {
+  note: 2,
+  mindmap: 3,
+  flashcard: 4,
+  quiz: 5,
+};
+
 export default function HomePage() {
   const router = useRouter();
   const auth = useAuth();
@@ -58,10 +68,14 @@ export default function HomePage() {
 
   // Per-session cache to preserve AI content when switching documents
   const [sessionCache, setSessionCache] = useState<
-    Map<number, { note?: StudyNoteRecord | null; mindMap?: MindMapRecord | null; completedSteps?: Set<number> }>
+    Map<number, {
+      note?: StudyNoteRecord | null;
+      mindMap?: MindMapRecord | null;
+      completedSteps?: Set<number>;
+      selectedOutlineSections?: string[];
+      outlineGenerateTrigger?: { type: string; counter: number };
+    }>
   >(new Map());
-
-  const [mindMapLoading, setMindMapLoading] = useState(false);
 
   const [chatOpen, setChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState("");
@@ -73,7 +87,6 @@ export default function HomePage() {
   // Derive current session's state from cache
   const activeCache = activeSession ? sessionCache.get(activeSession.id) : undefined;
   const note = activeCache?.note ?? null;
-  const mindMapData = activeCache?.mindMap ?? null;
   const completedSteps = activeCache?.completedSteps ?? new Set<number>();
 
   const updateSessionCache = (updates: Partial<NonNullable<typeof activeCache>>) => {
@@ -85,6 +98,17 @@ export default function HomePage() {
       return next;
     });
   };
+
+  // 大纲底部工具栏 → 导航到目标步骤并传递选中章节
+  const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", selectedSections: string[]) => {
+    const prev = activeCache?.outlineGenerateTrigger?.counter ?? 0;
+    updateSessionCache({
+      selectedOutlineSections: selectedSections,
+      outlineGenerateTrigger: { type, counter: prev + 1 },
+    });
+    const targetStep = OUTLINE_STEP_MAP[type];
+    if (targetStep) setCurrentStep(targetStep);
+  }, [activeSession, sessionCache]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -186,15 +210,13 @@ export default function HomePage() {
 
   const step1Ready = !!activeSession && activeSession.docStatus === "COMPLETED";
   const step2Ready = !!note;
-  const step3Ready = !!mindMapData;
 
   useEffect(() => {
     const next = new Set(completedSteps);
     if (step1Ready) next.add(1);
     if (step2Ready) next.add(2);
-    if (step3Ready) next.add(3);
     updateSessionCache({ completedSteps: next });
-  }, [step1Ready, step2Ready, step3Ready]); // eslint-disable-line
+  }, [step1Ready, step2Ready]); // eslint-disable-line
 
   const goStep = (s: number) => {
     if (s >= 1 && s <= STEPS.length) setCurrentStep(s);
@@ -206,36 +228,14 @@ export default function HomePage() {
     if (currentStep > 1) setCurrentStep(currentStep - 1);
   };
 
-  // Auto-load existing mind map from backend (no generation triggered for new docs)
-  useEffect(() => {
-    if (currentStep !== 3 || !activeSession?.docId || mindMapData || mindMapLoading) return;
-    let cancelled = false;
-    const load = async () => {
-      setMindMapLoading(true);
-      try {
-        // Only load if a MIND_MAP deck already exists — prevents auto-generation
-        const decks = await listDecks(activeSession!.docId!, "MIND_MAP");
-        if (!cancelled && decks.length > 0) {
-          const data = await getMindMap(activeSession!.docId!);
-          if (!cancelled) updateSessionCache({ mindMap: data });
-        }
-      } catch { /* show generate button */ }
-      if (!cancelled) setMindMapLoading(false);
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [currentStep, activeSession?.docId]); // eslint-disable-line
-
-  const handleGenerateMindMap = async () => {
-    if (!activeSession?.docId || mindMapLoading) return;
-    setMindMapLoading(true);
-    try {
-      const data = await getMindMap(activeSession.docId!);
-      updateSessionCache({ mindMap: data });
-      toast.success("思维导图生成成功");
-    } catch { toast.error("思维导图生成失败"); }
-    setMindMapLoading(false);
-  };
+  // 全局键盘快捷键: 1-6 跳转步骤, Ctrl+/ 对话, Ctrl+Shift+D 暗黑模式
+  // step 4(卡片) 时禁用全局数字键，避免与卡片自评快捷键(1-4)冲突
+  useGlobalKeyboard({
+    onGoStep: goStep,
+    onToggleChat: () => setChatOpen((v) => !v),
+    totalSteps: STEPS.length,
+    numberKeysHandled: currentStep === 4,
+  });
 
   const renderStep = () => {
     const docId = activeSession?.docId ?? null;
@@ -245,6 +245,19 @@ export default function HomePage() {
 
     switch (currentStep) {
       case 1:
+        // 已选中文档且处理完成 → 显示大纲视图
+        if (activeSession && activeSession.docStatus === "COMPLETED") {
+          return (
+            <DocumentOutlineView
+              docId={docId}
+              docStatus={docStatus}
+              embedded
+              onContextChange={setChatContext}
+              onGenerate={handleOutlineGenerate}
+            />
+          );
+        }
+        // 未选中文档或处理中 → 显示上传+文档列表
         return (
           <div className="flex-1 flex flex-col items-center justify-center gap-4 md:gap-6 p-4 md:p-8">
             <div className="text-center space-y-2 max-w-md">
@@ -253,7 +266,7 @@ export default function HomePage() {
               </div>
               <h2 className="text-lg font-semibold text-foreground">上传学习资料</h2>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                支持 PDF、Word、PPT、TXT 等格式。上传后 AI 将自动处理文档内容。
+                支持 PDF、Word、PPT、TXT 等格式。上传后 AI 将自动解析文档结构并生成大纲。
               </p>
             </div>
 
@@ -372,6 +385,8 @@ export default function HomePage() {
             docStatus={docStatus}
             embedded
             onContextChange={setChatContext}
+            selectedOutlineSections={activeCache?.selectedOutlineSections}
+            generateTrigger={activeCache?.outlineGenerateTrigger}
             onGenerated={() => {
               import("@/lib/api").then(({ getStudyNote }) => {
                 if (docId) getStudyNote(docId).then((n) => updateSessionCache({ note: n }));
@@ -381,36 +396,16 @@ export default function HomePage() {
         );
 
       case 3:
-        if (mindMapLoading) {
-          return (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在生成思维导图...
-              </div>
-            </div>
-          );
-        }
-        if (!mindMapData?.content) {
-          return (
-            <div className="flex-1 flex flex-col items-center justify-center gap-5 p-8">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted/60">
-                <GitFork className="h-7 w-7 text-muted-foreground/45" />
-              </div>
-              <div className="text-center space-y-1.5">
-                <p className="text-sm font-medium text-foreground/75">暂无思维导图</p>
-                <p className="max-w-sm text-xs leading-6 text-muted-foreground/60">
-                  AI 将自动分析文档结构，生成可交互的思维导图。
-                </p>
-              </div>
-              <Button onClick={handleGenerateMindMap} disabled={!activeSession?.docId || activeSession?.docStatus !== "COMPLETED"} className="rounded-xl gap-2 h-10">
-                <Sparkles className="h-4 w-4" />
-                一键生成思维导图
-              </Button>
-            </div>
-          );
-        }
-        return <MindMapViewer markdown={mindMapData.content} className="flex-1" onContextChange={setChatContext} />;
+        return (
+          <MindMapView
+            docId={docId}
+            docStatus={docStatus}
+            embedded
+            onContextChange={setChatContext}
+            selectedOutlineSections={activeCache?.selectedOutlineSections}
+            generateTrigger={activeCache?.outlineGenerateTrigger}
+          />
+        );
 
       case 4:
         return (
@@ -420,6 +415,8 @@ export default function HomePage() {
             sessionId={sessionId}
             embedded
             onContextChange={setChatContext}
+            selectedOutlineSections={activeCache?.selectedOutlineSections}
+            generateTrigger={activeCache?.outlineGenerateTrigger}
             onGenerated={() => updateSessionCache({ completedSteps: new Set([...completedSteps, 4]) })}
           />
         );

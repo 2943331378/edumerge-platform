@@ -13,11 +13,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, HelpCircle, RotateCw, ArrowLeft, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil } from "lucide-react";
+import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { DeckRecord, QuizItem, QuizAttemptRecord } from "@/lib/api";
-import { listDecks, listQuizzesByDeck, generateQuizzes as generateApi, deleteDeck, getMindMap, saveQuizAttempt, listQuizAttempts, updateQuiz, deleteQuiz } from "@/lib/api";
+import type { DeckRecord, QuizItem, QuizAttemptRecord, WeaknessItem } from "@/lib/api";
+import { listDecks, listQuizzesByDeck, generateQuizzes as generateApi, deleteDeck, getMindMap, saveQuizAttempt, listQuizAttempts, updateQuiz, deleteQuiz, listWeakness } from "@/lib/api";
+import { ErrorBookView } from "@/components/ErrorBookView";
 
 interface Props {
   docId: number | null;
@@ -27,13 +28,17 @@ interface Props {
   onGenerated?: () => void;
   onContextChange?: (hint: string) => void;
   embedded?: boolean;
+  /** 大纲选中的章节 IDs */
+  selectedOutlineSections?: string[];
+  /** 大纲触发生成信号，counter 变化时自动触发 */
+  generateTrigger?: { type: string; counter: number };
 }
 
 function isNewDeck(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 24 * 60 * 60 * 1000;
 }
 
-export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded }: Props) {
+export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, selectedOutlineSections, generateTrigger }: Props) {
   const [view, setView] = useState<"decks" | "quiz">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
@@ -44,6 +49,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(true);
   const [score, setScore] = useState(0);
   const [attempts, setAttempts] = useState<QuizAttemptRecord[]>([]);
   const [answers, setAnswers] = useState<{ quizId: number; selectedAnswer: string; correct: boolean }[]>([]);
@@ -60,6 +66,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const [editingQuizId, setEditingQuizId] = useState<number | null>(null);
   const [editQuizForm, setEditQuizForm] = useState({ question: "", options: "", answer: "", explanation: "" });
   const [saving, setSaving] = useState(false);
+  const [showErrorBook, setShowErrorBook] = useState(false);
+  const [weakness, setWeakness] = useState<WeaknessItem[]>([]);
 
   const wrongQuizzes = quizzes.filter((q) => answers.some((a) => a.quizId === q.id && !a.correct));
 
@@ -115,12 +123,14 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const reloadDecks = async () => {
     if (!docId) return;
     try {
-      const [deckList, attemptList] = await Promise.all([
+      const [deckList, attemptList, weaknessData] = await Promise.all([
         listDecks(docId, "QUIZ"),
         listQuizAttempts(docId),
+        listWeakness(docId).catch(() => []),
       ]);
       setDecks(deckList);
       setAttempts(attemptList);
+      setWeakness(weaknessData);
     } catch { setDecks([]); setAttempts([]); }
   };
 
@@ -193,6 +203,15 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     setLoading(false);
   };
 
+  // 从大纲页面跳转过来时自动触发生成
+  const triggerRef = useRef(0);
+  useEffect(() => {
+    if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "quiz") {
+      triggerRef.current = generateTrigger.counter;
+      requestAnimationFrame(() => handleGenerate());
+    }
+  }, [generateTrigger?.counter]);
+
   const handleDeleteDeck = async (e: React.MouseEvent, deckId: number) => {
     e.stopPropagation();
     try {
@@ -241,6 +260,11 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     }
   };
 
+  // ═══════════════ 错题本视图 ═══════════════
+  if (showErrorBook) {
+    return <ErrorBookView docId={docId} onBack={() => setShowErrorBook(false)} onContextChange={onContextChange} />;
+  }
+
   // ═══════════════ Deck 列表视图 ═══════════════
   if (view === "decks") {
     return (
@@ -252,6 +276,10 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
               测试题组
             </h2>
             <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30" onClick={() => setShowErrorBook(true)}>
+                <Target className="h-3.5 w-3.5" />
+                错题本
+              </Button>
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>
                 {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
                 {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
@@ -347,6 +375,19 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                             New
                           </span>
                         )}
+                        {/* 薄弱度指示器 */}
+                        {(() => {
+                          const w = weakness.find((w) => w.deckId === deck.id);
+                          if (!w || w.totalQuestions === 0) return null;
+                          const color = w.accuracyRate >= 80 ? "bg-emerald-500" : w.accuracyRate >= 60 ? "bg-amber-500" : "bg-red-500";
+                          const textColor = w.accuracyRate >= 80 ? "text-emerald-600 dark:text-emerald-400" : w.accuracyRate >= 60 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
+                          return (
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${textColor}`}>
+                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${color}`} />
+                              {w.accuracyRate}%
+                            </span>
+                          );
+                        })()}
                       </div>
                     </CardContent>
                   </Card>
@@ -438,8 +479,9 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
 
   return (
     <div className="flex flex-col h-full">
-      {!embedded && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/20 shrink-0">
+      {/* 导航栏 — 可折叠 */}
+      <div className="shrink-0 overflow-hidden transition-all duration-300 ease-in-out" style={{ height: navCollapsed ? 0 : "auto" }}>
+        <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/20">
           <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs gap-1.5" onClick={() => { if (reviewMode) { endReview(); } else { setView("decks"); reloadDecks(); } }}>
             <ArrowLeft className="h-3 w-3" />
             {reviewMode ? "返回成绩" : "返回测试题组"}
@@ -464,6 +506,41 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
           {reviewMode && (
             <span className="ml-auto text-[11px] text-muted-foreground">错题 {reviewIdx + 1}/{wrongQuizzes.length}</span>
           )}
+          <button
+            type="button"
+            onClick={() => setNavCollapsed(true)}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-all"
+            title="收起导航栏"
+          >
+            <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+          </button>
+        </div>
+      </div>
+
+      {/* 折叠态 — 悬浮小药丸 */}
+      {navCollapsed && (
+        <div className="shrink-0 px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setNavCollapsed(false)}
+            className="group inline-flex items-center gap-1.5 rounded-full bg-muted/40 hover:bg-muted/70 backdrop-blur-sm border border-border/30 px-3 py-1 transition-all duration-200"
+            title="展开导航栏"
+          >
+            <ArrowLeft
+              className="h-3 w-3 text-muted-foreground/50 group-hover:text-foreground transition-colors cursor-pointer"
+              onClick={(e) => { e.stopPropagation(); if (reviewMode) { endReview(); } else { setView("decks"); reloadDecks(); } }}
+            />
+            <span className="text-[11px] text-muted-foreground/60 group-hover:text-foreground/80 truncate max-w-[180px] transition-colors">
+              {reviewMode ? "错题回顾" : (currentDeck?.title ?? "")}
+            </span>
+            {!reviewMode && !manageMode && submitted && (
+              <span className="text-[10px] text-emerald-600/60 dark:text-emerald-400/60 font-medium">{score}/{currentIdx + 1}</span>
+            )}
+            {reviewMode && (
+              <span className="text-[10px] text-muted-foreground/40">{reviewIdx + 1}/{wrongQuizzes.length}</span>
+            )}
+            <ChevronRight className="h-3 w-3 -rotate-90 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors" />
+          </button>
         </div>
       )}
 

@@ -80,6 +80,8 @@ export function ChatSidebar({ documents, onUpload, onDelete, className }: ChatSi
             accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
             onChange={handleChange}
             className="hidden"
+            aria-label="选择文件上传"
+            title="选择文件上传"
           />
         </div>
       </div>
@@ -110,6 +112,8 @@ export function ChatSidebar({ documents, onUpload, onDelete, className }: ChatSi
               <button
                 onClick={(e) => { e.stopPropagation(); onDelete(doc.id); }}
                 className="opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="删除文档"
+                title="删除文档"
               >
                 <X className="h-3 w-3 text-muted-foreground hover:text-destructive" />
               </button>

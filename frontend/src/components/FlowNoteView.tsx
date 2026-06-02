@@ -36,6 +36,25 @@ const CATEGORIES = [
 
 const CATEGORY_MAP = new Map(CATEGORIES.map((c) => [c.key, c]));
 
+const ACCENT_MAP: Record<string, string> = {
+  KEY_POINT: "from-blue-500 to-indigo-500",
+  QUESTION: "from-amber-500 to-orange-500",
+  EXAMPLE: "from-emerald-500 to-teal-500",
+  REVIEW: "from-rose-500 to-pink-500",
+};
+const GLOW_MAP: Record<string, string> = {
+  KEY_POINT: "shadow-blue-500/5",
+  QUESTION: "shadow-amber-500/5",
+  EXAMPLE: "shadow-emerald-500/5",
+  REVIEW: "shadow-rose-500/5",
+};
+const HEADER_BG_MAP: Record<string, string> = {
+  KEY_POINT: "bg-blue-50/50 dark:bg-blue-950/10",
+  QUESTION: "bg-amber-50/50 dark:bg-amber-950/10",
+  EXAMPLE: "bg-emerald-50/50 dark:bg-emerald-950/10",
+  REVIEW: "bg-rose-50/50 dark:bg-rose-950/10",
+};
+
 export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Props) {
   const [entries, setEntries] = useState<FlowNoteItem[]>([]);
   const [stats, setStats] = useState<FlowNoteStats | null>(null);
@@ -247,82 +266,114 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
             </Button>
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto p-4 space-y-3">
+          <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4">
             {entries.map((entry) => {
               const cat = CATEGORY_MAP.get(entry.category);
               const Icon = cat?.icon ?? FileText;
+              const accent = ACCENT_MAP[entry.category] ?? "from-gray-400 to-gray-500";
+              const glow = GLOW_MAP[entry.category] ?? "";
+              const headerBg = HEADER_BG_MAP[entry.category] ?? "";
+
               return (
                 <div
                   key={entry.id}
                   className={cn(
-                    "group relative rounded-xl border p-4 transition-all",
+                    "group relative rounded-2xl border transition-all duration-300",
+                    "hover:shadow-lg hover:-translate-y-0.5",
                     entry.isReviewed
-                      ? "border-emerald-200/50 dark:border-emerald-800/30 bg-emerald-50/30 dark:bg-emerald-950/10"
-                      : "border-border/50 bg-card hover:border-border",
+                      ? "border-emerald-200/60 dark:border-emerald-800/30 bg-emerald-50/20 dark:bg-emerald-950/5"
+                      : "border-border/40 bg-card shadow-sm",
+                    glow,
                   )}
                 >
-                  {/* Category badge + actions */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium", cat?.color)}>
-                      <Icon className="h-2.5 w-2.5" />
-                      {cat?.label}
-                    </span>
-                    {entry.sourceType === "CHAT_EXTRACTED" && (
-                      <span className="text-[9px] text-muted-foreground/50">AI 提取</span>
-                    )}
-                    {entry.sourceType === "USER_WRITTEN" && (
-                      <span className="text-[9px] text-muted-foreground/50">手动</span>
-                    )}
-                    <span className="text-[9px] text-muted-foreground/40 ml-auto">
-                      {new Date(entry.createdAt).toLocaleDateString("zh-CN")}
-                    </span>
-                  </div>
+                  {/* 顶部装饰条 — 分类渐变色 */}
+                  <div className={cn("h-1 rounded-t-2xl bg-gradient-to-r", accent)} />
 
-                  {/* Title */}
-                  <h3 className="text-sm font-medium text-foreground/85 mb-1.5">{entry.title}</h3>
-
-                  {/* Content */}
-                  <div className="text-xs text-muted-foreground leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {entry.content}
-                    </ReactMarkdown>
-                  </div>
-
-                  {/* Source segment */}
-                  {entry.sourceSegment && (
-                    <details className="mt-2">
-                      <summary className="text-[10px] text-muted-foreground/50 cursor-pointer hover:text-muted-foreground">
-                        来源片段
-                      </summary>
-                      <p className="mt-1 text-[10px] text-muted-foreground/60 bg-muted/30 rounded-lg p-2 leading-relaxed">
-                        {entry.sourceSegment}
-                      </p>
-                    </details>
-                  )}
-
-                  {/* Actions */}
-                  <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      onClick={() => handleReview(entry.id)}
-                      className={cn(
-                        "p-1 rounded-md transition-all",
-                        entry.isReviewed
-                          ? "text-emerald-500 bg-emerald-100 dark:bg-emerald-900/30"
-                          : "text-muted-foreground/50 hover:text-emerald-500 hover:bg-emerald-50",
+                  <div className="p-5 sm:p-6">
+                    {/* 头部: 分类标签 + 来源 + 日期 */}
+                    <div className="flex items-center gap-2.5 mb-3.5">
+                      <span className={cn(
+                        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase",
+                        cat?.color,
+                      )}>
+                        <Icon className="h-3 w-3" />
+                        {cat?.label}
+                      </span>
+                      {entry.sourceType === "CHAT_EXTRACTED" && (
+                        <span className="inline-flex items-center gap-1 text-[9px] text-muted-foreground/50 bg-muted/40 rounded-md px-1.5 py-0.5">
+                          <Sparkles className="h-2.5 w-2.5" />
+                          AI 提取
+                        </span>
                       )}
-                      title={entry.isReviewed ? "已复习" : "标记已复习"}
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(entry.id)}
-                      className="p-1 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-all"
-                      title="删除"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                      {entry.sourceType === "USER_WRITTEN" && (
+                        <span className="inline-flex items-center gap-1 text-[9px] text-muted-foreground/50 bg-muted/40 rounded-md px-1.5 py-0.5">
+                          手动记录
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground/40 ml-auto font-medium tabular-nums">
+                        {new Date(entry.createdAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}
+                      </span>
+                    </div>
+
+                    {/* 标题 — 更大的字体，更强的存在感 */}
+                    <h3 className="text-base sm:text-lg font-semibold text-foreground/90 mb-3 leading-snug tracking-tight">
+                      {entry.title}
+                    </h3>
+
+                    {/* 内容区域 — 带微妙背景色 */}
+                    <div className={cn(
+                      "rounded-xl px-4 py-3 text-sm leading-relaxed text-foreground/75",
+                      "prose prose-sm dark:prose-invert max-w-none",
+                      "prose-headings:text-foreground/80 prose-headings:font-semibold",
+                      "prose-p:my-1.5 prose-li:my-0.5",
+                      "prose-strong:text-foreground/85 prose-strong:font-semibold",
+                      "prose-code:text-xs prose-code:bg-muted/60 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5",
+                      headerBg,
+                    )}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {entry.content}
+                      </ReactMarkdown>
+                    </div>
+
+                    {/* 来源片段 — 引用风格 */}
+                    {entry.sourceSegment && (
+                      <details className="mt-4 group/source">
+                        <summary className="flex items-center gap-1.5 text-[11px] text-muted-foreground/50 cursor-pointer hover:text-muted-foreground transition-colors select-none">
+                          <FileText className="h-3 w-3" />
+                          <span>查看原文来源</span>
+                        </summary>
+                        <blockquote className="mt-2 pl-3.5 border-l-2 border-muted-foreground/15 text-[11px] text-muted-foreground/55 leading-relaxed italic">
+                          {entry.sourceSegment}
+                        </blockquote>
+                      </details>
+                    )}
+
+                    {/* 底部操作栏 */}
+                    <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border/20">
+                      <button
+                        type="button"
+                        onClick={() => handleReview(entry.id)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all",
+                          entry.isReviewed
+                            ? "text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-900/20"
+                            : "text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20",
+                        )}
+                        title={entry.isReviewed ? "已复习" : "标记已复习"}
+                      >
+                        <Check className="h-3 w-3" />
+                        {entry.isReviewed ? "已复习" : "标为已复习"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(entry.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-all"
+                        title="删除"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        删除
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

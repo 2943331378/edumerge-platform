@@ -68,14 +68,18 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
         const remote = await listConversations(docId ?? undefined);
         if (cancelled) return;
         if (remote.length > 0) {
-          const list: Conversation[] = remote.map((r) => ({
+          const remoteList: Conversation[] = remote.map((r) => ({
             id: r.sessionId,
             title: r.title,
             createdAt: r.createdAt,
           }));
-          saveConversations(list);
-          setConversations(list);
-          setActiveId(list[0].id);
+          // 合并：保留本地存在但远程不存在的新建会话（用户创建但未发消息）
+          const localList = loadConversations();
+          const remoteIds = new Set(remoteList.map((r) => r.id));
+          const merged = [...remoteList, ...localList.filter((l) => !remoteIds.has(l.id))];
+          saveConversations(merged);
+          setConversations(merged);
+          setActiveId(merged[0].id);
           setMessages([]);
           return;
         }
@@ -159,6 +163,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
 
   const handleSelectConv = (id: string) => {
     if (id === activeId) return;
+    abortRef.current?.abort(); // 取消正在进行的流式请求，避免幽灵 loading 消息
     setActiveId(id);
     setMessages([]);
   };
@@ -182,6 +187,13 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       scrollToBottom(true);
     }
   }, [messages]);
+
+  // Abort in-flight stream on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const doSend = useCallback(async (text: string) => {
     lastQuery.current = text;
@@ -211,12 +223,13 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     abortRef.current = controller;
 
     try {
-      const stream = await chatStream(text, docUuid ?? undefined, activeId, docId ?? undefined, activityType ?? undefined, contextHint ?? undefined);
+      const stream = await chatStream(text, docUuid ?? undefined, activeId, docId ?? undefined, activityType ?? undefined, contextHint ?? undefined, controller.signal);
       const reader = stream.getReader();
       if (!reader) throw new Error("不支持流式读取");
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let streamDone = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -230,7 +243,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith("data:")) continue;
           const payload = trimmed.slice(5).trim();
-          if (payload === "[DONE]") break;
+          if (payload === "[DONE]") { streamDone = true; break; }
 
           try {
             const data = JSON.parse(payload);
@@ -259,18 +272,24 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
             }
           } catch { /* skip unparseable */ }
         }
+        if (streamDone) break;
       }
+      reader.cancel();
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       const msg = err instanceof Error ? err.message : "网络请求失败";
+      // Preserve already-received content — don't wipe it with the error
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === assistantMsg.id
+          m.id === assistantMsg.id && !m.content
             ? { ...m, content: msg, error: true }
             : m
         )
       );
-      toast.error("连接中断", { description: msg, duration: 5000 });
+      if (msg.includes("chunked") || msg.includes("interrupted") || msg.includes("network")) {
+        // Connection interrupted after content received — content is preserved, just notify
+        toast.error("连接中断，但已收到的内容已保留", { duration: 3000 });
+      }
     } finally {
       setLoading(false);
       abortRef.current = null;

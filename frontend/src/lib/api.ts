@@ -98,6 +98,51 @@ export async function deleteDocument(id: number): Promise<void> {
   return request<void>(`/documents/${id}`, { method: "DELETE" });
 }
 
+// ===== 文档大纲 (Document Outline) =====
+
+export interface OutlineSection {
+  id: string;
+  title: string;
+  level: number;
+  startChunk?: number;
+  endChunk?: number;
+  children: OutlineSection[];
+}
+
+export interface OutlineData {
+  docType: string;
+  docTypeLabel: string;
+  totalChunks: number;
+  sections: OutlineSection[];
+}
+
+export interface DocumentOutline {
+  id: number;
+  docId: number;
+  docType: string;
+  docTypeLabel: string;
+  outline: OutlineData;
+  version: number;
+  createdAt: string;
+}
+
+export async function getDocumentOutline(docId: number): Promise<DocumentOutline> {
+  return request<DocumentOutline>(`/documents/${docId}/outline`);
+}
+
+export async function updateDocumentOutline(docId: number, outline: OutlineData): Promise<DocumentOutline> {
+  return request<DocumentOutline>(`/documents/${docId}/outline`, {
+    method: "PUT",
+    body: JSON.stringify(outline),
+  });
+}
+
+export async function regenerateDocumentOutline(docId: number): Promise<DocumentOutline> {
+  return request<DocumentOutline>(`/documents/${docId}/outline/regenerate`, {
+    method: "POST",
+  });
+}
+
 export async function uploadDocument(file: File): Promise<UploadResult> {
   const formData = new FormData();
   formData.append("file", file);
@@ -121,7 +166,7 @@ export interface SourceRef {
   score: number;
 }
 
-export async function chatStream(message: string, documentId?: string, sessionId?: string, docId?: number, activityType?: string, contextHint?: string): Promise<ReadableStream<Uint8Array>> {
+export async function chatStream(message: string, documentId?: string, sessionId?: string, docId?: number, activityType?: string, contextHint?: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
   const body: Record<string, unknown> = { message };
   if (sessionId) body.sessionId = sessionId;
   if (documentId) body.documentId = documentId;
@@ -132,6 +177,7 @@ export async function chatStream(message: string, documentId?: string, sessionId
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.body!;
@@ -181,6 +227,24 @@ export interface MindMapRecord {
 
 export async function getMindMap(docId: number): Promise<MindMapRecord> {
   return request<MindMapRecord>(`/mindmap?docId=${docId}`);
+}
+
+export async function listMindMaps(docId: number): Promise<MindMapRecord[]> {
+  return request<MindMapRecord[]>(`/mindmap/list?docId=${docId}`);
+}
+
+export async function getMindMapDetail(deckId: number): Promise<MindMapRecord> {
+  return request<MindMapRecord>(`/mindmap/detail?deckId=${deckId}`);
+}
+
+export async function generateMindMap(docId: number, sectionContext?: string): Promise<MindMapRecord> {
+  const params = new URLSearchParams({ docId: String(docId) });
+  if (sectionContext) params.set("sectionContext", sectionContext);
+  return request<MindMapRecord>(`/mindmap/generate?${params}`, { method: "POST" });
+}
+
+export async function deleteMindMap(deckId: number): Promise<void> {
+  return request<void>(`/mindmap/${deckId}`, { method: "DELETE" });
 }
 
 // ===== 学习笔记 (StudyNote) =====
@@ -271,6 +335,19 @@ export async function updateFlashcard(id: number, data: Partial<FlashcardItem>):
 }
 export async function deleteFlashcard(id: number): Promise<void> {
   return request<void>(`/flashcards/${id}`, { method: "DELETE" });
+}
+
+/** SM-2 间隔重复: 提交自评 (quality: 1=忘了 2=模糊 3=记住 4=秒答) */
+export async function reviewFlashcard(id: number, quality: number): Promise<FlashcardItem> {
+  return request<FlashcardItem>(`/flashcards/${id}/review`, {
+    method: "PUT",
+    body: JSON.stringify({ quality }),
+  });
+}
+
+/** 查询到期需复习的卡片 */
+export async function listDueFlashcards(docId: number): Promise<FlashcardItem[]> {
+  return request<FlashcardItem[]>(`/flashcards/due?docId=${docId}`);
 }
 
 // ===== 测试题 =====
@@ -364,6 +441,37 @@ export async function updateQuiz(id: number, data: { question?: string; options?
 }
 export async function deleteQuiz(id: number): Promise<void> {
   return request<void>(`/quizzes/${id}`, { method: "DELETE" });
+}
+
+/** 全局错题本 */
+export interface ErrorBookItem {
+  quizId: number;
+  question: string;
+  options: string;
+  answer: string;
+  explanation?: string;
+  errorCount: number;
+  deckId: number;
+}
+
+export async function listErrorBook(docId: number): Promise<ErrorBookItem[]> {
+  const raw = await request<ErrorBookItem[]>(`/quizzes/error-book?docId=${docId}`);
+  return raw.map((q) => ({
+    ...q,
+    options: typeof q.options === "string" ? q.options : JSON.stringify(q.options),
+  }));
+}
+
+/** 按知识点统计正确率 (薄弱度热力图) */
+export interface WeaknessItem {
+  deckId: number;
+  totalQuestions: number;
+  correctCount: number;
+  accuracyRate: number;
+}
+
+export async function listWeakness(docId: number): Promise<WeaknessItem[]> {
+  return request<WeaknessItem[]>(`/quizzes/weakness?docId=${docId}`);
 }
 
 // ===== 数据资产看板 (Stats) =====

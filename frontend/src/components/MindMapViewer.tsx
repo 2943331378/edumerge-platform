@@ -218,7 +218,7 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
         canvas.width = w * scale;
         canvas.height = h * scale;
         const ctx = canvas.getContext("2d")!;
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = isDark ? "#0f172a" : "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 

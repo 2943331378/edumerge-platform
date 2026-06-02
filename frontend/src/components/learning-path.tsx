@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Check, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, type LucideIcon } from "lucide-react";
 
 export interface StepDef {
   id: number;
@@ -17,8 +18,39 @@ interface LearningPathProps {
 }
 
 export function LearningPath({ steps, currentStep, completedSteps, onStepClick }: LearningPathProps) {
+  const [collapsed, setCollapsed] = useState(true);
+
+  const currentStepDef = steps.find((s) => s.id === currentStep);
+  const CurrentIcon = currentStepDef?.icon;
+
+  // ═══ 折叠态 — 紧凑药丸 ═══
+  if (collapsed) {
+    return (
+      <div className="flex items-center justify-center px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          className="group inline-flex items-center gap-2 rounded-full bg-muted/40 hover:bg-muted/70 backdrop-blur-sm border border-border/30 px-4 py-1.5 transition-all duration-200"
+          title="展开学习路径"
+        >
+          {CurrentIcon && (
+            <CurrentIcon className="h-3.5 w-3.5 text-primary/70 group-hover:text-primary transition-colors" />
+          )}
+          <span className="text-[11px] font-medium text-foreground/70 group-hover:text-foreground transition-colors">
+            {currentStepDef?.label ?? ""}
+          </span>
+          <span className="text-[10px] text-muted-foreground/40 tabular-nums">
+            {currentStep}/{steps.length}
+          </span>
+          <ChevronDown className="h-3 w-3 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors" />
+        </button>
+      </div>
+    );
+  }
+
+  // ═══ 展开态 — 完整路径 ═══
   return (
-    <nav className="flex items-center justify-center gap-0 px-3 md:px-6 py-3 md:py-4 overflow-x-auto">
+    <nav className="relative flex items-center justify-center gap-0 px-3 md:px-6 py-3 md:py-4 overflow-x-auto">
       {steps.map((step, idx) => {
         const isCompleted = completedSteps.has(step.id);
         const isActive = currentStep === step.id;
@@ -83,6 +115,16 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
           </div>
         );
       })}
+
+      {/* 收起按钮 — 右侧悬浮 */}
+      <button
+        type="button"
+        onClick={() => setCollapsed(true)}
+        className="absolute right-2 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full bg-muted/40 hover:bg-muted/70 text-muted-foreground/40 hover:text-foreground transition-all"
+        title="收起学习路径"
+      >
+        <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+      </button>
     </nav>
   );
 }

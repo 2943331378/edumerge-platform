@@ -17,6 +17,10 @@ interface Props {
   embedded?: boolean;
   onGenerated?: () => void;
   onContextChange?: (hint: string) => void;
+  /** 大纲选中的章节 IDs，从 DocumentOutlineView 传入 */
+  selectedOutlineSections?: string[];
+  /** 大纲触发生成信号，counter 变化时自动触发 */
+  generateTrigger?: { type: string; counter: number };
 }
 
 const markdownComponents: Components = {
@@ -48,7 +52,7 @@ const markdownComponents: Components = {
   ),
 };
 
-export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onContextChange }: Props) {
+export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onContextChange, selectedOutlineSections, generateTrigger }: Props) {
   const [note, setNote] = useState<StudyNoteRecord | null>(null);
   const [history, setHistory] = useState<StudyNoteRecord[]>([]);
   const [activeVersionIdx, setActiveVersionIdx] = useState(0);
@@ -119,6 +123,15 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     abortRef.current = null;
     setGenerating(false);
   };
+
+  // 从大纲页面跳转过来时自动触发生成
+  const triggerRef = useRef(0);
+  useEffect(() => {
+    if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "note") {
+      triggerRef.current = generateTrigger.counter;
+      requestAnimationFrame(() => handleGenerate());
+    }
+  }, [generateTrigger?.counter]);
 
   const cancelGeneration = () => {
     if (abortRef.current) {
