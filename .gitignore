@@ -39,4 +39,4 @@ frontend.zip
 
 # RAG 评估生成输出（可重新生成）
 scripts/eval_results.json
-scripts/eval_report.md
+scripts/eval_report.md.claude/

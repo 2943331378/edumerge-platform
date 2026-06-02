@@ -1,0 +1,10 @@
+# 减小 Docker 构建上下文，避免上传 node_modules
+node_modules
+.next
+.git
+*.md
+.env*
+frontend-standalone.tar.gz
+.turbo
+coverage
+.DS_Store
