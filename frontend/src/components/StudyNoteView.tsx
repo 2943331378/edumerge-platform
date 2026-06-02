@@ -4,11 +4,11 @@ import { useEffect, useState, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { BookOpenCheck, Clipboard, Download, NotebookText, RotateCw, Sparkles } from "lucide-react";
+import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { StudyNoteRecord } from "@/lib/api";
-import { generateStudyNote, getStudyNote, listNoteHistory } from "@/lib/api";
+import { generateStudyNote, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -60,6 +60,11 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
   const [generating, setGenerating] = useState(false);
   const [requirements, setRequirements] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+
+  // 编辑模式状态
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const isReady = docStatus === "COMPLETED";
   const generatedAt = note?.createdAt ? new Date(note.createdAt).toLocaleString("zh-CN") : "";
@@ -166,6 +171,32 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     URL.revokeObjectURL(url);
   };
 
+  const handleStartEdit = () => {
+    if (!note?.content) return;
+    setEditContent(note.content);
+    setEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setEditing(false);
+    setEditContent("");
+  };
+
+  const handleSave = async () => {
+    if (!note?.id || saving) return;
+    setSaving(true);
+    try {
+      const updated = await updateStudyNote(note.id, { content: editContent });
+      setNote(updated);
+      setEditing(false);
+      setEditContent("");
+      toast.success("笔记已保存");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "保存失败");
+    }
+    setSaving(false);
+  };
+
   if (!docId) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -197,8 +228,12 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
             </div>
           </div>
         <div className="flex items-center gap-2">
-          {note?.content && (
+          {note?.content && !editing && (
             <>
+              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleStartEdit}>
+                <Pencil className="h-3.5 w-3.5" />
+                编辑
+              </Button>
               <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleCopy}>
                 <Clipboard className="h-3.5 w-3.5" />
                 复制
@@ -206,6 +241,18 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
               <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleDownload}>
                 <Download className="h-3.5 w-3.5" />
                 导出
+              </Button>
+            </>
+          )}
+          {editing && (
+            <>
+              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleCancelEdit}>
+                <X className="h-3.5 w-3.5" />
+                取消
+              </Button>
+              <Button size="sm" className="h-8 rounded-xl gap-1.5" onClick={handleSave} disabled={saving}>
+                <Save className="h-3.5 w-3.5" />
+                {saving ? "保存中..." : "保存"}
               </Button>
             </>
           )}
@@ -288,11 +335,22 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
           <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
             <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
               <CardContent className="p-6 sm:p-8">
-                <article className="max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                    {note.content}
-                  </ReactMarkdown>
-                </article>
+                {editing ? (
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="w-full min-h-[60vh] bg-transparent text-sm leading-7 text-foreground/85 outline-none resize-y font-mono"
+                    spellCheck={false}
+                    aria-label="编辑笔记内容"
+                    placeholder="在此编辑 Markdown 笔记内容..."
+                  />
+                ) : (
+                  <article className="max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {note.content}
+                    </ReactMarkdown>
+                  </article>
+                )}
               </CardContent>
             </Card>
 

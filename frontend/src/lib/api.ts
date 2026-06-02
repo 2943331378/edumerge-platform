@@ -278,6 +278,13 @@ export async function generateStudyNote(docId: number, requirements?: string, si
   });
 }
 
+export async function updateStudyNote(id: number, data: { content?: string; title?: string }): Promise<StudyNoteRecord> {
+  return request<StudyNoteRecord>(`/notes/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
 // ===== 卡片组 (Deck) =====
 
 export interface DeckRecord {

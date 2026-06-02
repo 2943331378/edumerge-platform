@@ -53,6 +53,21 @@ public class StudyNoteController {
         return Result.success(list);
     }
 
+    @PutMapping("/{id}")
+    public Result<Map<String, Object>> update(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        String content = body.get("content");
+        String title = body.get("title");
+        if (content == null && title == null) {
+            return Result.fail("content 和 title 不能同时为空");
+        }
+        try {
+            StudyNote updated = studyNoteService.update(id, content, title);
+            return Result.success(toMap(updated));
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
     @PostMapping("/generate")
     public Result<Map<String, Object>> generate(@RequestBody Map<String, String> body) {
         String docIdStr = body.get("docId");

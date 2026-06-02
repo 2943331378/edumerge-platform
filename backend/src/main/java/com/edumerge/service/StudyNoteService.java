@@ -50,6 +50,23 @@ public class StudyNoteService {
         return note;
     }
 
+    public StudyNote update(Long id, String content, String title) {
+        StudyNote note = studyNoteMapper.selectById(id);
+        if (note == null) {
+            throw new IllegalArgumentException("笔记不存在: " + id);
+        }
+        if (content != null) {
+            note.setContent(content);
+        }
+        if (title != null) {
+            note.setTitle(title);
+        }
+        note.setUpdatedAt(java.time.LocalDateTime.now());
+        studyNoteMapper.updateById(note);
+        log.info("学习笔记已更新: id={}", id);
+        return note;
+    }
+
     public void deleteByDocId(Long docId) {
         studyNoteMapper.delete(
                 new LambdaQueryWrapper<StudyNote>()
