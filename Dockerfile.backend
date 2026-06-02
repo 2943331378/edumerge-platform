@@ -1,0 +1,39 @@
+# ===== EduMerge 后端 Dockerfile — 多阶段构建 =====
+# 构建: docker build -f Dockerfile.backend -t edumerge-backend ../backend
+
+# ---- Stage 1: Maven 构建 ----
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+
+# 先复制 pom.xml 以利用 Docker 缓存层
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+
+# 复制源码并构建
+COPY src ./src
+RUN mvn clean package -DskipTests -B
+
+# ---- Stage 2: JRE 运行 ----
+FROM eclipse-temurin:17-jre-alpine AS runner
+WORKDIR /app
+
+# 安装 Tesseract OCR (中英文, 用于扫描版 PDF 处理)
+RUN apk add --no-cache \
+    tesseract-ocr \
+    tesseract-ocr-data-chi_sim \
+    tesseract-ocr-data-eng \
+    curl
+
+# 创建日志目录
+RUN mkdir -p /var/log/edumerge
+
+# 从构建阶段复制 JAR
+COPY --from=builder /build/target/edumerge-backend-*.jar app.jar
+
+EXPOSE 8085
+
+# JVM 参数: 内存自适应、G1GC、UTF-8 编码
+ENTRYPOINT ["sh", "-c", "java \
+    -Dfile.encoding=UTF-8 \
+    $JAVA_OPTS \
+    -jar app.jar"]

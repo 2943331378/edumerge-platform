@@ -1,0 +1,33 @@
+# ===== EduMerge 前端 Dockerfile — 纯 Linux 构建 =====
+# 构建: docker build -f Dockerfile.frontend -t edumerge-frontend ../frontend
+
+# ---- Stage 1: Debian Node.js 构建 ----
+FROM node:20-slim AS builder
+WORKDIR /build
+
+COPY package.json package-lock.json* ./
+RUN npm config set registry https://registry.npmmirror.com && npm ci
+
+COPY . .
+# 构建时可由 compose 传入，默认 /api（宝塔 Nginx 同源反代）
+ARG NEXT_PUBLIC_API_BASE=/api
+ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
+ENV NODE_OPTIONS="--max-old-space-size=1536"
+# 使用 npm run build，避免 node_modules/.bin/next 权限问题
+RUN npm run build
+
+# ---- Stage 2: 运行 (standalone) ----
+FROM node:20-slim AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+COPY --from=builder /build/next.config.ts ./
+COPY --from=builder /build/public ./public
+COPY --from=builder /build/.next/standalone ./
+COPY --from=builder /build/.next/static ./.next/static
+
+EXPOSE 3000
+CMD ["node", "server.js"]

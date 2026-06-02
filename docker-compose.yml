@@ -1,0 +1,227 @@
+version: '3.8'
+
+# ============================================================
+# EduMerge 生产部署 — 2026 大数据要素素质大赛
+# 启动: docker compose up -d
+# 查看: docker compose ps
+# 停止: docker compose down
+# ============================================================
+
+services:
+  # ===== MySQL 8.0 =====
+  mysql:
+    image: mysql:8.0
+    container_name: edumerge-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-edumerge_root_2026}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-edumerge}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-edumerge_root_2026}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - edumerge-network
+
+  # ===== Redis 7 =====
+  redis:
+    image: redis:7-alpine
+    container_name: edumerge-redis
+    restart: unless-stopped
+    command: >
+      sh -c "redis-server${REDIS_PASSWORD:+ --requirepass $$REDIS_PASSWORD}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - edumerge-network
+
+  # ===== RabbitMQ =====
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: edumerge-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-edumerge}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-edumerge_mq_2026}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - edumerge-network
+
+  # ===== Etcd (Milvus 元数据存储) =====
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: edumerge-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - etcd_data:/etcd
+    command: >
+      etcd
+      -advertise-client-urls=http://127.0.0.1:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - edumerge-network
+
+  # ===== MinIO (Milvus 对象存储) =====
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: edumerge-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - edumerge-network
+
+  # ===== Milvus 向量数据库 =====
+  milvus-standalone:
+    image: milvusdb/milvus:v2.4.4
+    container_name: edumerge-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    networks:
+      - edumerge-network
+
+  # ===== Spring Boot 后端 =====
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../Dockerfile.backend
+    container_name: edumerge-backend
+    restart: unless-stopped
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-edumerge}
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-edumerge_root_2026}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-edumerge}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-edumerge_mq_2026}
+      - MILVUS_HOST=milvus-standalone
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - AI_API_KEY=${AI_API_KEY}
+      - SERVER_PORT=8085
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+      - APP_UPLOAD_DIR=/data/uploads
+      - TESSERACT_DATA_PATH=/usr/share/tessdata
+      - JAVA_OPTS=-Xms512m -Xmx1024m -XX:+UseG1GC
+    volumes:
+      - uploads:/data/uploads
+      - logs:/var/log/edumerge
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_healthy
+    networks:
+      - edumerge-network
+
+  # ===== Next.js 前端 =====
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+      args:
+        - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-/api}
+    container_name: edumerge-frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    depends_on:
+      - backend
+    networks:
+      - edumerge-network
+
+  # ===== Nginx 反向代理 =====
+  nginx:
+    image: nginx:alpine
+    container_name: edumerge-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - edumerge-network
+
+volumes:
+  mysql_data:
+  redis_data:
+  rabbitmq_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  uploads:
+  logs:
+
+networks:
+  edumerge-network:
+    driver: bridge
