@@ -14,6 +14,19 @@ frontend/.env* # 忽略所有环境变量文件！
 .DS_Store
 *.log
 
+# Claude Code / IDE 本地配置
+.claude/settings.local.json
+.claude/worktrees/
+.codegraph/
+.cursor/
+
+# 根目录环境变量（含密钥）
+.env.production
+.env.baota
+
+# TypeScript 构建缓存
+*.tsbuildinfo
+
 # 本地一次性 SSH 部署脚本（勿提交）
 scripts/_ssh_*.py
 
