@@ -5,7 +5,9 @@ import { cn } from "@/lib/utils";
 import {
   getStats,
   getStatsReport,
+  getLearningStats,
   type StatsResponse,
+  type LearningStatsResponse,
 } from "@/lib/api";
 import {
   FileText,
@@ -19,10 +21,14 @@ import {
   Loader2,
   FileWarning,
   Zap,
+  Flame,
+  BookOpen,
+  Trophy,
 } from "lucide-react";
 
 export function StatsDashboard() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [learning, setLearning] = useState<LearningStatsResponse | null>(null);
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
@@ -31,10 +37,15 @@ export function StatsDashboard() {
     let cancelled = false;
     async function load() {
       try {
-        const [s, r] = await Promise.all([getStats(), getStatsReport()]);
+        const [s, r, l] = await Promise.all([
+          getStats(),
+          getStatsReport(),
+          getLearningStats().catch(() => null),
+        ]);
         if (!cancelled) {
           setStats(s);
           setReport(r.content);
+          setLearning(l);
         }
       } catch {
         /* ignore */
@@ -145,6 +156,99 @@ export function StatsDashboard() {
                 color="purple"
                 highlight
               />
+            </div>
+          </section>
+        )}
+
+        {/* 学习行为统计 */}
+        {learning && (
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <BookOpen className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">学习行为</h3>
+              <span className="text-[10px] text-muted-foreground/60">个人学习数据</span>
+            </div>
+
+            {/* 今日概况 + 连续天数 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <MetricCard
+                icon={Layers}
+                label="今日复习"
+                value={String(learning.today.flashcardReviews)}
+                sub="张卡片"
+                color="blue"
+              />
+              <MetricCard
+                icon={Target}
+                label="今日测验"
+                value={String(learning.today.quizAttempts)}
+                sub="次"
+                color="green"
+              />
+              <MetricCard
+                icon={TrendingUp}
+                label="今日正确率"
+                value={learning.today.totalQuestionsAnswered > 0 ? `${learning.today.quizAccuracy}%` : "-"}
+                sub={learning.today.totalQuestionsAnswered > 0 ? `${learning.today.totalCorrect}/${learning.today.totalQuestionsAnswered}` : "暂无数据"}
+                color="emerald"
+              />
+              <MetricCard
+                icon={Flame}
+                label="连续学习"
+                value={String(learning.allTime.streakDays)}
+                sub="天"
+                color="purple"
+                highlight={learning.allTime.streakDays >= 3}
+              />
+            </div>
+
+            {/* 近 7 天复习趋势 */}
+            <div className="rounded-xl border border-border/50 bg-card p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-foreground/70">近 7 天复习趋势</span>
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
+                    <span className="inline-block h-2 w-2 rounded-sm bg-blue-400" />卡片
+                  </span>
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
+                    <span className="inline-block h-2 w-2 rounded-sm bg-emerald-400" />正确率
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-end gap-2 h-32">
+                {learning.weekly.map((day) => {
+                  const maxReviews = Math.max(...learning.weekly.map(d => d.flashcardReviews), 1);
+                  const reviewH = (day.flashcardReviews / maxReviews) * 100;
+                  const dayLabel = day.date.slice(5); // MM-DD
+                  return (
+                    <div key={day.date} className="flex-1 flex flex-col items-center gap-1">
+                      <div className="relative w-full flex flex-col items-center" style={{ height: "100px" }}>
+                        {/* 正确率背景条 */}
+                        {day.quizAccuracy > 0 && (
+                          <div
+                            className="absolute bottom-0 w-full rounded-t-sm bg-emerald-200 dark:bg-emerald-900/30 opacity-40"
+                            style={{ height: `${day.quizAccuracy}%` }}
+                          />
+                        )}
+                        {/* 复习卡片条 */}
+                        <div
+                          className="absolute bottom-0 w-full rounded-t-sm bg-blue-400 dark:bg-blue-500 transition-all duration-500"
+                          style={{ height: `${Math.max(reviewH, day.flashcardReviews > 0 ? 8 : 0)}%` }}
+                        />
+                      </div>
+                      <span className="text-[9px] text-muted-foreground/40">{dayLabel}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between mt-2 pt-2 border-t border-border/30">
+                <span className="text-[10px] text-muted-foreground/50">
+                  7 天累计: {learning.weekly.reduce((s, d) => s + d.flashcardReviews, 0)} 张卡片
+                </span>
+                <span className="text-[10px] text-muted-foreground/50">
+                  累计 {learning.allTime.totalFlashcardReviews} 张 · {learning.allTime.totalQuizAttempts} 次测验
+                </span>
+              </div>
             </div>
           </section>
         )}

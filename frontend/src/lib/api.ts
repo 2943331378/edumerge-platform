@@ -531,6 +531,32 @@ export async function getStatsReport(): Promise<{ format: string; title: string;
   return request<{ format: string; title: string; content: string }>("/stats/report");
 }
 
+export interface LearningStatsResponse {
+  today: {
+    flashcardReviews: number;
+    quizAttempts: number;
+    quizAccuracy: number;
+    totalQuestionsAnswered: number;
+    totalCorrect: number;
+  };
+  weekly: {
+    date: string;
+    flashcardReviews: number;
+    quizAttempts: number;
+    quizAccuracy: number;
+  }[];
+  allTime: {
+    totalFlashcardReviews: number;
+    totalQuizAttempts: number;
+    avgQuizAccuracy: number;
+    streakDays: number;
+  };
+}
+
+export async function getLearningStats(): Promise<LearningStatsResponse> {
+  return request<LearningStatsResponse>("/stats/learning");
+}
+
 // ===== FlowNote 持续学习日志 =====
 
 export interface FlowNoteItem {

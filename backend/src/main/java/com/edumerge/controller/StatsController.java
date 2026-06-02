@@ -1,6 +1,7 @@
 package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.LearningStatsResponse;
 import com.edumerge.dto.StatsResponse;
 import com.edumerge.service.StatsService;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +53,16 @@ public class StatsController {
                 "title", "EduMerge 数据素质自评报告",
                 "content", markdown
         ));
+    }
+
+    /**
+     * GET /api/stats/learning — 个人学习行为统计
+     * 今日复习/测验、近 7 天趋势、累计统计、连续学习天数
+     */
+    @GetMapping("/learning")
+    public Result<LearningStatsResponse> learningStats() {
+        LearningStatsResponse resp = statsService.calculateLearningStats();
+        return Result.success(resp);
     }
 
     /**

@@ -1,14 +1,20 @@
 package com.edumerge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.edumerge.dto.LearningStatsResponse;
 import com.edumerge.dto.StatsResponse;
 import com.edumerge.entity.*;
 import com.edumerge.mapper.*;
+import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -33,6 +39,8 @@ public class StatsService {
     private final FlashcardMapper flashcardMapper;
     private final QuizMapper quizMapper;
     private final ChatHistoryMapper chatHistoryMapper;
+    private final FlashcardReviewLogMapper flashcardReviewLogMapper;
+    private final QuizAttemptMapper quizAttemptMapper;
 
     /**
      * 评测指标内存存储 — 由 evaluate_rag.py 推送, 重启后清空
@@ -48,7 +56,9 @@ public class StatsService {
                         StudyNoteMapper studyNoteMapper,
                         FlashcardMapper flashcardMapper,
                         QuizMapper quizMapper,
-                        ChatHistoryMapper chatHistoryMapper) {
+                        ChatHistoryMapper chatHistoryMapper,
+                        FlashcardReviewLogMapper flashcardReviewLogMapper,
+                        QuizAttemptMapper quizAttemptMapper) {
         this.documentMapper = documentMapper;
         this.documentChunkMapper = documentChunkMapper;
         this.cardDeckMapper = cardDeckMapper;
@@ -57,6 +67,8 @@ public class StatsService {
         this.flashcardMapper = flashcardMapper;
         this.quizMapper = quizMapper;
         this.chatHistoryMapper = chatHistoryMapper;
+        this.flashcardReviewLogMapper = flashcardReviewLogMapper;
+        this.quizAttemptMapper = quizAttemptMapper;
     }
 
     /**
@@ -283,5 +295,134 @@ public class StatsService {
                 g.getAuditPassRate() * 100,
                 g.getTraceableResponseRate() * 100
         );
+    }
+
+    /**
+     * 计算个人学习行为统计
+     * 数据来源: flashcard_review_logs (闪卡复习) + quiz_attempts (测验答题)
+     */
+    public LearningStatsResponse calculateLearningStats() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        LocalDateTime todayStart = LocalDateTime.of(LocalDate.now(), LocalTime.MIN);
+        LocalDateTime weekAgo = todayStart.minusDays(6);
+        DateTimeFormatter dayFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        // ===== 今日统计 =====
+        List<FlashcardReviewLog> todayReviews = flashcardReviewLogMapper.selectList(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId)
+                        .ge(FlashcardReviewLog::getCreatedAt, todayStart));
+        List<QuizAttempt> todayAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, todayStart));
+        long todayTotalQ = todayAttempts.stream().mapToLong(a -> a.getTotalQuestions() != null ? a.getTotalQuestions() : 0).sum();
+        long todayCorrect = todayAttempts.stream().mapToLong(a -> a.getCorrectCount() != null ? a.getCorrectCount() : 0).sum();
+        LearningStatsResponse.TodayStats today = LearningStatsResponse.TodayStats.builder()
+                .flashcardReviews(todayReviews.size())
+                .quizAttempts(todayAttempts.size())
+                .quizAccuracy(todayTotalQ > 0 ? Math.round(todayCorrect * 1000.0 / todayTotalQ) / 10.0 : 0)
+                .totalQuestionsAnswered(todayTotalQ)
+                .totalCorrect(todayCorrect)
+                .build();
+
+        // ===== 近 7 天每日统计 =====
+        List<FlashcardReviewLog> weekReviews = flashcardReviewLogMapper.selectList(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId)
+                        .ge(FlashcardReviewLog::getCreatedAt, weekAgo));
+        List<QuizAttempt> weekAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, weekAgo));
+
+        // 按日期分组
+        Map<String, Long> reviewByDay = new LinkedHashMap<>();
+        Map<String, long[]> quizByDay = new LinkedHashMap<>(); // [totalQ, correct]
+        for (int i = 6; i >= 0; i--) {
+            String day = LocalDate.now().minusDays(i).format(dayFmt);
+            reviewByDay.put(day, 0L);
+            quizByDay.put(day, new long[]{0, 0});
+        }
+        for (FlashcardReviewLog r : weekReviews) {
+            if (r.getCreatedAt() == null) continue;
+            String day = r.getCreatedAt().toLocalDate().format(dayFmt);
+            reviewByDay.merge(day, 1L, Long::sum);
+        }
+        for (QuizAttempt a : weekAttempts) {
+            if (a.getCreatedAt() == null) continue;
+            String day = a.getCreatedAt().toLocalDate().format(dayFmt);
+            long[] stats = quizByDay.get(day);
+            if (stats != null) {
+                stats[0] += a.getTotalQuestions() != null ? a.getTotalQuestions() : 0;
+                stats[1] += a.getCorrectCount() != null ? a.getCorrectCount() : 0;
+            }
+        }
+        List<LearningStatsResponse.DailyStats> weekly = new ArrayList<>();
+        for (String day : reviewByDay.keySet()) {
+            long[] qStats = quizByDay.getOrDefault(day, new long[]{0, 0});
+            weekly.add(LearningStatsResponse.DailyStats.builder()
+                    .date(day)
+                    .flashcardReviews(reviewByDay.getOrDefault(day, 0L))
+                    .quizAttempts(weekAttempts.stream().filter(a ->
+                            a.getCreatedAt() != null && a.getCreatedAt().toLocalDate().format(dayFmt).equals(day)).count())
+                    .quizAccuracy(qStats[0] > 0 ? Math.round(qStats[1] * 1000.0 / qStats[0]) / 10.0 : 0)
+                    .build());
+        }
+
+        // ===== 累计统计 =====
+        long totalReviews = flashcardReviewLogMapper.selectCount(
+                new LambdaQueryWrapper<FlashcardReviewLog>().eq(FlashcardReviewLog::getUserId, userId));
+        List<QuizAttempt> allAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>().eq(QuizAttempt::getUserId, userId));
+        long allTotalQ = allAttempts.stream().mapToLong(a -> a.getTotalQuestions() != null ? a.getTotalQuestions() : 0).sum();
+        long allCorrect = allAttempts.stream().mapToLong(a -> a.getCorrectCount() != null ? a.getCorrectCount() : 0).sum();
+
+        // 连续学习天数 (从今天往前数，有 review 或 attempt 的天)
+        Set<String> activeDays = new HashSet<>();
+        for (FlashcardReviewLog r : weekReviews) {
+            if (r.getCreatedAt() != null) activeDays.add(r.getCreatedAt().toLocalDate().format(dayFmt));
+        }
+        for (QuizAttempt a : weekAttempts) {
+            if (a.getCreatedAt() != null) activeDays.add(a.getCreatedAt().toLocalDate().format(dayFmt));
+        }
+        // 也检查更早的记录来计算 streak
+        LocalDateTime monthAgo = todayStart.minusDays(29);
+        List<FlashcardReviewLog> monthReviews = flashcardReviewLogMapper.selectList(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId)
+                        .ge(FlashcardReviewLog::getCreatedAt, monthAgo));
+        List<QuizAttempt> monthAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, monthAgo));
+        for (FlashcardReviewLog r : monthReviews) {
+            if (r.getCreatedAt() != null) activeDays.add(r.getCreatedAt().toLocalDate().format(dayFmt));
+        }
+        for (QuizAttempt a : monthAttempts) {
+            if (a.getCreatedAt() != null) activeDays.add(a.getCreatedAt().toLocalDate().format(dayFmt));
+        }
+        int streak = 0;
+        for (int i = 0; i < 30; i++) {
+            String day = LocalDate.now().minusDays(i).format(dayFmt);
+            if (activeDays.contains(day)) streak++;
+            else break;
+        }
+
+        LearningStatsResponse.AllTimeStats allTime = LearningStatsResponse.AllTimeStats.builder()
+                .totalFlashcardReviews(totalReviews)
+                .totalQuizAttempts(allAttempts.size())
+                .avgQuizAccuracy(allTotalQ > 0 ? Math.round(allCorrect * 1000.0 / allTotalQ) / 10.0 : 0)
+                .streakDays(streak)
+                .build();
+
+        log.info("[学习统计] userId={}, 今日复习={}, 今日测验={}, 连续{}天",
+                userId, today.getFlashcardReviews(), today.getQuizAttempts(), streak);
+
+        return LearningStatsResponse.builder()
+                .today(today)
+                .weekly(weekly)
+                .allTime(allTime)
+                .build();
     }
 }
