@@ -13,13 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 思维导图 Controller — 懒生成策略: 首次请求触发 AI 生成, 后续返回缓存
- */
 @Slf4j
 @RestController
 @RequestMapping("/mindmap")
@@ -41,31 +39,49 @@ public class MindMapController {
         this.documentService = documentService;
     }
 
-    @GetMapping
-    public Result<Map<String, Object>> getMindMap(@RequestParam Long docId) {
-        // 1. 检查是否已有思维导图 deck
+    /** 查询文档的所有思维导图列表 */
+    @GetMapping("/list")
+    public Result<List<Map<String, Object>>> listMindMaps(@RequestParam Long docId) {
         List<CardDeck> decks = cardDeckService.listByDocIdAndType(docId, "MIND_MAP");
-        if (!decks.isEmpty()) {
-            MindMap existing = mindMapService.getByDocId(docId);
-            if (existing != null) {
-                CardDeck deck = decks.get(0);
-                log.info("返回缓存思维导图: docId={}, deckId={}", docId, deck.getId());
-                return Result.success(toMap(existing, deck));
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (CardDeck deck : decks) {
+            MindMap mm = mindMapService.getByDeckId(deck.getId());
+            if (mm != null) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("deckId", mm.getDeckId());
+                item.put("docId", mm.getDocId());
+                item.put("title", deck.getTitle());
+                item.put("createdAt", deck.getCreatedAt() != null ? deck.getCreatedAt().toString() : null);
+                result.add(item);
             }
         }
+        return Result.success(result);
+    }
 
-        // 2. 无缓存 → AI 生成
+    /** 获取指定 deckId 的思维导图内容 */
+    @GetMapping("/detail")
+    public Result<Map<String, Object>> getMindMapDetail(@RequestParam Long deckId) {
+        MindMap mm = mindMapService.getByDeckId(deckId);
+        if (mm == null) return Result.fail("思维导图不存在");
+        CardDeck deck = cardDeckService.getById(mm.getDeckId());
+        return Result.success(toMap(mm, deck));
+    }
+
+    /** 生成新的思维导图 (支持章节上下文) */
+    @PostMapping("/generate")
+    public Result<Map<String, Object>> generateMindMap(@RequestParam Long docId,
+                                                       @RequestParam(required = false) String sectionContext) {
         Document doc = documentService.getById(docId);
-        if (doc == null) {
-            return Result.fail("文档不存在: " + docId);
-        }
+        if (doc == null) return Result.fail("文档不存在: " + docId);
         String docUuid = doc.getDocumentId();
         if (docUuid == null || docUuid.isBlank()) {
-            return Result.fail("文档尚未完成向量化, 无法生成思维导图: " + docId);
+            return Result.fail("文档尚未完成向量化, 无法生成思维导图");
         }
 
-        log.info("开始生成思维导图: docId={}, docUuid={}", docId, docUuid);
-        AiMindMapGenerator.MindMapResult genResult = aiMindMapGenerator.generate(docId, SecurityUtils.getCurrentUserId(), docUuid);
+        log.info("开始生成思维导图: docId={}, sectionContext={}", docId,
+                sectionContext != null ? sectionContext.substring(0, Math.min(100, sectionContext.length())) : "null");
+        AiMindMapGenerator.MindMapResult genResult = aiMindMapGenerator.generate(
+                docId, SecurityUtils.getCurrentUserId(), docUuid, sectionContext);
 
         if (!genResult.isSuccess()) {
             return Result.fail("思维导图生成失败: 未从文档中提取到足够的内容");
@@ -80,11 +96,34 @@ public class MindMapController {
         return Result.success(data);
     }
 
+    /** 删除指定思维导图 */
+    @DeleteMapping("/{deckId}")
+    public Result<Void> deleteMindMap(@PathVariable Long deckId) {
+        mindMapService.deleteByDeckId(deckId);
+        cardDeckService.delete(deckId);
+        log.info("思维导图已删除: deckId={}", deckId);
+        return Result.success(null);
+    }
+
+    /** 兼容旧接口: GET /mindmap?docId= → 返回最新一条或自动生成 */
+    @GetMapping
+    public Result<Map<String, Object>> getMindMap(@RequestParam Long docId) {
+        List<CardDeck> decks = cardDeckService.listByDocIdAndType(docId, "MIND_MAP");
+        if (!decks.isEmpty()) {
+            MindMap existing = mindMapService.getByDeckId(decks.get(0).getId());
+            if (existing != null) {
+                return Result.success(toMap(existing, decks.get(0)));
+            }
+        }
+        // 无缓存 → 自动生成
+        return generateMindMap(docId, null);
+    }
+
     private Map<String, Object> toMap(MindMap mindMap, CardDeck deck) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("deckId", mindMap.getDeckId());
         data.put("docId", mindMap.getDocId());
-        data.put("title", deck.getTitle());
+        data.put("title", deck != null ? deck.getTitle() : "思维导图");
         data.put("content", mindMap.getContent());
         data.put("createdAt", mindMap.getCreatedAt() != null ? mindMap.getCreatedAt().toString() : null);
         return data;

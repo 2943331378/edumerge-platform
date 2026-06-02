@@ -1,5 +1,6 @@
 package com.edumerge.mq.listener;
 
+import com.edumerge.ai.AiOutlineGenerator;
 import com.edumerge.config.RabbitMQConfig;
 import com.edumerge.entity.DocumentChunk;
 import com.edumerge.mapper.DocumentChunkMapper;
@@ -59,6 +60,7 @@ public class DocumentListener {
     private final MilvusEmbeddingStore embeddingStore;
     private final DocumentService documentService;
     private final DocumentChunkMapper documentChunkMapper;
+    private final AiOutlineGenerator outlineGenerator;
 
     @Value("${app.document.ocr.enabled:true}")
     private boolean ocrEnabled;
@@ -75,11 +77,13 @@ public class DocumentListener {
     public DocumentListener(EmbeddingModel embeddingModel,
                             MilvusEmbeddingStore embeddingStore,
                             DocumentService documentService,
-                            DocumentChunkMapper documentChunkMapper) {
+                            DocumentChunkMapper documentChunkMapper,
+                            AiOutlineGenerator outlineGenerator) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.documentService = documentService;
         this.documentChunkMapper = documentChunkMapper;
+        this.outlineGenerator = outlineGenerator;
     }
 
     @RabbitListener(queues = RabbitMQConfig.EMBEDDING_QUEUE)
@@ -173,6 +177,21 @@ public class DocumentListener {
 
             // 7. 更新 MySQL 文档状态为 COMPLETED
             updateDocStatus(filePath, "COMPLETED", enrichedSegments.size(), embeddings.size(), null);
+
+            // 8. 异步触发文档大纲生成 (AI 识别文档类型 + 章节结构, 不阻塞消费者线程)
+            if (doc != null) {
+                final Long outlineDocId = doc.getId();
+                final Long outlineUserId = doc.getUserId();
+                final int outlineChunkCount = enrichedSegments.size();
+                java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try {
+                        outlineGenerator.generateAndSave(outlineDocId, outlineUserId, outlineChunkCount);
+                        log.info("文档大纲生成完成: docId={}", outlineDocId);
+                    } catch (Exception e) {
+                        log.warn("文档大纲生成失败(不影响主流程): docId={}, error={}", outlineDocId, e.getMessage());
+                    }
+                });
+            }
 
         } catch (IOException e) {
             log.error("文档解析失败: documentId={}, error={}", documentId, e.getMessage(), e);

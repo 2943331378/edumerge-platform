@@ -7,6 +7,7 @@ import com.edumerge.mapper.DocumentChunkMapper;
 import com.edumerge.mapper.DocumentMapper;
 import com.edumerge.mapper.SessionMapper;
 import com.edumerge.store.MilvusEmbeddingStore;
+import com.edumerge.service.DocumentOutlineService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -24,14 +25,17 @@ public class DocumentService {
     private final DocumentChunkMapper documentChunkMapper;
     private final SessionMapper sessionMapper;
     private final MilvusEmbeddingStore milvusEmbeddingStore;
+    private final DocumentOutlineService outlineService;
 
     @Autowired
     public DocumentService(DocumentMapper documentMapper, DocumentChunkMapper documentChunkMapper,
-                           SessionMapper sessionMapper, MilvusEmbeddingStore milvusEmbeddingStore) {
+                           SessionMapper sessionMapper, MilvusEmbeddingStore milvusEmbeddingStore,
+                           DocumentOutlineService outlineService) {
         this.documentMapper = documentMapper;
         this.documentChunkMapper = documentChunkMapper;
         this.sessionMapper = sessionMapper;
         this.milvusEmbeddingStore = milvusEmbeddingStore;
+        this.outlineService = outlineService;
     }
 
     /** 创建文档记录 */
@@ -101,6 +105,9 @@ public class DocumentService {
         // 1. 删除关联会话
         sessionMapper.delete(new LambdaQueryWrapper<com.edumerge.entity.Session>()
                 .eq(com.edumerge.entity.Session::getDocId, id));
+
+        // 1.5 删除文档大纲
+        outlineService.deleteByDocId(id);
 
         // 2. 删除 Milvus 向量
         if (doc.getDocumentId() != null && !doc.getDocumentId().isBlank()) {

@@ -59,6 +59,15 @@ public class Flashcard {
     /** 最近复习时间 */
     private LocalDateTime lastReviewedAt;
 
+    /** SM-2 简易因子 (最低1.3, 默认2.5) */
+    private Double easeFactor;
+
+    /** 当前复习间隔(天), 0=新卡片未复习 */
+    private Integer reviewInterval;
+
+    /** 下次复习时间 (NULL=新卡片或已归档) */
+    private LocalDateTime nextReviewAt;
+
     @TableLogic
     private Integer deleted;
 

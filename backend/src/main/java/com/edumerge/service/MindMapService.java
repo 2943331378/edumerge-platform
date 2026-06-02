@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Slf4j
 @Service
 public class MindMapService {
@@ -25,6 +27,28 @@ public class MindMapService {
                         .eq(MindMap::getDocId, docId)
                         .orderByDesc(MindMap::getCreatedAt)
                         .last("LIMIT 1"));
+    }
+
+    /** 按文档 ID 查询所有思维导图 (最新在前) */
+    public List<MindMap> listByDocId(Long docId) {
+        return mindMapMapper.selectList(
+                new LambdaQueryWrapper<MindMap>()
+                        .eq(MindMap::getDocId, docId)
+                        .orderByDesc(MindMap::getCreatedAt));
+    }
+
+    /** 按 deckId 查询思维导图 */
+    public MindMap getByDeckId(Long deckId) {
+        return mindMapMapper.selectOne(
+                new LambdaQueryWrapper<MindMap>()
+                        .eq(MindMap::getDeckId, deckId));
+    }
+
+    /** 删除指定 deck 的思维导图 */
+    public void deleteByDeckId(Long deckId) {
+        mindMapMapper.delete(
+                new LambdaQueryWrapper<MindMap>()
+                        .eq(MindMap::getDeckId, deckId));
     }
 
     /** 创建思维导图记录 */

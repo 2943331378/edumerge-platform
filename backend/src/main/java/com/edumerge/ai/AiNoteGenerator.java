@@ -14,8 +14,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Slf4j
@@ -45,8 +43,9 @@ public class AiNoteGenerator extends AiGeneratorBase {
             return StudyNoteResult.empty(docId);
         }
 
-        CardDeck deck = cardDeckService.create(docId, "NOTE");
-        String title = LocalDateTime.now().format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) + " 学习笔记";
+        // 从 Markdown 提取第一个 # 标题作为笔记标题
+        String title = extractTitle(content);
+        CardDeck deck = cardDeckService.create(docId, "NOTE", title);
         String sourceSummary = buildSourceSummary(matches);
         studyNoteService.create(docId, deck.getId(), title, content, sourceSummary, requirements);
 
@@ -109,6 +108,21 @@ public class AiNoteGenerator extends AiGeneratorBase {
         }
         int heading = trimmed.indexOf("# ");
         return heading > 0 ? trimmed.substring(heading).trim() : trimmed;
+    }
+
+    /** 从 Markdown 内容中提取第一个 # 标题 */
+    private String extractTitle(String markdown) {
+        if (markdown == null) return "学习笔记";
+        for (String line : markdown.split("\\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("# ")) {
+                String title = trimmed.substring(2).trim();
+                // 去除 Markdown 格式符号
+                title = title.replaceAll("[*`_~]", "").trim();
+                return title.isEmpty() ? "学习笔记" : title;
+            }
+        }
+        return "学习笔记";
     }
 
     private String buildSourceSummary(List<EmbeddingMatch<TextSegment>> matches) {

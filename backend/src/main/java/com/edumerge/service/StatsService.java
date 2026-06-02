@@ -9,12 +9,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 数据资产统计服务 — 2026 大数据要素素质大赛
  *
  * 【核心能力】将非结构化数据治理成果量化为可呈现的指标体系，
  * 为数据资产化、数据要素价值评估提供量化依据。
+ *
+ * 【评测指标同步】
+ * evaluate_rag.py 通过 POST /api/stats/eval 推送评测结果到此服务,
+ * 实现 "自动化评测 → 看板展示 → 自评报告" 的数据闭环。
  */
 @Slf4j
 @Service
@@ -28,6 +33,12 @@ public class StatsService {
     private final FlashcardMapper flashcardMapper;
     private final QuizMapper quizMapper;
     private final ChatHistoryMapper chatHistoryMapper;
+
+    /**
+     * 评测指标内存存储 — 由 evaluate_rag.py 推送, 重启后清空
+     * 生产环境可迁移至 Redis 或 MySQL system_logs 持久化
+     */
+    private final AtomicReference<StatsResponse.EvalMetrics> evalMetricsRef = new AtomicReference<>();
 
     @Autowired
     public StatsService(DocumentMapper documentMapper,
@@ -46,6 +57,25 @@ public class StatsService {
         this.flashcardMapper = flashcardMapper;
         this.quizMapper = quizMapper;
         this.chatHistoryMapper = chatHistoryMapper;
+    }
+
+    /**
+     * 接收评测脚本推送的 RAG 质量指标
+     * Hit Rate 基于语义空间向量对齐 (Embedding Cosine Similarity) 计算
+     */
+    public void updateEvalMetrics(double hitRate, double avgFaithfulness,
+                                  double avgCorrectness, double compositeScore,
+                                  int totalQuestions) {
+        StatsResponse.EvalMetrics metrics = StatsResponse.EvalMetrics.builder()
+                .hitRate(hitRate)
+                .avgFaithfulness(avgFaithfulness)
+                .avgCorrectness(avgCorrectness)
+                .compositeScore(compositeScore)
+                .totalQuestions(totalQuestions)
+                .build();
+        evalMetricsRef.set(metrics);
+        log.info("[数据看板] 评测指标已更新: HR={:.1%}, Faith={:.1f}/5, Corr={:.1f}/5, Composite={:.2%}",
+                hitRate, avgFaithfulness, avgCorrectness, compositeScore);
     }
 
     /**
@@ -112,11 +142,12 @@ public class StatsService {
         govMetrics.setTraceableResponseRate(
                 dataMetrics.getTotalChatExchanges() > 0 ? 1.0 : 0.0); // RAG 回答 100% 可溯源
 
-        // 组装
+        // 组装 — 包含由 evaluate_rag.py 推送的实时评测指标
         StatsResponse resp = new StatsResponse();
         resp.setDataAssetMetrics(dataMetrics);
         resp.setEfficiencyMetrics(effMetrics);
         resp.setGovernanceMetrics(govMetrics);
+        resp.setEvalMetrics(evalMetricsRef.get());  // 实时 RAG 评测指标 (语义空间向量对齐)
 
         log.info("[数据资产统计] 文档={}, 非结构化数据={}字, 卡片={}, 测验={}, 覆盖率={:.1%}",
                 completedDocs, totalChars, dataMetrics.getTotalFlashcards(),
@@ -134,6 +165,29 @@ public class StatsService {
         StatsResponse.DataAssetMetrics d = stats.getDataAssetMetrics();
         StatsResponse.EfficiencyMetrics e = stats.getEfficiencyMetrics();
         StatsResponse.GovernanceMetrics g = stats.getGovernanceMetrics();
+        StatsResponse.EvalMetrics eval = stats.getEvalMetrics();
+
+        // 评测指标行 (有实时数据则展示，否则展示说明)
+        String evalRows;
+        if (eval != null) {
+            evalRows = String.format("""
+                | 检索命中率 (Hit Rate) | **%.1f%%** | 语义空间向量对齐 (Cosine ≥ 0.75) |
+                | 内容忠实度 (Faithfulness) | **%.1f/5** | LLM-as-Judge 零幻觉验证 |
+                | 回答准确率 (Correctness) | **%.1f/5** | LLM-as-Judge 语义一致性 |
+                | 综合数据素质得分 | **%.1f%%** | 加权综合 (基于 %d 组问答) |
+                """,
+                eval.getHitRate() * 100,
+                eval.getAvgFaithfulness(),
+                eval.getAvgCorrectness(),
+                eval.getCompositeScore() * 100,
+                eval.getTotalQuestions());
+        } else {
+            evalRows = """
+                | 检索命中率 (Hit Rate) | 待评测 | 运行 evaluate_rag.py 生成 |
+                | 内容忠实度 (Faithfulness) | 待评测 | 同上 |
+                | 回答准确率 (Correctness) | 待评测 | 同上 |
+                """;
+        }
 
         return String.format("""
                 # EduMerge 数据素质自评报告
@@ -176,13 +230,13 @@ public class StatsService {
 
                 ## 三、AI 质量评测
 
-                （基于 Golden Dataset 自动化评测结果，详见 `scripts/eval_report.md`）
+                基于 Golden Dataset 自动化评测结果，采用语义空间向量对齐技术
+                (Embedding Cosine Similarity) 进行 Hit Rate 计算，
+                LLM-as-Judge 进行 Faithfulness/Correctness 评分。
 
-                | 指标 | 说明 |
-                |------|------|
-                | 检索命中率 (Hit Rate) | 向量检索能否定位到相关知识 |
-                | 内容忠实度 (Faithfulness) | AI 回答是否忠于检索内容 (零幻觉) |
-                | 回答准确率 (Correctness) | AI 回答与标准答案的语义一致性 |
+                | 指标 | 数值 | 说明 |
+                |------|------|------|
+                %s
 
                 ## 四、数据资产化成果
 
@@ -223,6 +277,7 @@ public class StatsService {
                 d.getTotalQuizzes(),
                 d.getTotalChatExchanges(),
                 e.getDataToAssetConversionRate(),
+                evalRows,
                 e.getEstimatedPrepTimeReduction(),
                 e.getEstimatedLearningEfficiencyGain(),
                 g.getAuditPassRate() * 100,

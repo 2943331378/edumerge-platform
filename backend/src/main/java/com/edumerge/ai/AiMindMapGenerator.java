@@ -43,7 +43,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
      * @param docUuid 文档 Milvus UUID (用于向量检索)
      * @return 生成结果 (含 deckId、title、content)
      */
-    public MindMapResult generate(Long docId, Long userId, String docUuid) {
+    public MindMapResult generate(Long docId, Long userId, String docUuid, String sectionContext) {
         // 步骤 1: 从 Milvus 检索文档核心内容 — 非结构化数据提取
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 20,
                 "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容 定义 原理 方法 总结 document structure headings core topic key concepts hierarchy outline main content definition principles methods summary");
@@ -57,7 +57,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         log.info("思维导图上下文构建完成: docId={}, 块数={}", docId, matches.size());
 
         // 步骤 3: 调用 LLM 生成 Markdown 思维导图 — 非结构化→结构化转化核心
-        String markdown = callLLM(context);
+        String markdown = callLLM(context, sectionContext);
         log.info("LLM 思维导图生成完成: docId={}, 长度={}", docId, markdown.length());
 
         // 步骤 4: 清理验证 — 确保输出符合 Markdown 层级格式
@@ -67,9 +67,9 @@ public class AiMindMapGenerator extends AiGeneratorBase {
             return MindMapResult.empty(docId);
         }
 
-        // 步骤 5: 持久化 — 删除旧记录, 创建 deck + mind_map
-        mindMapService.deleteByDocId(docId);
-        CardDeck deck = cardDeckService.create(docId, "MIND_MAP");
+        // 步骤 5: 持久化 — 创建 deck + mind_map (不再删除旧的)
+        String title = extractTitle(markdown);
+        CardDeck deck = cardDeckService.create(docId, "MIND_MAP", title);
         mindMapService.create(docId, deck.getId(), markdown);
 
         String createdAt = deck.getCreatedAt() != null
@@ -79,7 +79,11 @@ public class AiMindMapGenerator extends AiGeneratorBase {
     }
 
     /** 调用大模型, 使用专用 Prompt 强制输出结构化 Markdown */
-    private String callLLM(String context) {
+    private String callLLM(String context, String sectionContext) {
+        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
+                ? "\n\n# 重点关注章节\n请重点围绕以下章节生成思维导图，但保持整体结构完整:\n" + sectionContext.strip() + "\n"
+                : "";
+
         String template = """
                 你是一个严谨的 AI 知识架构师，擅长从非结构化文本中提取层级知识结构。
 
@@ -98,6 +102,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                 5. 层级之间不要有空行，保持紧凑的树状结构
                 6. 必须使用简体中文生成标题、分支和要点；如果文档是英文，请基于英文原文翻译、归纳和解释
                 7. 英文关键术语首次出现时保留英文原词，例如"个性化学习（personalized learning）"
+                {SECTION_HINT}
 
                 # 文档上下文
                 {CONTEXT}
@@ -105,7 +110,9 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                 基于以上文档内容，生成一份结构清晰的 Markdown 思维导图。
                 仅输出 Markdown 内容，严禁包含任何多余的解释文字。""";
 
-        SystemMessage system = new SystemMessage(template.replace("{CONTEXT}", context));
+        SystemMessage system = new SystemMessage(template
+                .replace("{SECTION_HINT}", sectionHint)
+                .replace("{CONTEXT}", context));
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
@@ -145,6 +152,19 @@ public class AiMindMapGenerator extends AiGeneratorBase {
     /** 验证: 必须至少包含一个 # 标题 */
     private boolean isValidMindMap(String markdown) {
         return markdown != null && !markdown.isBlank() && markdown.contains("# ");
+    }
+
+    /** 从 Markdown 提取第一个 # 标题 */
+    private String extractTitle(String markdown) {
+        if (markdown == null) return "思维导图";
+        for (String line : markdown.split("\\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("# ")) {
+                String title = trimmed.substring(2).replaceAll("[*`_~]", "").trim();
+                return title.isEmpty() ? "思维导图" : title + " 导图";
+            }
+        }
+        return "思维导图";
     }
 
     // ===== 结果封装 =====

@@ -24,6 +24,9 @@ public class StatsResponse {
     /** 治理合规指标 — 体现数据安全与可追溯性 */
     private GovernanceMetrics governanceMetrics;
 
+    /** RAG 评测指标 — 由 evaluate_rag.py 推送, 反映 AI 质量 (语义空间向量对齐) */
+    private EvalMetrics evalMetrics;
+
     @Data
     @Builder
     @AllArgsConstructor
@@ -75,5 +78,26 @@ public class StatsResponse {
         private long totalAuditLogs;
         /** 可溯源回答比例 */
         private double traceableResponseRate;
+    }
+
+    /**
+     * RAG 评测指标 — 由 evaluate_rag.py 自动化评测脚本推送
+     * Hit Rate 基于语义空间向量对齐 (Cosine Similarity) 计算
+     */
+    @Data
+    @Builder
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class EvalMetrics {
+        /** 检索命中率 (0-1) — 基于 Embedding 余弦相似度的语义匹配 */
+        private double hitRate;
+        /** 平均内容忠实度 (1-5) — LLM-as-Judge 零幻觉验证 */
+        private double avgFaithfulness;
+        /** 平均回答准确率 (1-5) — LLM-as-Judge 语义一致性 */
+        private double avgCorrectness;
+        /** 综合数据素质得分 (0-1) */
+        private double compositeScore;
+        /** 评测问题总数 */
+        private int totalQuestions;
     }
 }

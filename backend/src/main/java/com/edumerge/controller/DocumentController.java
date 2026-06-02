@@ -1,12 +1,17 @@
 package com.edumerge.controller;
 
+import com.edumerge.ai.AiOutlineGenerator;
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.OutlineResponse;
 import com.edumerge.entity.Document;
+import com.edumerge.entity.DocumentOutline;
 import com.edumerge.entity.Session;
 import com.edumerge.mq.producer.EmbeddingProducer;
 import com.edumerge.security.SecurityUtils;
+import com.edumerge.service.DocumentOutlineService;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.SessionService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,16 +38,25 @@ public class DocumentController {
     private final EmbeddingProducer embeddingProducer;
     private final DocumentService documentService;
     private final SessionService sessionService;
+    private final DocumentOutlineService outlineService;
+    private final AiOutlineGenerator outlineGenerator;
+    private final ObjectMapper objectMapper;
 
     @Autowired
     public DocumentController(@Value("${app.document.upload-dir:./uploads}") String uploadDir,
                               EmbeddingProducer embeddingProducer,
                               DocumentService documentService,
-                              SessionService sessionService) {
+                              SessionService sessionService,
+                              DocumentOutlineService outlineService,
+                              AiOutlineGenerator outlineGenerator,
+                              ObjectMapper objectMapper) {
         this.uploadDir = uploadDir;
         this.embeddingProducer = embeddingProducer;
         this.documentService = documentService;
         this.sessionService = sessionService;
+        this.outlineService = outlineService;
+        this.outlineGenerator = outlineGenerator;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -149,6 +163,71 @@ public class DocumentController {
         } catch (Exception e) {
             log.error("文档删除失败: id={}", id, e);
             return Result.fail("文档删除失败: " + e.getMessage());
+        }
+    }
+
+    // ═══════ 文档大纲 API ═══════
+
+    /**
+     * 获取文档大纲 — 返回解析后的 OutlineResponse (outline 字段为 JSON 对象而非字符串)
+     */
+    @GetMapping("/{docId}/outline")
+    public Result<OutlineResponse> getOutline(@PathVariable Long docId) {
+        Document doc = documentService.getById(docId);
+        if (doc == null) return Result.fail("文档不存在");
+
+        DocumentOutline outline = outlineService.getByDocId(docId);
+        if (outline == null) return Result.fail("文档大纲尚未生成");
+        return Result.success(OutlineResponse.from(outline, objectMapper));
+    }
+
+    /**
+     * 更新文档大纲 (用户编辑后保存)
+     * 请求体为 OutlineData JSON 对象，后程序列化为字符串存储
+     */
+    @PutMapping("/{docId}/outline")
+    public Result<OutlineResponse> updateOutline(@PathVariable Long docId, @RequestBody String body) {
+        Document doc = documentService.getById(docId);
+        if (doc == null) return Result.fail("文档不存在");
+
+        // 校验 JSON 合法性
+        try {
+            objectMapper.readTree(body);
+        } catch (Exception e) {
+            return Result.fail("大纲 JSON 格式无效: " + e.getMessage());
+        }
+
+        try {
+            DocumentOutline updated = outlineService.update(docId, body, SecurityUtils.getCurrentUserId());
+            return Result.success("大纲已保存", OutlineResponse.from(updated, objectMapper));
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 重新生成文档大纲 — 先生成成功后再删除旧大纲，避免生成失败时数据丢失
+     */
+    @PostMapping("/{docId}/outline/regenerate")
+    public Result<OutlineResponse> regenerateOutline(@PathVariable Long docId) {
+        Document doc = documentService.getById(docId);
+        if (doc == null) return Result.fail("文档不存在");
+        if (!"COMPLETED".equals(doc.getStatus())) return Result.fail("文档尚未处理完成");
+        if (doc.getChunkCount() == null || doc.getChunkCount() == 0) return Result.fail("文档无切块数据");
+
+        try {
+            // 先生成新大纲（旧大纲仍在数据库中）
+            DocumentOutline newOutline = outlineGenerator.generateAndSave(
+                    docId, SecurityUtils.getCurrentUserId(), doc.getChunkCount());
+            if (newOutline == null) return Result.fail("大纲生成失败, 请稍后重试");
+
+            // 生成成功后，删除旧版本的大纲（保留最新版本）
+            outlineService.deleteOldVersions(docId, newOutline.getVersion());
+
+            return Result.success("大纲已重新生成", OutlineResponse.from(newOutline, objectMapper));
+        } catch (Exception e) {
+            log.error("大纲重新生成失败: docId={}", docId, e);
+            return Result.fail("大纲生成失败: " + e.getMessage());
         }
     }
 }

@@ -115,7 +115,7 @@ public class AiRagService {
             String answer = response.content().text();
 
             // 直接持久化 (绕过 LangChain4j 0.28.0 ChatMemory.add 消息丢失 bug)
-            saveExchange(sessionId, documentId, docId, userMessage, answer, activityType);
+            saveExchange(sessionId, documentId, docId, userMessage, answer, activityType, matches.size());
 
             log.info("RAG 回答生成完成, 长度: {} 字符", answer.length());
             return AiRagResult.success(answer, sources);
@@ -155,7 +155,7 @@ public class AiRagService {
             String fallback = "在该材料中未找到相关内容。";
             handler.onNext(fallback);
             handler.onComplete(null);
-            saveExchange(sessionId, documentId, docId, userMessage, fallback, activityType);
+            saveExchange(sessionId, documentId, docId, userMessage, fallback, activityType, 0);
             return matches;
         }
 
@@ -165,7 +165,11 @@ public class AiRagService {
         final String finalDocId = documentId;
         final Long finalDocId2 = docId;
         final String finalActivityType = activityType;
-        final String finalContextHint = contextHint;
+        final int finalRetrievedCount = matches.size();
+        // 捕获当前线程的 SecurityContext（来自控制器的 CompletableFuture 线程），
+        // 因为 onComplete/onError 由 LLM 提供商的线程调用，不继承 ThreadLocal
+        final org.springframework.security.core.context.SecurityContext securityContext =
+                org.springframework.security.core.context.SecurityContextHolder.getContext();
         StringBuilder fullAnswer = new StringBuilder();
         StreamingResponseHandler<AiMessage> wrappedHandler = new StreamingResponseHandler<>() {
             @Override
@@ -175,15 +179,25 @@ public class AiRagService {
             }
             @Override
             public void onComplete(Response<AiMessage> response) {
-                log.info("流式生成完成, 持久化: sessionId={}, answerLen={}", sessionId, fullAnswer.length());
-                handler.onComplete(response);
-                saveExchange(sessionId, finalDocId, finalDocId2, userMessage, fullAnswer.toString(), finalActivityType);
+                org.springframework.security.core.context.SecurityContextHolder.setContext(securityContext);
+                try {
+                    log.info("流式生成完成, 持久化: sessionId={}, answerLen={}", sessionId, fullAnswer.length());
+                    handler.onComplete(response);
+                    saveExchange(sessionId, finalDocId, finalDocId2, userMessage, fullAnswer.toString(), finalActivityType, finalRetrievedCount);
+                } finally {
+                    org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                }
             }
             @Override
             public void onError(Throwable error) {
-                log.error("流式生成错误: sessionId={}", sessionId, error.getMessage());
-                handler.onError(error);
-                saveExchange(sessionId, finalDocId, finalDocId2, userMessage, "生成失败: " + error.getMessage(), finalActivityType);
+                org.springframework.security.core.context.SecurityContextHolder.setContext(securityContext);
+                try {
+                    log.error("流式生成错误: sessionId={}", sessionId, error.getMessage());
+                    handler.onError(error);
+                    saveExchange(sessionId, finalDocId, finalDocId2, userMessage, "生成失败: " + error.getMessage(), finalActivityType, finalRetrievedCount);
+                } finally {
+                    org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                }
             }
         };
 
@@ -222,16 +236,19 @@ public class AiRagService {
 
     /** 直接持久化一轮对话 (绕过 LangChain4j 0.28.0 ChatMemory.add 消息丢失 bug) */
     private void saveExchange(String sessionId, String documentId, Long docId,
-                               String userMessage, String aiResponse, String activityType) {
+                               String userMessage, String aiResponse, String activityType,
+                               int retrievedCount) {
         if (sessionId == null || sessionId.isBlank()) return;
         try {
             Long userId = com.edumerge.security.SecurityUtils.getCurrentUserId();
-            conversationService.ensure(sessionId, userId,
-                    userMessage.length() > 40 ? userMessage.substring(0, 40) + "..." : userMessage, docId);
+            String title = userMessage.length() > 40 ? userMessage.substring(0, 40) + "..." : userMessage;
+            log.info("saveExchange: sessionId={}, docId={}, userId={}, msgLen={}, activityType={}, retrievedCount={}",
+                    sessionId, docId, userId, userMessage.length(), activityType, retrievedCount);
+            conversationService.ensure(sessionId, userId, title, docId);
             ChatHistory record = ChatHistory.builder()
                     .userId(userId).sessionId(sessionId)
                     .query(userMessage).response(aiResponse)
-                    .retrievedDocuments(0).deleted(0)
+                    .retrievedDocuments(retrievedCount).deleted(0)
                     .activityType(activityType)
                     .build();
             chatHistoryMapper.insert(record);

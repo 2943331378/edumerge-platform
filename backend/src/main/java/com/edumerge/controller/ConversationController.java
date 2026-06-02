@@ -36,13 +36,15 @@ public class ConversationController {
     public Result<Void> rename(@PathVariable String sessionId, @RequestBody Map<String, String> body) {
         String title = body.get("title");
         if (title == null || title.isBlank()) return Result.fail("标题不能为空");
-        conversationService.updateTitle(sessionId, title.trim());
+        Long userId = SecurityUtils.getCurrentUserId();
+        conversationService.updateTitle(sessionId, title.trim(), userId);
         return Result.success("已重命名", null);
     }
 
     @DeleteMapping("/{sessionId}")
     public Result<Void> delete(@PathVariable String sessionId) {
-        conversationService.delete(sessionId);
+        Long userId = SecurityUtils.getCurrentUserId();
+        conversationService.delete(sessionId, userId);
         return Result.success("对话已删除", null);
     }
 }

@@ -3,6 +3,8 @@ package com.edumerge.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edumerge.entity.Conversation;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import com.edumerge.mapper.ConversationMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,8 +43,12 @@ public class ConversationService {
         return c;
     }
 
-    /** 更新会话标题 */
-    public void updateTitle(String sessionId, String title) {
+    /** 更新会话标题 (带归属校验) */
+    public void updateTitle(String sessionId, String title, Long userId) {
+        Conversation c = getBySessionId(sessionId);
+        if (c == null || !c.getUserId().equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权操作此对话");
+        }
         conversationMapper.update(null,
                 new LambdaUpdateWrapper<Conversation>()
                         .eq(Conversation::getSessionId, sessionId)
@@ -73,8 +79,12 @@ public class ConversationService {
                         .eq(Conversation::getSessionId, sessionId));
     }
 
-    /** 删除会话 (软删除) */
-    public void delete(String sessionId) {
+    /** 删除会话 (软删除，带归属校验) */
+    public void delete(String sessionId, Long userId) {
+        Conversation c = getBySessionId(sessionId);
+        if (c == null || !c.getUserId().equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权操作此对话");
+        }
         conversationMapper.delete(
                 new LambdaQueryWrapper<Conversation>()
                         .eq(Conversation::getSessionId, sessionId));

@@ -36,7 +36,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
     private CardDeckService cardDeckService;
 
     /** 根据文档内容自动生成测试题 (每次生成创建一个 Deck) */
-    public List<Quiz> generate(Long docId, Long userId, String docUuid) {
+    public List<Quiz> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 15,
                 "核心概念 定义 原理 方法 应用场景 实践案例 技术细节 架构设计 关键要点 总结归纳 key concepts definition principles methods use cases examples technical details architecture key points summary");
         if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
@@ -44,14 +44,28 @@ public class AiQuizGenerator extends AiGeneratorBase {
         String context = buildContext(matches);
         log.info("提取上下文完成: docId={}, 块数={}", docId, matches.size());
 
-        String llmResponse = callLLM(context);
+        String existingHint = buildExistingHint(existingQuestions);
+
+        String llmResponse = callLLM(context, existingHint);
         log.info("LLM 测试题生成响应: 长度={} 字符", llmResponse.length());
 
-        Long deckId = cardDeckService.create(docId, "QUIZ").getId();
+        String deckTitle = extractDeckTitle(llmResponse);
+        Long deckId = cardDeckService.create(docId, "QUIZ", deckTitle).getId();
         return parseAndSave(llmResponse, docId, userId, deckId, matches);
     }
 
-    private String callLLM(String context) {
+    private String buildExistingHint(List<String> existingQuestions) {
+        if (existingQuestions == null || existingQuestions.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n# 已有题目(严禁生成相同或高度相似的问题)\n");
+        for (int i = 0; i < Math.min(existingQuestions.size(), 30); i++) {
+            sb.append("- ").append(existingQuestions.get(i)).append("\n");
+        }
+        sb.append("\n请确保新生成的题目与以上已有题目在考察角度、知识维度上有明显区分。\n");
+        return sb.toString();
+    }
+
+    private String callLLM(String context, String existingHint) {
         String template = """
                 你是一个严谨的 AI 学习导师。请分析提供的文档片段，生成5道高质量单选题。
 
@@ -77,13 +91,21 @@ public class AiQuizGenerator extends AiGeneratorBase {
                    - **application** (2-3题): 方法选择、流程判断、实践案例的分析应用
 
                 # JSON格式约束 (严格)
-                [{"question":"...","options":["A. ...","B. ...","C. ...","D. ..."],
-                  "correctAnswer":"A. ...","explanation":"...","difficulty":"basic"}]
+                {"deckTitle": "根据文档内容生成的简短标题(10字以内)",
+                 "quizzes": [
+                   {"question":"...","options":["A. ...","B. ...","C. ...","D. ..."],
+                    "correctAnswer":"A. ...","explanation":"...","difficulty":"basic"}
+                 ]}
+
+                deckTitle 要求: 提炼文档核心主题, 如"Java并发编程测试"、"机器学习基础测验"、"分布式系统设计题"。
 
                 # 文档上下文
                 {CONTEXT}
+                {EXISTING_HINT}
                 """;
-        SystemMessage system = new SystemMessage(template.replace("{CONTEXT}", context));
+        SystemMessage system = new SystemMessage(template
+                .replace("{CONTEXT}", context)
+                .replace("{EXISTING_HINT}", existingHint));
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
@@ -96,8 +118,10 @@ public class AiQuizGenerator extends AiGeneratorBase {
                                      Long deckId, List<EmbeddingMatch<TextSegment>> matches) {
         List<Quiz> quizzes = new ArrayList<>();
         try {
-            String json = extractJsonArray(llmResponse);
-            List<Map<String, Object>> items = objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
+            String json = extractJsonObject(llmResponse);
+            Map<String, Object> root = objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> items = (List<Map<String, Object>>) (List<?>) (root.getOrDefault("quizzes", List.of()));
             for (int i = 0; i < items.size(); i++) {
                 Map<String, Object> item = items.get(i);
                 String q = (String) item.getOrDefault("question", "");
@@ -122,5 +146,16 @@ public class AiQuizGenerator extends AiGeneratorBase {
             log.error("解析 LLM 测试题 JSON 失败: error={}, raw={}", e.getMessage(), llmResponse, e);
         }
         return quizzes;
+    }
+
+    /** 从 LLM 响应中提取 deckTitle */
+    private String extractDeckTitle(String llmResponse) {
+        try {
+            String json = extractJsonObject(llmResponse);
+            Map<String, Object> root = objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+            Object title = root.get("deckTitle");
+            if (title instanceof String s && !s.isBlank()) return s.trim();
+        } catch (Exception ignored) {}
+        return null;
     }
 }

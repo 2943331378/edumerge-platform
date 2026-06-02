@@ -36,7 +36,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
     private CardDeckService cardDeckService;
 
     /** 根据文档内容自动生成学习卡片 (每次生成创建一个 Deck) */
-    public List<Flashcard> generate(Long docId, Long userId, String docUuid) {
+    public List<Flashcard> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 10,
                 "核心知识点 关键概念 重要内容 定义 原理 方法 总结 key concepts important content definition principles methods summary");
         if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
@@ -44,15 +44,30 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         String context = buildContext(matches);
         log.info("提取上下文完成: docId={}, 块数={}", docId, matches.size());
 
-        String llmResponse = callLLM(context);
+        // 拼装已有卡片问题列表，告知 LLM 避免重复
+        String existingHint = buildExistingHint(existingQuestions);
+
+        String llmResponse = callLLM(context, existingHint);
         log.info("LLM 卡片生成响应: 长度={} 字符", llmResponse.length());
 
         // 创建卡片组, 将本次生成的卡片绑定到该组
-        Long deckId = cardDeckService.create(docId, "FLASHCARD").getId();
+        String deckTitle = extractDeckTitle(llmResponse);
+        Long deckId = cardDeckService.create(docId, "FLASHCARD", deckTitle).getId();
         return parseAndSave(llmResponse, docId, userId, deckId, matches);
     }
 
-    private String callLLM(String context) {
+    private String buildExistingHint(List<String> existingQuestions) {
+        if (existingQuestions == null || existingQuestions.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n# 已有卡片(严禁生成相同或高度相似的问题)\n");
+        for (int i = 0; i < Math.min(existingQuestions.size(), 30); i++) {
+            sb.append("- ").append(existingQuestions.get(i)).append("\n");
+        }
+        sb.append("\n请确保新生成的问题与以上已有问题在语义上有明显区分。\n");
+        return sb.toString();
+    }
+
+    private String callLLM(String context, String existingHint) {
         String template = """
                 你是一个严谨的 AI 学习导师。请分析提供的文档片段，提取5个核心知识点并转化为学习卡片。
 
@@ -80,12 +95,18 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                 5. **精准简洁**: question 清晰明确, answer 准确有信息量, 单条卡片不超过200字。
 
                 # 输出格式
-                [{"question": "知识点问题1", "answer": "对应答案1"}]
+                {"deckTitle": "根据文档内容生成的简短标题(10字以内)",
+                 "cards": [{"question": "知识点问题1", "answer": "对应答案1"}]}
+
+                deckTitle 要求: 提炼文档核心主题, 如"Java并发编程核心概念"、"机器学习基础术语"、"分布式系统设计要点"。
 
                 # 文档上下文
                 {CONTEXT}
+                {EXISTING_HINT}
                 """;
-        SystemMessage system = new SystemMessage(template.replace("{CONTEXT}", context));
+        SystemMessage system = new SystemMessage(template
+                .replace("{CONTEXT}", context)
+                .replace("{EXISTING_HINT}", existingHint));
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
@@ -98,8 +119,10 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                                           Long deckId, List<EmbeddingMatch<TextSegment>> matches) {
         List<Flashcard> cards = new ArrayList<>();
         try {
-            String json = extractJsonArray(llmResponse);
-            List<Map<String, String>> items = objectMapper.readValue(json, new TypeReference<List<Map<String, String>>>() {});
+            String json = extractJsonObject(llmResponse);
+            Map<String, Object> root = objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, String>> items = (List<Map<String, String>>) (List<?>) (root.getOrDefault("cards", List.of()));
             for (int i = 0; i < items.size(); i++) {
                 Map<String, String> item = items.get(i);
                 String q = item.getOrDefault("question", ""), a = item.getOrDefault("answer", "");
@@ -116,5 +139,16 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
             log.error("解析 LLM 卡片 JSON 失败: error={}, raw={}", e.getMessage(), llmResponse, e);
         }
         return cards;
+    }
+
+    /** 从 LLM 响应中提取 deckTitle */
+    private String extractDeckTitle(String llmResponse) {
+        try {
+            String json = extractJsonObject(llmResponse);
+            Map<String, Object> root = objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+            Object title = root.get("deckTitle");
+            if (title instanceof String s && !s.isBlank()) return s.trim();
+        } catch (Exception ignored) {}
+        return null;
     }
 }

@@ -67,6 +67,20 @@ public abstract class AiGeneratorBase {
         return raw;
     }
 
+    /** 从 LLM 响应中提取 JSON 对象 (支持 markdown 代码块) */
+    protected String extractJsonObject(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        // 去除 markdown 代码块
+        if (trimmed.startsWith("```")) {
+            trimmed = trimmed.replaceFirst("```[a-zA-Z]*\\s*", "").replaceFirst("\\s*```$", "").trim();
+        }
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) return trimmed.substring(start, end + 1);
+        return null;
+    }
+
     /** 截断过长文本以适配数据库字段 */
     protected String truncate(String text, int maxLen) {
         return text.length() > maxLen ? text.substring(0, maxLen - 3) + "..." : text;

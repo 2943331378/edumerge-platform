@@ -6,6 +6,8 @@ spring:
   sql:
     init:
       mode: always
+      schema-locations: classpath:db/schema.sql
+      continue-on-error: true
 
   # ===== 文件上传大小限制 =====
   servlet:

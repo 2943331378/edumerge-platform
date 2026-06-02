@@ -288,7 +288,7 @@ INSERT IGNORE INTO users (username, email, password, display_name, status)
 VALUES ('admin', 'admin@edumerge.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '管理员', 1);
 
 -- ===== chat_history 活动上下文字段 (v2.1) =====
-ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS activity_type VARCHAR(20) DEFAULT NULL
+ALTER TABLE chat_history ADD COLUMN activity_type VARCHAR(20) DEFAULT NULL
     COMMENT '活动上下文: notes/mindmap/flashcards/quiz/flownote';
 
 -- ===== 知识图谱 (v2.2) =====
@@ -335,5 +335,46 @@ CREATE TABLE IF NOT EXISTS concept_relationships (
     INDEX idx_cr_concept_a (concept_id_a),
     INDEX idx_cr_concept_b (concept_id_b)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='概念关系表';
+
+-- ===== SM-2 间隔重复字段 (v2.3) =====
+-- 以下 ALTER TABLE 在列已存在时会报 "Duplicate column" 错误，可安全忽略
+-- (Spring Boot sql.init.continue-on-error=true 会跳过错误继续执行后续语句)
+ALTER TABLE flashcards ADD COLUMN ease_factor DOUBLE DEFAULT 2.5 COMMENT 'SM-2 简易因子 (最低1.3, 默认2.5)';
+ALTER TABLE flashcards ADD COLUMN review_interval INT DEFAULT 0 COMMENT '当前复习间隔(天), 0=新卡片未复习';
+ALTER TABLE flashcards ADD COLUMN next_review_at DATETIME DEFAULT NULL COMMENT '下次复习时间 (NULL=新卡片或已归档)';
+
+CREATE TABLE IF NOT EXISTS flashcard_review_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '记录ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    flashcard_id BIGINT NOT NULL COMMENT '卡片ID',
+    quality TINYINT NOT NULL COMMENT '自评分数: 1=忘了 2=模糊 3=记住 4=秒答',
+    ease_factor DOUBLE NOT NULL COMMENT '本次复习后的简易因子',
+    review_interval INT NOT NULL COMMENT '本次复习后的间隔(天)',
+    next_review_at DATETIME NOT NULL COMMENT '下次复习时间',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '复习时间',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (flashcard_id) REFERENCES flashcards(id) ON DELETE CASCADE,
+    INDEX idx_frl_user_id (user_id),
+    INDEX idx_frl_flashcard_id (flashcard_id),
+    INDEX idx_frl_next_review (next_review_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='闪卡复习记录表(SM-2)';
+
+-- ===== 文档大纲表 (v2.4) =====
+CREATE TABLE IF NOT EXISTS document_outlines (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '大纲ID',
+    doc_id BIGINT NOT NULL COMMENT '关联文档ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    doc_type VARCHAR(30) NOT NULL COMMENT '文档类型: TEXTBOOK/PAPER/NOTE/SLIDE/MANUAL/OTHER',
+    doc_type_label VARCHAR(50) COMMENT '文档类型中文标签',
+    outline_json LONGTEXT NOT NULL COMMENT '大纲JSON(树状结构含chunk范围映射)',
+    version INT DEFAULT 1 COMMENT '版本号(用户编辑后递增)',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_do_doc_id (doc_id),
+    INDEX idx_do_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档大纲表';
 
 COMMIT;

@@ -66,4 +66,8 @@ public class QuizService {
         if (rows > 0) log.info("测试题已删除: id={}", id);
         return rows;
     }
+
+    public Quiz getById(Long id) {
+        return quizMapper.selectById(id);
+    }
 }

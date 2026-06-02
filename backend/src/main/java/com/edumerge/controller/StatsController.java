@@ -5,9 +5,7 @@ import com.edumerge.dto.StatsResponse;
 import com.edumerge.service.StatsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
@@ -32,6 +30,7 @@ public class StatsController {
     /**
      * GET /api/stats — 数据资产全维度指标
      * 返回非结构化数据处理规模、结构化知识转化成果、合规治理状态
+     * 以及自动化 RAG 评测指标 (由 evaluate_rag.py 推送)
      */
     @GetMapping
     public Result<StatsResponse> stats() {
@@ -53,5 +52,41 @@ public class StatsController {
                 "title", "EduMerge 数据素质自评报告",
                 "content", markdown
         ));
+    }
+
+    /**
+     * POST /api/stats/eval — 接收评测脚本推送的 RAG 评测指标
+     * 实现"评测-看板-报告"全链路数据闭环，确保看板展示的
+     * 是实时、可验证的 AI 质量指标。
+     */
+    @PostMapping("/eval")
+    public Result<String> updateEvalMetrics(@RequestBody Map<String, Object> body) {
+        log.info("[数据看板] 接收评测指标推送: hitRate={}, faithfulness={}, correctness={}",
+                body.get("hitRate"), body.get("avgFaithfulness"), body.get("avgCorrectness"));
+        try {
+            statsService.updateEvalMetrics(
+                    toDouble(body.get("hitRate")),
+                    toDouble(body.get("avgFaithfulness")),
+                    toDouble(body.get("avgCorrectness")),
+                    toDouble(body.get("compositeScore")),
+                    toInt(body.get("totalQuestions"))
+            );
+            return Result.success("评测指标已更新");
+        } catch (Exception e) {
+            log.error("评测指标更新失败: {}", e.getMessage());
+            return Result.fail("评测指标更新失败: " + e.getMessage());
+        }
+    }
+
+    private static double toDouble(Object v) {
+        if (v instanceof Number n) return n.doubleValue();
+        if (v instanceof String s) return Double.parseDouble(s);
+        return 0.0;
+    }
+
+    private static int toInt(Object v) {
+        if (v instanceof Number n) return n.intValue();
+        if (v instanceof String s) return Integer.parseInt(s);
+        return 0;
     }
 }

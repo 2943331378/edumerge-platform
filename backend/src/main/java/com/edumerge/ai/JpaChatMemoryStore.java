@@ -3,6 +3,7 @@ package com.edumerge.ai;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edumerge.entity.ChatHistory;
 import com.edumerge.mapper.ChatHistoryMapper;
+import com.edumerge.security.SecurityUtils;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -10,6 +11,7 @@ import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -27,10 +29,16 @@ public class JpaChatMemoryStore implements ChatMemoryStore {
     @Override
     public List<ChatMessage> getMessages(Object memoryId) {
         String sessionId = memoryId.toString();
+        // 只加载最近 N 条记录，避免长对话时全表扫描和内存浪费
+        // 1 条 ChatHistory = 2 条 ChatMessage (User + AI)，所以 limit=10 对应 maxMessages=20
+        int limit = 10;
         List<ChatHistory> records = chatHistoryMapper.selectList(
                 new LambdaQueryWrapper<ChatHistory>()
                         .eq(ChatHistory::getSessionId, sessionId)
-                        .orderByAsc(ChatHistory::getCreatedAt));
+                        .orderByDesc(ChatHistory::getCreatedAt)
+                        .last("LIMIT " + limit));
+        // 倒序查出来需要反转，保持时间正序
+        Collections.reverse(records);
         List<ChatMessage> messages = new ArrayList<>();
         for (ChatHistory h : records) {
             messages.add(new UserMessage(h.getQuery()));
@@ -72,7 +80,7 @@ public class JpaChatMemoryStore implements ChatMemoryStore {
             UserMessage userMsg = (UserMessage) messages.get(userFound);
             AiMessage aiMsg = (AiMessage) messages.get(aiFound);
             ChatHistory record = ChatHistory.builder()
-                    .userId(1L)
+                    .userId(SecurityUtils.getCurrentUserId())
                     .sessionId(sessionId)
                     .query(userMsg.singleText())
                     .response(aiMsg.text())

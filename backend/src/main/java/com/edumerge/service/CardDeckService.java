@@ -22,7 +22,7 @@ public class CardDeckService {
         this.cardDeckMapper = cardDeckMapper;
     }
 
-    /** 创建卡片组 */
+    /** 创建卡片组 (默认标题) */
     public CardDeck create(Long docId, String type) {
         String suffix = switch (type) {
             case "FLASHCARD" -> "核心概念提取";
@@ -32,6 +32,17 @@ public class CardDeckService {
             default -> type;
         };
         String title = LocalDateTime.now().format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) + " " + suffix;
+        return createWithTitle(docId, type, title);
+    }
+
+    /** 创建卡片组 (自定义标题) */
+    public CardDeck create(Long docId, String type, String customTitle) {
+        String title = (customTitle != null && !customTitle.isBlank()) ? customTitle.trim() : null;
+        if (title == null) return create(docId, type);
+        return createWithTitle(docId, type, title);
+    }
+
+    private CardDeck createWithTitle(Long docId, String type, String title) {
         CardDeck deck = CardDeck.builder()
                 .docId(docId).title(title).type(type).createdAt(LocalDateTime.now()).build();
         cardDeckMapper.insert(deck);

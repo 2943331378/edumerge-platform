@@ -53,7 +53,12 @@ public class FlashcardController {
 
         if (docIdStr == null || docUuid == null) return Result.fail("docId/sessionId 和 docUuid 不能为空");
 
-        List<Flashcard> cards = aiFlashcardGenerator.generate(Long.parseLong(docIdStr), SecurityUtils.getCurrentUserId(), docUuid);
+        Long docId = Long.parseLong(docIdStr);
+        // 加载已有卡片，传问题列表给 AI 以避免重复
+        List<String> existingQuestions = flashcardService.listByDocId(docId).stream()
+                .map(Flashcard::getQuestion).toList();
+
+        List<Flashcard> cards = aiFlashcardGenerator.generate(docId, SecurityUtils.getCurrentUserId(), docUuid, existingQuestions);
         return cards.isEmpty() ? Result.fail("未检索到文档内容，生成失败") : Result.success("学习卡片生成成功", cards);
     }
 
@@ -79,5 +84,27 @@ public class FlashcardController {
     public Result<Void> delete(@PathVariable Long id) {
         if (flashcardService.deleteById(id) == 0) return Result.fail("卡片不存在");
         return Result.success("卡片已删除", null);
+    }
+
+    /** SM-2 间隔重复: 提交自评 */
+    @PutMapping("/{id}/review")
+    public Result<Flashcard> review(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
+        Integer quality = body.get("quality");
+        if (quality == null || quality < 1 || quality > 4) {
+            return Result.fail("quality 必须在 1-4 之间 (1=忘了 2=模糊 3=记住 4=秒答)");
+        }
+        try {
+            Flashcard card = flashcardService.review(id, quality, SecurityUtils.getCurrentUserId());
+            return Result.success("复习记录已保存", card);
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /** 查询到期需复习的卡片 (nextReviewAt <= now 或新卡片) */
+    @GetMapping("/due")
+    public Result<List<Flashcard>> listDue(@RequestParam Long docId) {
+        List<Flashcard> due = flashcardService.listDueCards(docId);
+        return Result.success(due);
     }
 }
