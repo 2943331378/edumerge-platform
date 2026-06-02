@@ -1,3 +1,7 @@
+-- ===== EduMerge 数据库初始化脚本 =====
+-- 合并所有增量变更，新设备首次执行即可获得完整表结构
+-- Spring Boot 通过 sql.init.continue-on-error=true 保证重复执行安全
+
 -- ===== 创建数据库 =====
 CREATE DATABASE IF NOT EXISTS edumerge CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -88,6 +92,7 @@ CREATE TABLE IF NOT EXISTS chat_history (
     confidence DECIMAL(5, 4) COMMENT '置信度',
     tokens_used INT COMMENT '使用的令牌数',
     is_helpful INT COMMENT '用户反馈：1=有用，0=无用，null=未反馈',
+    activity_type VARCHAR(20) DEFAULT NULL COMMENT '活动上下文: notes/mindmap/flashcards/quiz/flownote',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -122,6 +127,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '会话ID',
     session_id VARCHAR(64) NOT NULL UNIQUE COMMENT '前端对话UUID',
     user_id BIGINT NOT NULL COMMENT '用户ID',
+    doc_id BIGINT COMMENT '关联文档ID',
     title VARCHAR(200) DEFAULT '新对话' COMMENT '对话标题',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -144,8 +150,6 @@ CREATE TABLE IF NOT EXISTS card_decks (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='卡片组表';
 
 -- ===== 思维导图表 =====
--- 数据素质: MindMap 通过 doc_id 关联源文档, content 存储 Markdown 格式的层级知识结构,
--- 实现"非结构化文档 → 结构化知识树"的转化, 体现数据治理与知识提取能力
 CREATE TABLE IF NOT EXISTS mind_maps (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '思维导图ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
@@ -159,8 +163,6 @@ CREATE TABLE IF NOT EXISTS mind_maps (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='思维导图表';
 
 -- ===== 学习笔记表 =====
--- 数据素质: StudyNote 通过 doc_id 关联源文档, content 存储 Markdown 格式的学习笔记,
--- 将非结构化文档转化为可复习、可追溯的中文学习资料
 CREATE TABLE IF NOT EXISTS study_notes (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '学习笔记ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
@@ -179,8 +181,6 @@ CREATE TABLE IF NOT EXISTS study_notes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学习笔记表';
 
 -- ===== 学习卡片表 =====
--- 数据素质: Flashcards 通过 doc_id 关联源文档, source_segment 记录内容出处,
--- 实现学习资源的"可追溯性"与"组织管理", 符合数据要素治理要求
 CREATE TABLE IF NOT EXISTS flashcards (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '卡片ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
@@ -194,6 +194,9 @@ CREATE TABLE IF NOT EXISTS flashcards (
     difficulty INT DEFAULT 0 COMMENT '难度等级: 0=未评估, 1-5',
     review_count INT DEFAULT 0 COMMENT '复习次数',
     last_reviewed_at DATETIME COMMENT '最近复习时间',
+    ease_factor DOUBLE DEFAULT 2.5 COMMENT 'SM-2 简易因子 (最低1.3, 默认2.5)',
+    review_interval INT DEFAULT 0 COMMENT '当前复习间隔(天), 0=新卡片未复习',
+    next_review_at DATETIME DEFAULT NULL COMMENT '下次复习时间 (NULL=新卡片或已归档)',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -205,8 +208,6 @@ CREATE TABLE IF NOT EXISTS flashcards (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学习卡片表';
 
 -- ===== 测试题表 =====
--- 数据素质: Quizzes 通过 doc_id 关联源文档, source_segment 记录题目出处,
--- options 使用 JSON 格式存储, 实现结构化数据的"组织管理"与"可追溯性"
 CREATE TABLE IF NOT EXISTS quizzes (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '测试题ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
@@ -217,7 +218,7 @@ CREATE TABLE IF NOT EXISTS quizzes (
     answer VARCHAR(500) NOT NULL COMMENT '正确答案',
     explanation TEXT COMMENT '解析/知识扩展',
     source_segment TEXT COMMENT '题目源自文档的片段引用 (实现数据可追溯)',
-    quiz_type VARCHAR(20) DEFAULT 'SINGLE' COMMENT '题型: SINGLE=单选, MULTIPLE=多选, JUDGE=判断',
+    quiz_type VARCHAR(20) DEFAULT 'SINGLE' COMMENT '题型: SINGLE=单选, FILL_BLANK=填空',
     difficulty INT DEFAULT 0 COMMENT '难度等级: 0=未评估, 1-5',
     status VARCHAR(20) DEFAULT 'ACTIVE' COMMENT '状态: ACTIVE, ARCHIVED',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
@@ -232,7 +233,6 @@ CREATE TABLE IF NOT EXISTS quizzes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='测试题表';
 
 -- ===== 测验答题记录表 =====
--- 持久化用户答题结果，支持错题回顾与学习进度追踪
 CREATE TABLE IF NOT EXISTS quiz_attempts (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '记录ID',
     user_id BIGINT NOT NULL COMMENT '用户ID',
@@ -252,7 +252,6 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='测验答题记录表';
 
 -- ===== FlowNote 持续学习日志表 =====
--- CuFlow 风格: 自动从对话中提取结构化笔记，分类组织，支持复习标记
 CREATE TABLE IF NOT EXISTS flow_notes (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '条目ID',
     user_id BIGINT NOT NULL COMMENT '用户ID',
@@ -279,70 +278,7 @@ CREATE TABLE IF NOT EXISTS flow_notes (
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='FlowNote 学习日志表';
 
--- ===== 初始化示例数据 =====
--- 默认管理员账号: admin / admin123
--- 密码需通过注册接口由 BCrypt 加密写入，或使用以下 hash 直接插入:
--- BCrypt hash for "admin123": $2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
--- 注意: 如果已有 admin 用户且密码为明文，则无法通过 BCrypt 验证，需删除后重新注册
-INSERT IGNORE INTO users (username, email, password, display_name, status)
-VALUES ('admin', 'admin@edumerge.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '管理员', 1);
-
--- ===== chat_history 活动上下文字段 (v2.1) =====
-ALTER TABLE chat_history ADD COLUMN activity_type VARCHAR(20) DEFAULT NULL
-    COMMENT '活动上下文: notes/mindmap/flashcards/quiz/flownote';
-
--- ===== 知识图谱 (v2.2) =====
-CREATE TABLE IF NOT EXISTS knowledge_concepts (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '概念ID',
-    user_id BIGINT NOT NULL COMMENT '用户ID',
-    name VARCHAR(200) NOT NULL COMMENT '概念名称',
-    definition TEXT COMMENT '概念定义',
-    importance_score DOUBLE DEFAULT 0.0 COMMENT '重要程度 1-10',
-    document_count INT DEFAULT 0 COMMENT '涉及的文档数',
-    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_kg_user_id (user_id),
-    INDEX idx_kg_importance (importance_score)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识概念表';
-
-CREATE TABLE IF NOT EXISTS concept_documents (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关联ID',
-    concept_id BIGINT NOT NULL COMMENT '概念ID',
-    doc_id BIGINT NOT NULL COMMENT '文档ID',
-    doc_uuid VARCHAR(64) COMMENT 'Milvus文档UUID',
-    chunk_index INT COMMENT '具体切片索引',
-    mention_text TEXT COMMENT '提及该概念的原文片段',
-    relevance_score DOUBLE DEFAULT 1.0 COMMENT '概念在该文档中的相关度',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (concept_id) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
-    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
-    INDEX idx_cd_concept_id (concept_id),
-    INDEX idx_cd_doc_id (doc_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='概念-文档关联表';
-
-CREATE TABLE IF NOT EXISTS concept_relationships (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关系ID',
-    concept_id_a BIGINT NOT NULL COMMENT '源概念ID',
-    concept_id_b BIGINT NOT NULL COMMENT '目标概念ID',
-    relationship_type VARCHAR(50) NOT NULL COMMENT '关系类型: IS_A/PART_OF/RELATES_TO/PREREQUISITE/CONTRADICTS/APPLIES_TO',
-    description TEXT COMMENT '关系描述',
-    strength DOUBLE DEFAULT 1.0 COMMENT '关系强度 0.0-1.0',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (concept_id_a) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
-    FOREIGN KEY (concept_id_b) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
-    INDEX idx_cr_concept_a (concept_id_a),
-    INDEX idx_cr_concept_b (concept_id_b)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='概念关系表';
-
--- ===== SM-2 间隔重复字段 (v2.3) =====
--- 以下 ALTER TABLE 在列已存在时会报 "Duplicate column" 错误，可安全忽略
--- (Spring Boot sql.init.continue-on-error=true 会跳过错误继续执行后续语句)
-ALTER TABLE flashcards ADD COLUMN ease_factor DOUBLE DEFAULT 2.5 COMMENT 'SM-2 简易因子 (最低1.3, 默认2.5)';
-ALTER TABLE flashcards ADD COLUMN review_interval INT DEFAULT 0 COMMENT '当前复习间隔(天), 0=新卡片未复习';
-ALTER TABLE flashcards ADD COLUMN next_review_at DATETIME DEFAULT NULL COMMENT '下次复习时间 (NULL=新卡片或已归档)';
-
+-- ===== 闪卡复习记录表 (SM-2) =====
 CREATE TABLE IF NOT EXISTS flashcard_review_logs (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '记录ID',
     user_id BIGINT NOT NULL COMMENT '用户ID',
@@ -359,7 +295,54 @@ CREATE TABLE IF NOT EXISTS flashcard_review_logs (
     INDEX idx_frl_next_review (next_review_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='闪卡复习记录表(SM-2)';
 
--- ===== 文档大纲表 (v2.4) =====
+-- ===== 知识概念表 =====
+CREATE TABLE IF NOT EXISTS knowledge_concepts (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '概念ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    name VARCHAR(200) NOT NULL COMMENT '概念名称',
+    definition TEXT COMMENT '概念定义',
+    importance_score DOUBLE DEFAULT 0.0 COMMENT '重要程度 1-10',
+    document_count INT DEFAULT 0 COMMENT '涉及的文档数',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_kg_user_id (user_id),
+    INDEX idx_kg_importance (importance_score)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识概念表';
+
+-- ===== 概念-文档关联表 =====
+CREATE TABLE IF NOT EXISTS concept_documents (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关联ID',
+    concept_id BIGINT NOT NULL COMMENT '概念ID',
+    doc_id BIGINT NOT NULL COMMENT '文档ID',
+    doc_uuid VARCHAR(64) COMMENT 'Milvus文档UUID',
+    chunk_index INT COMMENT '具体切片索引',
+    mention_text TEXT COMMENT '提及该概念的原文片段',
+    relevance_score DOUBLE DEFAULT 1.0 COMMENT '概念在该文档中的相关度',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (concept_id) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
+    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+    INDEX idx_cd_concept_id (concept_id),
+    INDEX idx_cd_doc_id (doc_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='概念-文档关联表';
+
+-- ===== 概念关系表 =====
+CREATE TABLE IF NOT EXISTS concept_relationships (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关系ID',
+    concept_id_a BIGINT NOT NULL COMMENT '源概念ID',
+    concept_id_b BIGINT NOT NULL COMMENT '目标概念ID',
+    relationship_type VARCHAR(50) NOT NULL COMMENT '关系类型: IS_A/PART_OF/RELATES_TO/PREREQUISITE/CONTRADICTS/APPLIES_TO',
+    description TEXT COMMENT '关系描述',
+    strength DOUBLE DEFAULT 1.0 COMMENT '关系强度 0.0-1.0',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (concept_id_a) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
+    FOREIGN KEY (concept_id_b) REFERENCES knowledge_concepts(id) ON DELETE CASCADE,
+    INDEX idx_cr_concept_a (concept_id_a),
+    INDEX idx_cr_concept_b (concept_id_b)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='概念关系表';
+
+-- ===== 文档大纲表 =====
 CREATE TABLE IF NOT EXISTS document_outlines (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '大纲ID',
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
@@ -376,5 +359,10 @@ CREATE TABLE IF NOT EXISTS document_outlines (
     INDEX idx_do_doc_id (doc_id),
     INDEX idx_do_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档大纲表';
+
+-- ===== 初始化示例数据 =====
+-- 默认管理员账号: admin / admin123
+INSERT IGNORE INTO users (username, email, password, display_name, status)
+VALUES ('admin', 'admin@edumerge.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '管理员', 1);
 
 COMMIT;
