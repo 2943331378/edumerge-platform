@@ -38,6 +38,13 @@ function isNewDeck(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 24 * 60 * 60 * 1000;
 }
 
+/** 填空题答案模糊匹配: trim + 忽略大小写 + 去除中英文标点 + 合并空格 */
+function isAnswerMatch(input: string, answer: string): boolean {
+  const normalize = (s: string) =>
+    s.trim().toLowerCase().replace(/[.,;:!?，。；：！？、""''「」【】（）()\[\]{}]/g, "").replace(/\s+/g, " ").trim();
+  return normalize(input) === normalize(answer);
+}
+
 export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, selectedOutlineSections, generateTrigger }: Props) {
   const [view, setView] = useState<"decks" | "quiz">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
@@ -227,7 +234,9 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     if (!selected || submitted) return;
     setSubmitted(true);
     const quiz = quizzes[currentIdx];
-    const isCorrect = quiz && selected === quiz.answer;
+    const isCorrect = quiz && (
+      quiz.quizType === "FILL_BLANK" ? isAnswerMatch(selected, quiz.answer) : selected === quiz.answer
+    );
     if (isCorrect) setScore((s) => s + 1);
     if (quiz) {
       setAnswers((prev) => [...prev, { quizId: quiz.id, selectedAnswer: selected!, correct: !!isCorrect }]);
@@ -452,7 +461,9 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const handleReviewSubmit = () => {
     if (!reviewSelected || reviewSubmitted) return;
     setReviewSubmitted(true);
-    const isCorrect = quiz && reviewSelected === quiz.answer;
+    const isCorrect = quiz && (
+      quiz.quizType === "FILL_BLANK" ? isAnswerMatch(reviewSelected, quiz.answer) : reviewSelected === quiz.answer
+    );
     if (isCorrect) setReviewScore((s) => s + 1);
     if (quiz) {
       setReviewAnswers((prev) => [...prev, { quizId: quiz.id, selectedAnswer: reviewSelected, correct: !!isCorrect }]);
@@ -656,8 +667,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                   className={cn(
                     "flex-1 rounded-xl border px-4 py-2.5 text-sm outline-none transition-all",
                     !activeSubmitted && "border-border/60 bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/10",
-                    activeSubmitted && activeSelected === quiz?.answer && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20",
-                    activeSubmitted && activeSelected !== quiz?.answer && "border-destructive bg-destructive/5",
+                    activeSubmitted && isAnswerMatch(activeSelected ?? "", quiz?.answer ?? "") && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20",
+                    activeSubmitted && !isAnswerMatch(activeSelected ?? "", quiz?.answer ?? "") && "border-destructive bg-destructive/5",
                   )}
                   onKeyDown={(e) => { if (e.key === "Enter" && !activeSubmitted && activeSelected) handleSubmitOpt(); }}
                   aria-label="填空题答案输入"
@@ -666,11 +677,11 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
               {activeSubmitted && (
                 <div className={cn(
                   "flex items-center gap-2 rounded-xl px-4 py-3 text-sm",
-                  activeSelected === quiz?.answer
+                  isAnswerMatch(activeSelected ?? "", quiz?.answer ?? "")
                     ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300"
                     : "bg-destructive/5 text-destructive"
                 )}>
-                  {activeSelected === quiz?.answer
+                  {isAnswerMatch(activeSelected ?? "", quiz?.answer ?? "")
                     ? <><Check className="h-4 w-4 shrink-0" /><span>正确！</span></>
                     : <><X className="h-4 w-4 shrink-0" /><span>正确答案: <strong>{quiz?.answer}</strong></span></>
                   }
