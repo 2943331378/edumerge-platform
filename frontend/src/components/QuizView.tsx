@@ -270,12 +270,12 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     return (
       <div className="flex flex-col h-full">
         {!embedded && (
-          <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
-            <h2 className="text-sm font-medium text-foreground/80 flex items-center gap-2">
-              <HelpCircle className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 border-b bg-muted/20 shrink-0">
+            <h2 className="text-xs sm:text-sm font-medium text-foreground/80 flex items-center gap-1.5 sm:gap-2">
+              <HelpCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
               测试题组
             </h2>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30" onClick={() => setShowErrorBook(true)}>
                 <Target className="h-3.5 w-3.5" />
                 错题本
@@ -622,7 +622,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+        <div className="max-w-2xl mx-auto px-4 py-4 sm:px-6 sm:py-8 space-y-4 sm:space-y-6">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground/50">
             <span>{activeIdx + 1} / {totalItems}</span>
             {quiz?.difficulty && <span>{quiz.difficulty >= 4 ? "综合应用" : "基础概念"}</span>}
@@ -630,8 +630,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
           </div>
 
           <Card className="rounded-2xl border-border/60 shadow-sm">
-            <CardContent className="p-6">
-              <p className="text-sm leading-relaxed text-foreground/85">{quiz?.question}</p>
+            <CardContent className="p-4 sm:p-6">
+              <p className="text-[13px] sm:text-sm leading-relaxed text-foreground/85">{quiz?.question}</p>
             </CardContent>
           </Card>
 
@@ -646,7 +646,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                   onClick={() => handleSelectOpt(opt)}
                   disabled={activeSubmitted}
                   className={cn(
-                    "w-full text-left px-4 py-3 rounded-xl border text-sm transition-all",
+                    "w-full text-left px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl border text-[13px] sm:text-sm transition-all",
                     !activeSubmitted && "hover:border-primary/40 hover:bg-muted/40 cursor-pointer",
                     activeSubmitted && "cursor-default",
                     isSelected && !activeSubmitted && "border-primary bg-primary/5",

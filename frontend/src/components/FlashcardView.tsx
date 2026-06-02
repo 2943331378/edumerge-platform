@@ -258,12 +258,12 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     return (
       <div className="flex flex-col h-full">
         {/* 顶部工具栏 */}
-        <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
-          <h2 className="text-sm font-medium text-foreground/80 flex items-center gap-2">
-            <Layers className="h-4 w-4 text-muted-foreground" />
+        <div className="flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 border-b bg-muted/20 shrink-0">
+          <h2 className="text-xs sm:text-sm font-medium text-foreground/80 flex items-center gap-1.5 sm:gap-2">
+            <Layers className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
             学习卡片组
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {dueCount > 0 && (
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30" onClick={async () => {
                 if (!docId) return;
@@ -392,13 +392,13 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   if (view === "preview") {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
+        <div className="flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 border-b bg-muted/20 shrink-0">
           <div>
-            <h2 className="text-sm font-medium text-foreground/80 flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" />
+            <h2 className="text-xs sm:text-sm font-medium text-foreground/80 flex items-center gap-1.5 sm:gap-2">
+              <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
               生成预览
             </h2>
-            <p className="text-[11px] text-muted-foreground/60">{currentDeck?.title} · {cards.length} 张卡片</p>
+            <p className="text-[10px] sm:text-[11px] text-muted-foreground/60">{currentDeck?.title} · {cards.length} 张卡片</p>
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs border-destructive/20 text-destructive hover:bg-destructive/10" onClick={async () => {
@@ -546,8 +546,8 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
       )}
 
       {/* 翻转卡片 — 大尺寸展示 */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-4 sm:px-8 overflow-y-auto py-4">
-        <p className="text-xs text-muted-foreground/40 tracking-wider">{currentIdx + 1} / {cards.length}</p>
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 sm:gap-6 px-3 sm:px-8 overflow-y-auto py-3 sm:py-4">
+        <p className="text-[10px] sm:text-xs text-muted-foreground/40 tracking-wider">{currentIdx + 1} / {cards.length}</p>
 
         {/* 容器: 宽大 + 渐变边框光晕 + 动画 */}
         <div
@@ -556,7 +556,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           onClick={() => setFlipped((v) => !v)}
         >
           <div
-            className="relative w-full min-h-[360px] sm:min-h-[450px] transition-transform duration-300 [transform-style:preserve-3d]"
+            className="relative w-full min-h-[260px] sm:min-h-[450px] transition-transform duration-300 [transform-style:preserve-3d]"
             style={{ transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
           >
             {/* Front — 问题 */}
@@ -564,12 +564,12 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               border border-transparent bg-clip-padding
               before:absolute before:inset-0 before:rounded-3xl before:p-[1px] before:bg-gradient-to-br before:from-primary/40 before:via-primary/10 before:to-transparent before:-z-10 before:[mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] before:[mask-composite:exclude]
               bg-card">
-              <CardContent className="flex flex-col items-center justify-center p-8 sm:p-12 h-full min-h-[360px] sm:min-h-[450px]">
-                <span className="text-[11px] font-medium text-muted-foreground/40 uppercase tracking-[0.2em] mb-6">问题</span>
-                <p className="text-xl sm:text-3xl text-center leading-relaxed text-foreground/90 font-medium max-w-2xl">
+              <CardContent className="flex flex-col items-center justify-center p-4 sm:p-8 h-full min-h-[260px] sm:min-h-[450px]">
+                <span className="text-[10px] sm:text-[11px] font-medium text-muted-foreground/40 uppercase tracking-[0.2em] mb-3 sm:mb-6">问题</span>
+                <p className="text-base sm:text-3xl text-center leading-relaxed text-foreground/90 font-medium max-w-2xl">
                   {card?.question}
                 </p>
-                <p className="mt-8 text-xs text-muted-foreground/30">点击翻转查看答案</p>
+                <p className="mt-4 sm:mt-8 text-[10px] sm:text-xs text-muted-foreground/30">点击翻转查看答案</p>
               </CardContent>
             </Card>
 
@@ -581,32 +581,32 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               {/* 顶部装饰区 — 渐变背景 */}
               <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-emerald-50/60 to-transparent dark:from-emerald-950/20 dark:to-transparent pointer-events-none" />
 
-              <CardContent className="relative flex flex-col h-full min-h-[360px] sm:min-h-[450px] overflow-y-auto">
+              <CardContent className="relative flex flex-col h-full min-h-[260px] sm:min-h-[450px] overflow-y-auto">
                 {/* 答案区域 — 左对齐，更自然的阅读体验 */}
-                <div className="flex-1 flex flex-col justify-center px-8 sm:px-14 py-10 sm:py-14">
+                <div className="flex-1 flex flex-col justify-center px-4 sm:px-14 py-4 sm:py-14">
                   {/* 标签 */}
-                  <div className="flex items-center gap-2 mb-5">
-                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-[0.2em] bg-emerald-100/60 dark:bg-emerald-900/20 rounded-md px-2 py-0.5">
+                  <div className="flex items-center gap-2 mb-2 sm:mb-5">
+                    <span className="inline-flex items-center gap-1.5 text-[9px] sm:text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-[0.2em] bg-emerald-100/60 dark:bg-emerald-900/20 rounded-md px-2 py-0.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                       答案
                     </span>
                   </div>
 
                   {/* 核心答案 — 大字醒目 */}
-                  <p className="text-lg sm:text-2xl leading-relaxed text-foreground/90 font-semibold tracking-tight max-w-xl">
+                  <p className="text-base sm:text-2xl leading-relaxed text-foreground/90 font-semibold tracking-tight max-w-xl">
                     {card?.answer}
                   </p>
 
                   {/* 解析区 — 独立卡片式设计 */}
                   {card?.explanation && (
-                    <div className="mt-8 rounded-xl bg-muted/30 dark:bg-muted/10 border border-border/20 p-4 sm:p-5">
+                    <div className="mt-3 sm:mt-8 rounded-xl bg-muted/30 dark:bg-muted/10 border border-border/20 p-3 sm:p-5">
                       <div className="flex items-center gap-2 mb-2.5">
                         <div className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 dark:bg-amber-900/30">
                           <span className="text-[10px]">💡</span>
                         </div>
-                        <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">解析</span>
+                        <span className="text-[10px] sm:text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">解析</span>
                       </div>
-                      <p className="text-sm leading-relaxed text-foreground/65">{card.explanation}</p>
+                      <p className="text-xs sm:text-sm leading-relaxed text-foreground/65">{card.explanation}</p>
                     </div>
                   )}
                 </div>
@@ -631,25 +631,25 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
         {/* SM-2 自评按钮 — 翻转后显示 */}
         {flipped && (
-          <div className="flex items-center gap-2 pb-2 flex-wrap justify-center">
+          <div className="flex items-center gap-1.5 sm:gap-2 pb-2 flex-wrap justify-center">
             {selfAssessed ? (
               <span className="text-xs text-muted-foreground/50">已评估，继续下一张</span>
             ) : (
               <>
-                <span className="text-[11px] text-muted-foreground/40 mr-1">自评:</span>
-                <Button size="sm" variant="outline" className="rounded-lg h-8 text-xs border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => handleSelfAssess(1)}>
+                <span className="text-[10px] sm:text-[11px] text-muted-foreground/40 mr-1">自评:</span>
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => handleSelfAssess(1)}>
                   忘了
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-lg h-8 text-xs border-orange-200 dark:border-orange-800 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30" onClick={() => handleSelfAssess(2)}>
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-orange-200 dark:border-orange-800 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30" onClick={() => handleSelfAssess(2)}>
                   模糊
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-lg h-8 text-xs border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30" onClick={() => handleSelfAssess(3)}>
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30" onClick={() => handleSelfAssess(3)}>
                   记住
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-lg h-8 text-xs border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30" onClick={() => handleSelfAssess(4)}>
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30" onClick={() => handleSelfAssess(4)}>
                   秒答
                 </Button>
-                <span className="text-[10px] text-muted-foreground/30 ml-1">快捷键 1-4</span>
+                <span className="hidden sm:inline text-[10px] text-muted-foreground/30 ml-1">快捷键 1-4</span>
               </>
             )}
           </div>
