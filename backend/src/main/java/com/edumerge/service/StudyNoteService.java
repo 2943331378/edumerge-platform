@@ -5,7 +5,6 @@ import com.edumerge.ai.AiNoteGenerator;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.StudyNote;
 import com.edumerge.mapper.StudyNoteMapper;
-import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -25,14 +24,17 @@ public class StudyNoteService {
     private final StudyNoteMapper studyNoteMapper;
     private final AiNoteGenerator aiNoteGenerator;
     private final DocumentService documentService;
+    private final CardDeckService cardDeckService;
 
     @Autowired
     public StudyNoteService(StudyNoteMapper studyNoteMapper,
                             AiNoteGenerator aiNoteGenerator,
-                            DocumentService documentService) {
+                            DocumentService documentService,
+                            CardDeckService cardDeckService) {
         this.studyNoteMapper = studyNoteMapper;
         this.aiNoteGenerator = aiNoteGenerator;
         this.documentService = documentService;
+        this.cardDeckService = cardDeckService;
     }
 
     // ═══════ CRUD ═══════
@@ -122,20 +124,26 @@ public class StudyNoteService {
                 sectionContext != null ? sectionContext.substring(0, Math.min(100, sectionContext.length())) : "null");
 
         AiNoteGenerator.StudyNoteResult generated = aiNoteGenerator.generate(
-                docId, SecurityUtils.getCurrentUserId(), doc.getDocumentId(), requirements, sectionContext);
+                docId, doc.getDocumentId(), requirements, sectionContext);
 
         if (!generated.isSuccess()) {
             throw new IllegalStateException("学习笔记生成失败: 未从文档中提取到足够内容");
         }
 
+        // 持久化 — 创建 deck + study_note 记录
+        com.edumerge.entity.CardDeck deck = cardDeckService.create(docId, "NOTE", generated.getTitle());
+        StudyNote saved = create(docId, deck.getId(), generated.getTitle(),
+                generated.getContent(), generated.getSourceSummary(), generated.getRequirements());
+        log.info("学习笔记已持久化: docId={}, deckId={}", docId, deck.getId());
+
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("deckId", generated.getDeckId());
-        data.put("docId", generated.getDocId());
+        data.put("deckId", deck.getId());
+        data.put("docId", docId);
         data.put("title", generated.getTitle());
         data.put("content", generated.getContent());
         data.put("sourceSummary", generated.getSourceSummary());
         data.put("requirements", generated.getRequirements());
-        data.put("createdAt", java.time.LocalDateTime.now().toString());
+        data.put("createdAt", saved.getCreatedAt() != null ? saved.getCreatedAt().toString() : null);
         return data;
     }
 

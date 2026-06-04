@@ -1,8 +1,5 @@
 package com.edumerge.ai;
 
-import com.edumerge.entity.CardDeck;
-import com.edumerge.service.CardDeckService;
-import com.edumerge.service.StudyNoteService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -23,13 +20,7 @@ public class AiNoteGenerator extends AiGeneratorBase {
     @Autowired
     private ChatLanguageModel chatLanguageModel;
 
-    @Autowired
-    private CardDeckService cardDeckService;
-
-    @Autowired
-    private StudyNoteService studyNoteService;
-
-    public StudyNoteResult generate(Long docId, Long userId, String docUuid, String requirements, String sectionContext) {
+    public StudyNoteResult generate(Long docId, String docUuid, String requirements, String sectionContext) {
         long startTime = System.currentTimeMillis();
 
         // top-K=15 平衡质量与速度（之前 25 太多，LLM 处理慢）
@@ -37,7 +28,7 @@ public class AiNoteGenerator extends AiGeneratorBase {
                 "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 结论 复习重点 study notes summary chapter highlights key concepts main ideas methods principles conclusions review points");
         if (matches.isEmpty()) {
             log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
-            return StudyNoteResult.empty(docId);
+            return StudyNoteResult.empty();
         }
 
         String context = buildContext(matches);
@@ -47,16 +38,13 @@ public class AiNoteGenerator extends AiGeneratorBase {
         String content = cleanMarkdown(callLLM(context, requirements, sectionContext));
         log.info("LLM 笔记生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, content.length(), System.currentTimeMillis() - llmStart);
         if (content.isBlank()) {
-            return StudyNoteResult.empty(docId);
+            return StudyNoteResult.empty();
         }
 
-        // 从 Markdown 提取第一个 # 标题作为笔记标题
+        // 从 Markdown 提取第一个 # 标题作为笔记标题，持久化由 StudyNoteService 负责
         String title = extractTitle(content);
-        CardDeck deck = cardDeckService.create(docId, "NOTE", title);
         String sourceSummary = buildSourceSummary(matches);
-        studyNoteService.create(docId, deck.getId(), title, content, sourceSummary, requirements);
-
-        return StudyNoteResult.success(docId, deck.getId(), title, content, sourceSummary, requirements);
+        return StudyNoteResult.success(title, content, sourceSummary, requirements);
     }
 
     private String callLLM(String context, String requirements, String sectionContext) {
@@ -148,36 +136,30 @@ public class AiNoteGenerator extends AiGeneratorBase {
 
     public static class StudyNoteResult {
         private final boolean success;
-        private final Long docId;
-        private final Long deckId;
         private final String title;
         private final String content;
         private final String sourceSummary;
         private final String requirements;
 
-        private StudyNoteResult(boolean success, Long docId, Long deckId,
-                                String title, String content, String sourceSummary, String requirements) {
+        private StudyNoteResult(boolean success, String title, String content,
+                                String sourceSummary, String requirements) {
             this.success = success;
-            this.docId = docId;
-            this.deckId = deckId;
             this.title = title;
             this.content = content;
             this.sourceSummary = sourceSummary;
             this.requirements = requirements;
         }
 
-        public static StudyNoteResult success(Long docId, Long deckId, String title,
-                                              String content, String sourceSummary, String requirements) {
-            return new StudyNoteResult(true, docId, deckId, title, content, sourceSummary, requirements);
+        public static StudyNoteResult success(String title, String content,
+                                              String sourceSummary, String requirements) {
+            return new StudyNoteResult(true, title, content, sourceSummary, requirements);
         }
 
-        public static StudyNoteResult empty(Long docId) {
-            return new StudyNoteResult(false, docId, null, null, null, null, null);
+        public static StudyNoteResult empty() {
+            return new StudyNoteResult(false, null, null, null, null);
         }
 
         public boolean isSuccess() { return success; }
-        public Long getDocId() { return docId; }
-        public Long getDeckId() { return deckId; }
         public String getTitle() { return title; }
         public String getContent() { return content; }
         public String getSourceSummary() { return sourceSummary; }
