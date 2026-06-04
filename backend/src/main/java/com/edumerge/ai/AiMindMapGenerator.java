@@ -30,11 +30,10 @@ public class AiMindMapGenerator extends AiGeneratorBase {
     /**
      * 根据文档内容生成思维导图
      * @param docId   文档数据库 ID
-     * @param userId  用户 ID
      * @param docUuid 文档 Milvus UUID (用于向量检索)
-     * @return 生成结果 (含 deckId、title、content)
+     * @return 生成结果 (含 title、content)
      */
-    public MindMapResult generate(Long docId, Long userId, String docUuid, String sectionContext) {
+    public MindMapResult generate(Long docId, String docUuid, String sectionContext) {
         long startTime = System.currentTimeMillis();
 
         // 步骤 1: 从 Milvus 检索文档核心内容 — top-K=12 平衡质量与速度
@@ -42,7 +41,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                 "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容 定义 原理 方法 总结 document structure headings core topic key concepts hierarchy outline main content definition principles methods summary");
         if (matches.isEmpty()) {
             log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
-            return MindMapResult.empty(docId);
+            return MindMapResult.empty();
         }
 
         // 步骤 2: 拼装上下文 — 标注来源信息实现数据溯源
@@ -58,13 +57,13 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         markdown = cleanMarkdown(markdown);
         if (!isValidMindMap(markdown)) {
             log.error("思维导图格式验证失败: docId={}, content={}", docId, markdown.substring(0, Math.min(200, markdown.length())));
-            return MindMapResult.empty(docId);
+            return MindMapResult.empty();
         }
 
         // 步骤 5: 提取标题，持久化由 MindMapService 负责（避免循环依赖）
         String title = extractTitle(markdown);
         log.info("思维导图内容生成完成: docId={}, title={}", docId, title);
-        return MindMapResult.success(docId, null, title, markdown, null);
+        return MindMapResult.success(title, markdown);
     }
 
     /** 调用大模型, 使用专用 Prompt 强制输出结构化 Markdown */
@@ -160,29 +159,23 @@ public class AiMindMapGenerator extends AiGeneratorBase {
 
     public static class MindMapResult {
         private final boolean success;
-        private final Long docId;
-        private final Long deckId;
         private final String title;
         private final String content;
-        private final String createdAt;
 
-        private MindMapResult(boolean s, Long d, Long dk, String t, String c, String ca) {
-            this.success = s; this.docId = d; this.deckId = dk; this.title = t; this.content = c; this.createdAt = ca;
+        private MindMapResult(boolean success, String title, String content) {
+            this.success = success; this.title = title; this.content = content;
         }
 
-        public static MindMapResult success(Long docId, Long deckId, String title, String content, String createdAt) {
-            return new MindMapResult(true, docId, deckId, title, content, createdAt);
+        public static MindMapResult success(String title, String content) {
+            return new MindMapResult(true, title, content);
         }
 
-        public static MindMapResult empty(Long docId) {
-            return new MindMapResult(false, docId, null, null, null, null);
+        public static MindMapResult empty() {
+            return new MindMapResult(false, null, null);
         }
 
         public boolean isSuccess() { return success; }
-        public Long getDocId() { return docId; }
-        public Long getDeckId() { return deckId; }
         public String getTitle() { return title; }
         public String getContent() { return content; }
-        public String getCreatedAt() { return createdAt; }
     }
 }

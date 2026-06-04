@@ -6,7 +6,6 @@ import com.edumerge.entity.CardDeck;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.MindMap;
 import com.edumerge.mapper.MindMapMapper;
-import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -141,7 +140,7 @@ public class MindMapService {
                 sectionContext != null ? sectionContext.substring(0, Math.min(100, sectionContext.length())) : "null");
 
         AiMindMapGenerator.MindMapResult genResult = aiMindMapGenerator.generate(
-                docId, SecurityUtils.getCurrentUserId(), docUuid, sectionContext);
+                docId, docUuid, sectionContext);
 
         if (!genResult.isSuccess()) {
             throw new IllegalStateException("思维导图生成失败: 未从文档中提取到足够的内容");
