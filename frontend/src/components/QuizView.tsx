@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil } from "lucide-react";
+import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { DeckRecord, QuizItem, QuizAttemptRecord, WeaknessItem } from "@/lib/api";
@@ -28,8 +28,8 @@ interface Props {
   onGenerated?: () => void;
   onContextChange?: (hint: string) => void;
   embedded?: boolean;
-  /** 大纲选中的章节 IDs */
-  selectedOutlineSections?: string[];
+  /** 大纲选中的章节上下文（含 ID 和标题） */
+  sectionContext?: string;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
 }
@@ -45,7 +45,7 @@ function isAnswerMatch(input: string, answer: string): boolean {
   return normalize(input) === normalize(answer);
 }
 
-export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, selectedOutlineSections, generateTrigger }: Props) {
+export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, generateTrigger }: Props) {
   const [view, setView] = useState<"decks" | "quiz">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
@@ -77,6 +77,27 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const [weakness, setWeakness] = useState<WeaknessItem[]>([]);
 
   const wrongQuizzes = quizzes.filter((q) => answers.some((a) => a.quizId === q.id && !a.correct));
+
+  const handleExportCSV = () => {
+    if (quizzes.length === 0) { toast.info("暂无题目可导出"); return; }
+    const escapeCSV = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const header = "题目,选项,正确答案,解析";
+    const rows = quizzes.map((q) => [
+      escapeCSV(q.question),
+      escapeCSV(q.options.join(" | ")),
+      escapeCSV(q.answer),
+      escapeCSV(q.explanation ?? ""),
+    ].join(","));
+    const csv = "﻿" + [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `测验_${currentDeck?.title ?? "导出"}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("已导出 CSV");
+  };
 
   const startReview = () => {
     setReviewMode(true);
@@ -193,7 +214,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     abortRef.current = controller;
     setLoading(true);
     try {
-      await generateApi(undefined, undefined, sessionId, controller.signal);
+      await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined);
       const fresh = await listDecks(docId!, "QUIZ");
       setDecks(fresh);
       onGenerated?.();
@@ -211,7 +232,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   };
 
   // 从大纲页面跳转过来时自动触发生成
-  const triggerRef = useRef(0);
+  const triggerRef = useRef(generateTrigger?.counter ?? 0);
+  useEffect(() => { triggerRef.current = generateTrigger?.counter ?? 0; }, [docId]);
   useEffect(() => {
     if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "quiz") {
       triggerRef.current = generateTrigger.counter;
@@ -278,35 +300,42 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   if (view === "decks") {
     return (
       <div className="flex flex-col h-full">
-        {!embedded && (
-          <div className="flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 border-b bg-muted/20 shrink-0">
+        <div className="flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 border-b bg-muted/20 shrink-0">
+          {!embedded && (
             <h2 className="text-xs sm:text-sm font-medium text-foreground/80 flex items-center gap-1.5 sm:gap-2">
               <HelpCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
               测试题组
             </h2>
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30" onClick={() => setShowErrorBook(true)}>
-                <Target className="h-3.5 w-3.5" />
-                错题本
+          )}
+          {embedded && <div />}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30" onClick={() => setShowErrorBook(true)}>
+              <Target className="h-3.5 w-3.5" />
+              错题本
+            </Button>
+            {(quizzes.length > 0 || decks.length > 0) && (
+              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8" onClick={handleExportCSV}>
+                <Download className="h-3.5 w-3.5" />
+                导出
               </Button>
-              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>
-                {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
-                {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
+            )}
+            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>
+              {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
+              {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
+            </Button>
+            {loading ? (
+              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
+                <XCircle className="h-3.5 w-3.5" />
+                取消生成
               </Button>
-              {loading ? (
-                <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
-                  <XCircle className="h-3.5 w-3.5" />
-                  取消生成
-                </Button>
-              ) : (
-                <Button size="sm" className="rounded-xl gap-1.5 h-8" onClick={handleGenerate} disabled={!sessionId}>
-                  <Sparkles className="h-3.5 w-3.5" />
-                  一键生成
-                </Button>
-              )}
-            </div>
+            ) : (
+              <Button size="sm" className="rounded-xl gap-1.5 h-8" onClick={handleGenerate} disabled={!sessionId}>
+                <Sparkles className="h-3.5 w-3.5" />
+                一键生成
+              </Button>
+            )}
           </div>
-        )}
+        </div>
 
         {/* 思维导图生成进度条 */}
         {mindMapGenerating && (

@@ -1,6 +1,18 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+
+/** crypto.randomUUID polyfill for non-secure contexts (http://) */
+function randomId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+    });
+  }
+}
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { MessageBubble } from "./MessageBubble";
@@ -86,7 +98,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       } catch { /* fallback */ }
       if (cancelled) return;
 
-      const newId = crypto.randomUUID();
+      const newId = randomId();
       const c: Conversation = { id: newId, title: "新对话", createdAt: new Date().toISOString() };
       setConversations([c]);
       setActiveId(newId);
@@ -123,7 +135,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
   const createConversation = (list?: Conversation[]) => {
     const convs = list ?? loadConversations();
     const c: Conversation = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       title: "新对话",
       createdAt: new Date().toISOString(),
     };
@@ -152,7 +164,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       if (convs.length > 0) {
         setActiveId(convs[0].id);
       } else {
-        const newId = crypto.randomUUID();
+        const newId = randomId();
         const c: Conversation = { id: newId, title: "新对话", createdAt: new Date().toISOString() };
         saveConversations([c]);
         setConversations([c]);
@@ -211,8 +223,8 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       }
     }
 
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
-    const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: "", loading: true };
+    const userMsg: Message = { id: randomId(), role: "user", content: text };
+    const assistantMsg: Message = { id: randomId(), role: "assistant", content: "", loading: true };
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput("");

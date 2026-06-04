@@ -19,7 +19,7 @@ export interface UploadedDoc {
   sessionId: number;
   name: string;
   size: number;
-  status: "uploading" | "done" | "error";
+  status: "uploading" | "processing" | "done" | "error";
   chunks?: number;
 }
 
@@ -247,7 +247,9 @@ export function AppSidebar({
                           ? "bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/30"
                           : doc.status === "error"
                             ? "bg-destructive"
-                            : "bg-amber-400 animate-pulse",
+                            : doc.status === "processing"
+                              ? "bg-blue-400 animate-pulse"
+                              : "bg-amber-400 animate-pulse",
                       )}
                     />
                   </div>

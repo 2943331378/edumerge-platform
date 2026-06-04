@@ -20,13 +20,13 @@ interface Props {
   docStatus?: string | null;
   embedded?: boolean;
   onContextChange?: (hint: string) => void;
-  /** 大纲选中的章节 IDs */
-  selectedOutlineSections?: string[];
+  /** 大纲选中的章节上下文（含 ID 和标题） */
+  sectionContext?: string;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
 }
 
-export function MindMapView({ docId, docStatus, embedded, onContextChange, selectedOutlineSections, generateTrigger }: Props) {
+export function MindMapView({ docId, docStatus, embedded, onContextChange, sectionContext, generateTrigger }: Props) {
   const [view, setView] = useState<"list" | "viewer">("list");
   const [mindMaps, setMindMaps] = useState<MindMapRecord[]>([]);
   const [currentMap, setCurrentMap] = useState<MindMapRecord | null>(null);
@@ -52,10 +52,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, selec
     if (!docId || generating) return;
     setGenerating(true);
     try {
-      const sectionContext = selectedOutlineSections && selectedOutlineSections.length > 0
-        ? selectedOutlineSections.join(", ")
-        : undefined;
-      const data = await generateMindMap(docId, sectionContext);
+      const data = await generateMindMap(docId, sectionContext || undefined);
       setCurrentMap(data);
       setView("viewer");
       await reloadList();
@@ -64,10 +61,11 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, selec
       toast.error("思维导图生成失败");
     }
     setGenerating(false);
-  }, [docId, generating, selectedOutlineSections, reloadList]);
+  }, [docId, generating, sectionContext, reloadList]);
 
   // 从大纲跳转自动触发
-  const triggerRef = useRef(0);
+  const triggerRef = useRef(generateTrigger?.counter ?? 0);
+  useEffect(() => { triggerRef.current = generateTrigger?.counter ?? 0; }, [docId]);
   useEffect(() => {
     if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "mindmap") {
       triggerRef.current = generateTrigger.counter;

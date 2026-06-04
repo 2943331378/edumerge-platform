@@ -22,7 +22,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 const TOKEN_KEY = "edumerge_token";
 const USER_KEY = "edumerge_user";
-const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8085/api";
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);

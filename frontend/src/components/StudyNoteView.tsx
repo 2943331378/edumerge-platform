@@ -18,7 +18,7 @@ interface Props {
   onGenerated?: () => void;
   onContextChange?: (hint: string) => void;
   /** 大纲选中的章节 IDs，从 DocumentOutlineView 传入 */
-  selectedOutlineSections?: string[];
+  sectionContext?: string;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
 }
@@ -52,7 +52,7 @@ const markdownComponents: Components = {
   ),
 };
 
-export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onContextChange, selectedOutlineSections, generateTrigger }: Props) {
+export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onContextChange, sectionContext, generateTrigger }: Props) {
   const [note, setNote] = useState<StudyNoteRecord | null>(null);
   const [history, setHistory] = useState<StudyNoteRecord[]>([]);
   const [activeVersionIdx, setActiveVersionIdx] = useState(0);
@@ -114,7 +114,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     abortRef.current = controller;
     setGenerating(true);
     try {
-      await generateStudyNote(docId, requirements.trim() || undefined, controller.signal);
+      await generateStudyNote(docId, requirements.trim() || undefined, controller.signal, sectionContext || undefined);
       // reload history to include newly generated note
       const list = await listNoteHistory(docId);
       loadHistory(list);
@@ -130,7 +130,11 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
   };
 
   // 从大纲页面跳转过来时自动触发生成
-  const triggerRef = useRef(0);
+  const triggerRef = useRef(generateTrigger?.counter ?? 0);
+  useEffect(() => {
+    // docId 变化时重置 ref，防止切换文档时旧 trigger 误触发
+    triggerRef.current = generateTrigger?.counter ?? 0;
+  }, [docId]);
   useEffect(() => {
     if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "note") {
       triggerRef.current = generateTrigger.counter;
@@ -218,8 +222,8 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
 
   return (
     <div className="flex h-full flex-col">
-      {!embedded && (
-        <div className="flex shrink-0 items-center justify-between border-b bg-muted/20 px-6 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b bg-muted/20 px-6 py-3">
+        {!embedded && (
           <div className="flex items-center gap-2">
             <NotebookText className="h-4 w-4 text-muted-foreground" />
             <div>
@@ -227,6 +231,8 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
               {generatedAt && <p className="text-[11px] text-muted-foreground/60">生成时间 {generatedAt}</p>}
             </div>
           </div>
+        )}
+        {embedded && <div />}
         <div className="flex items-center gap-2">
           {note?.content && !editing && (
             <>
@@ -256,19 +262,8 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
               </Button>
             </>
           )}
-          {generating ? (
-            <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
-              <RotateCw className="h-3.5 w-3.5 animate-spin" />取消生成
-            </Button>
-          ) : (
-            <Button size="sm" className="h-8 rounded-xl gap-1.5" onClick={handleGenerate} disabled={!isReady}>
-              <Sparkles className="h-3.5 w-3.5" />
-              {note?.content ? "重新生成" : "一键生成"}
-            </Button>
-          )}
         </div>
       </div>
-      )}
 
       {isReady && (
         <div className="shrink-0 px-6 pt-2 pb-1">

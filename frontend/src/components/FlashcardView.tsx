@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X } from "lucide-react";
+import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download } from "lucide-react";
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
 import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards } from "@/lib/api";
 import { toast } from "sonner";
@@ -26,8 +26,8 @@ interface Props {
   onGenerated?: () => void;
   onContextChange?: (hint: string) => void;
   embedded?: boolean;
-  /** 大纲选中的章节 IDs */
-  selectedOutlineSections?: string[];
+  /** 大纲选中的章节上下文（含 ID 和标题） */
+  sectionContext?: string;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
 }
@@ -37,7 +37,7 @@ function isNewDeck(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 24 * 60 * 60 * 1000;
 }
 
-export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, selectedOutlineSections, generateTrigger }: Props) {
+export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, generateTrigger }: Props) {
   const [view, setView] = useState<"decks" | "preview" | "cards">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [cards, setCards] = useState<FlashcardItem[]>([]);
@@ -64,6 +64,32 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [dueCount, setDueCount] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const autoNextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleExportCSV = async () => {
+    let exportCards = cards;
+    if (exportCards.length === 0 && decks.length > 0) {
+      // 未进入具体卡片组时，加载第一个有卡片的组
+      for (const deck of decks) {
+        try {
+          const d = await listFlashcardsByDeck(deck.id);
+          if (d.length > 0) { exportCards = d; break; }
+        } catch { /* skip */ }
+      }
+    }
+    if (exportCards.length === 0) { toast.info("暂无卡片可导出"); return; }
+    const escapeCSV = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const header = "问题,答案,解析";
+    const rows = exportCards.map((c) => [escapeCSV(c.question), escapeCSV(c.answer), escapeCSV(c.explanation ?? "")].join(","));
+    const csv = "﻿" + [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `闪卡_${currentDeck?.title ?? "导出"}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("已导出 CSV");
+  };
 
   // 组件卸载时清理定时器
   useEffect(() => {
@@ -210,7 +236,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     abortRef.current = controller;
     setLoading(true);
     try {
-      await generateApi(undefined, undefined, sessionId, controller.signal);
+      await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined);
       const fresh = await listDecks(docId!, "FLASHCARD");
       setDecks(fresh);
       onGenerated?.();
@@ -230,7 +256,8 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   };
 
   // 从大纲页面跳转过来时自动触发生成
-  const triggerRef = useRef(0);
+  const triggerRef = useRef(generateTrigger?.counter ?? 0);
+  useEffect(() => { triggerRef.current = generateTrigger?.counter ?? 0; }, [docId]);
   useEffect(() => {
     if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "flashcard") {
       triggerRef.current = generateTrigger.counter;
@@ -280,6 +307,12 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               }}>
                 <RotateCw className="h-3.5 w-3.5" />
                 到期复习 ({dueCount})
+              </Button>
+            )}
+            {(cards.length > 0 || decks.length > 0) && (
+              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8" onClick={handleExportCSV}>
+                <Download className="h-3.5 w-3.5" />
+                导出
               </Button>
             )}
             <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>

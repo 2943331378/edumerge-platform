@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -18,12 +18,15 @@ import { FlowNoteView } from "@/components/FlowNoteView";
 import { KnowledgeGraphPage } from "@/components/KnowledgeGraphPage";
 import { DocumentOutlineView } from "@/components/DocumentOutlineView";
 import { StatsDashboard } from "@/components/StatsDashboard";
+import { OnboardingTour, isOnboardingDone } from "@/components/OnboardingTour";
+import { StepHint, isStepHintDismissed, dismissStepHint } from "@/components/StepHint";
 import { useAuth } from "@/lib/auth-context";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import {
   Upload, NotebookText, GitFork, Layers, HelpCircle,
   MessageSquare, ChevronLeft, ChevronRight,
   FileText, Loader2, X, BarChart3, Menu, Search, LogOut, User, BookOpen, GitBranch,
+  CheckCircle2, Clock,
 } from "lucide-react";
 import type { SessionRecord, MindMapRecord, StudyNoteRecord } from "@/lib/api";
 import { listSessions, uploadDocument, deleteDocument } from "@/lib/api";
@@ -54,6 +57,62 @@ const OUTLINE_STEP_MAP: Record<string, number> = {
   quiz: 5,
 };
 
+/** 处理阶段定义 */
+const PROCESSING_STAGES = [
+  { key: "UPLOADING", label: "上传文件", icon: Upload },
+  { key: "PROCESSING", label: "解析文档 & 向量化", icon: Loader2 },
+  { key: "COMPLETED", label: "处理完成", icon: CheckCircle2 },
+] as const;
+
+/** 文档处理进度卡片 — 展示当前处理阶段 */
+function ProcessingStatusCard({ fileName, status, chunkCount }: {
+  fileName: string;
+  status: string;
+  chunkCount: number | null;
+}) {
+  const activeIdx = status === "UPLOADING" ? 0 : status === "COMPLETED" ? 2 : 1;
+  return (
+    <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-6 shadow-sm space-y-5">
+      <div className="text-center space-y-1">
+        <h3 className="text-sm font-semibold text-foreground truncate">{fileName}</h3>
+        <p className="text-xs text-muted-foreground">正在后台处理，请稍候...</p>
+      </div>
+      <div className="flex items-center justify-between">
+        {PROCESSING_STAGES.map((stage, i) => {
+          const Icon = stage.icon;
+          const isActive = i === activeIdx;
+          const isDone = i < activeIdx;
+          return (
+            <div key={stage.key} className="flex flex-col items-center gap-1.5 flex-1">
+              <div className={cn(
+                "relative flex h-9 w-9 items-center justify-center rounded-full transition-all",
+                isDone ? "bg-primary/15 text-primary" : isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground/40",
+              )}>
+                <Icon className={cn("h-4 w-4", isActive && "animate-spin")} />
+                {isActive && <span className="absolute inset-0 rounded-full animate-ping bg-primary/30" />}
+              </div>
+              <span className={cn("text-[10px] font-medium", isActive ? "text-primary" : isDone ? "text-foreground/70" : "text-muted-foreground/40")}>
+                {stage.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {/* 连接线 */}
+      <div className="relative mx-4 -mt-8 mb-2 h-0.5">
+        <div className="absolute inset-0 bg-muted rounded-full" />
+        <div className="absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-700"
+          style={{ width: `${(activeIdx / (PROCESSING_STAGES.length - 1)) * 100}%` }} />
+      </div>
+      {chunkCount != null && chunkCount > 0 && (
+        <p className="text-center text-[11px] text-muted-foreground">
+          已切分 <span className="font-medium text-foreground">{chunkCount}</span> 个文本片段
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const router = useRouter();
   const auth = useAuth();
@@ -72,7 +131,7 @@ export default function HomePage() {
       note?: StudyNoteRecord | null;
       mindMap?: MindMapRecord | null;
       completedSteps?: Set<number>;
-      selectedOutlineSections?: string[];
+      sectionContext?: string;
       outlineGenerateTrigger?: { type: string; counter: number };
     }>
   >(new Map());
@@ -84,10 +143,38 @@ export default function HomePage() {
   const [docSearch, setDocSearch] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
+  // Onboarding tour — show on first login
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => {
+    if (!auth.loading && auth.token && !isOnboardingDone()) {
+      setTourOpen(true);
+    }
+  }, [auth.loading, auth.token]);
+
   // Derive current session's state from cache
   const activeCache = activeSession ? sessionCache.get(activeSession.id) : undefined;
   const note = activeCache?.note ?? null;
   const completedSteps = activeCache?.completedSteps ?? new Set<number>();
+
+  // Step hints — show contextual hint on first visit to each step
+  const [stepHintVisible, setStepHintVisible] = useState(false);
+  useEffect(() => {
+    // Auto-hide if step already has content (user already knows how it works)
+    const hasContent =
+      (currentStep === 1 && !!activeSession) ||
+      (currentStep === 2 && !!note) ||
+      (currentStep >= 3 && completedSteps.has(currentStep));
+    if (hasContent) {
+      dismissStepHint(currentStep);
+      setStepHintVisible(false);
+    } else {
+      setStepHintVisible(!isStepHintDismissed(currentStep));
+    }
+  }, [currentStep, activeSession, note, sessionCache]);
+  const dismissHint = () => {
+    dismissStepHint(currentStep);
+    setStepHintVisible(false);
+  };
 
   const updateSessionCache = (updates: Partial<NonNullable<typeof activeCache>>) => {
     if (!activeSession) return;
@@ -100,10 +187,10 @@ export default function HomePage() {
   };
 
   // 大纲底部工具栏 → 导航到目标步骤并传递选中章节
-  const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", selectedSections: string[]) => {
+  const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string) => {
     const prev = activeCache?.outlineGenerateTrigger?.counter ?? 0;
     updateSessionCache({
-      selectedOutlineSections: selectedSections,
+      sectionContext,
       outlineGenerateTrigger: { type, counter: prev + 1 },
     });
     const targetStep = OUTLINE_STEP_MAP[type];
@@ -115,9 +202,13 @@ export default function HomePage() {
       const list = await listSessions();
       setSessions(list);
       setActiveSession((cur) => {
-        if (cur?.id && list.find((s) => s.id === cur.id)) return cur;
-        const completed = list.find((s) => s.docStatus === "COMPLETED");
-        return completed ?? list[0] ?? null;
+        if (!cur?.id) {
+          const completed = list.find((s) => s.docStatus === "COMPLETED");
+          return completed ?? list[0] ?? null;
+        }
+        // 用列表中的最新数据替换，确保 status 等字段同步更新
+        const updated = list.find((s) => s.id === cur.id);
+        return updated ?? cur;
       });
     } catch { /* ignore */ }
   }, []);
@@ -127,20 +218,21 @@ export default function HomePage() {
     return () => clearTimeout(t);
   }, [loadSessions]);
 
-  // Auth guard: redirect to login if not authenticated
+  // Auth guard: redirect to landing page if not authenticated
   useEffect(() => {
     if (!auth.loading && !auth.token) {
-      router.replace("/login");
+      router.replace("/landing");
     }
   }, [auth.loading, auth.token, router]);
 
-  // 文档向量化异步处理中，定时刷新状态直至完成或失败
+  // 文档向量化异步处理中，自适应轮询（处理中 2s，空闲 10s）
   useEffect(() => {
     const hasPending = sessions.some(
       (s) => s.docStatus && s.docStatus !== "COMPLETED" && s.docStatus !== "FAILED",
     );
     if (!hasPending) return;
-    const timer = setInterval(loadSessions, 5000);
+    const interval = hasPending ? 2000 : 10000;
+    const timer = setInterval(loadSessions, interval);
     return () => clearInterval(timer);
   }, [sessions, loadSessions]);
 
@@ -154,7 +246,9 @@ export default function HomePage() {
         ? "done"
         : s.docStatus === "FAILED"
           ? "error"
-          : "uploading", // UPLOADING / PROCESSING 均显示处理中
+          : s.docStatus === "PROCESSING"
+            ? "processing"
+            : "uploading",
     chunks: s.chunkCount ?? 0,
   }));
 
@@ -162,11 +256,9 @@ export default function HomePage() {
     const s = sessions.find((x) => x.id === sessionId);
     if (s) {
       setActiveSession(s);
-      // Restore cached state for this session, or start fresh
-      const cached = sessionCache.get(s.id);
-      setCurrentStep(cached?.completedSteps && cached.completedSteps.size > 0 ? 2 : 1);
+      setCurrentStep(1);
     }
-  }, [sessions, sessionCache]);
+  }, [sessions]);
 
   const handleDeleteDocument = useCallback(async (sessionId: number) => {
     const session = sessions.find((s) => s.id === sessionId);
@@ -193,14 +285,22 @@ export default function HomePage() {
     setUploading(true);
     setUploadProgress(0);
     const timer = setInterval(() => {
-      setUploadProgress((p) => Math.min(p + 15, 70));
-    }, 400);
+      setUploadProgress((p) => Math.min(p + 15, 80));
+    }, 300);
     try {
       const result = await uploadDocument(file);
       clearInterval(timer);
       setUploadProgress(100);
       await loadSessions();
-      toast.success(`${result.fileName} 上传成功`);
+      // 上传后自动选中新文档
+      const list = await listSessions();
+      const newSession = list.find((s) => s.docId && String(s.docId) === result.documentId)
+        ?? list.find((s) => s.fileName === result.fileName);
+      if (newSession) {
+        setActiveSession(newSession);
+        setCurrentStep(1);
+      }
+      toast.success(`${result.fileName} 上传成功，正在后台处理`);
     } catch (err) {
       clearInterval(timer);
       toast.error(err instanceof Error ? err.message : "上传失败");
@@ -257,7 +357,33 @@ export default function HomePage() {
             />
           );
         }
-        // 未选中文档或处理中 → 显示上传+文档列表
+        // 已选中文档但处理中 → 显示处理进度卡片
+        if (activeSession && activeSession.docStatus && activeSession.docStatus !== "FAILED") {
+          return (
+            <div className="flex-1 flex flex-col items-center justify-center gap-6 p-4 md:p-8">
+              <ProcessingStatusCard
+                fileName={activeSession.fileName ?? activeSession.title}
+                status={activeSession.docStatus}
+                chunkCount={activeSession.chunkCount}
+              />
+            </div>
+          );
+        }
+        // 已选中文档但处理失败 → 显示错误提示
+        if (activeSession && activeSession.docStatus === "FAILED") {
+          return (
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 p-4 md:p-8">
+              <div className="text-center space-y-2 max-w-md">
+                <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-destructive/10 mb-2">
+                  <X className="h-7 w-7 text-destructive" />
+                </div>
+                <h2 className="text-lg font-semibold text-foreground">文档处理失败</h2>
+                <p className="text-sm text-muted-foreground">「{activeSession.fileName ?? activeSession.title}」处理时出错，请重新上传。</p>
+              </div>
+            </div>
+          );
+        }
+        // 未选中文档 → 显示上传+文档列表
         return (
           <div className="flex-1 flex flex-col items-center justify-center gap-4 md:gap-6 p-4 md:p-8">
             <div className="text-center space-y-2 max-w-md">
@@ -305,13 +431,13 @@ export default function HomePage() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    上传处理中...
+                    {uploadProgress < 80 ? "正在上传文件..." : "上传完成，准备处理..."}
                   </span>
                   <span className="text-xs text-muted-foreground">{uploadProgress}%</span>
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-primary transition-all duration-500"
+                    className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
                     style={{ width: `${uploadProgress}%` }}
                   />
                 </div>
@@ -350,6 +476,11 @@ export default function HomePage() {
                   >
                     <FileText className="h-3.5 w-3.5 shrink-0" />
                     <span className="flex-1 truncate">{s.fileName ?? s.title}</span>
+                    {s.docStatus && s.docStatus !== "COMPLETED" && s.docStatus !== "FAILED" && (
+                      <span className="text-[9px] text-muted-foreground/60 shrink-0">
+                        {s.docStatus === "UPLOADING" ? "上传中" : s.chunkCount ? `${s.chunkCount}片` : "处理中"}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {
@@ -365,10 +496,12 @@ export default function HomePage() {
                       className={cn(
                         "inline-block h-1.5 w-1.5 rounded-full shrink-0",
                         s.docStatus === "COMPLETED"
-                          ? "bg-emerald-400"
+                          ? "bg-lime-500"
                           : s.docStatus === "FAILED"
                             ? "bg-destructive"
-                            : "bg-amber-400 animate-pulse",
+                            : s.docStatus === "PROCESSING"
+                              ? "bg-blue-400 animate-pulse"
+                              : "bg-amber-400 animate-pulse",
                       )}
                     />
                   </div>
@@ -385,7 +518,7 @@ export default function HomePage() {
             docStatus={docStatus}
             embedded
             onContextChange={setChatContext}
-            selectedOutlineSections={activeCache?.selectedOutlineSections}
+            sectionContext={activeCache?.sectionContext}
             generateTrigger={activeCache?.outlineGenerateTrigger}
             onGenerated={() => {
               import("@/lib/api").then(({ getStudyNote }) => {
@@ -402,7 +535,7 @@ export default function HomePage() {
             docStatus={docStatus}
             embedded
             onContextChange={setChatContext}
-            selectedOutlineSections={activeCache?.selectedOutlineSections}
+            sectionContext={activeCache?.sectionContext}
             generateTrigger={activeCache?.outlineGenerateTrigger}
           />
         );
@@ -415,7 +548,7 @@ export default function HomePage() {
             sessionId={sessionId}
             embedded
             onContextChange={setChatContext}
-            selectedOutlineSections={activeCache?.selectedOutlineSections}
+            sectionContext={activeCache?.sectionContext}
             generateTrigger={activeCache?.outlineGenerateTrigger}
             onGenerated={() => updateSessionCache({ completedSteps: new Set([...completedSteps, 4]) })}
           />
@@ -429,6 +562,8 @@ export default function HomePage() {
             sessionId={sessionId}
             embedded
             onContextChange={setChatContext}
+            sectionContext={activeCache?.sectionContext}
+            generateTrigger={activeCache?.outlineGenerateTrigger}
             onGenerated={() => updateSessionCache({ completedSteps: new Set([...completedSteps, 5]) })}
           />
         );
@@ -482,16 +617,10 @@ export default function HomePage() {
             >
               <Menu className="h-4 w-4" />
             </button>
-            <Image
-              src="/logo_converted.svg"
-              alt="EduMerge"
-              width={28}
-              height={28}
-              priority
-              className="rounded-md hidden sm:block"
-            />
+            <div className="hidden sm:block">
+              <BrandMark variant="header" />
+            </div>
             <div>
-              <h1 className="text-sm font-semibold text-foreground">EduMerge</h1>
               {activeSession && (
                 <p className="text-[10px] text-muted-foreground truncate max-w-[120px] md:max-w-[200px]">
                   {activeSession.fileName ?? activeSession.title}
@@ -580,6 +709,14 @@ export default function HomePage() {
         )}
 
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+          {/* Contextual step hint — shown on first visit to each step */}
+          {!showStats && !showKnowledgeGraph && (
+            <StepHint
+              step={currentStep}
+              visible={stepHintVisible}
+              onDismiss={dismissHint}
+            />
+          )}
           {showKnowledgeGraph ? (
             <KnowledgeGraphPage
               sessions={sessions}
@@ -645,6 +782,9 @@ export default function HomePage() {
         activityType={STEP_ACTIVITY_MAP[currentStep] ?? null}
         contextHint={chatContext || null}
       />
+
+      {/* Onboarding tour — first-time user guide */}
+      <OnboardingTour open={tourOpen} onClose={() => setTourOpen(false)} />
     </div>
   );
 }

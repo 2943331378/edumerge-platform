@@ -2,7 +2,7 @@
  * API 抽象层 — 所有后端请求集中管理
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8085/api";
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -268,9 +268,10 @@ export async function listNoteHistory(docId: number): Promise<StudyNoteRecord[]>
   return request<StudyNoteRecord[]>(`/notes/history?docId=${docId}`);
 }
 
-export async function generateStudyNote(docId: number, requirements?: string, signal?: AbortSignal): Promise<StudyNoteRecord> {
+export async function generateStudyNote(docId: number, requirements?: string, signal?: AbortSignal, sectionContext?: string): Promise<StudyNoteRecord> {
   const body: Record<string, string> = { docId: String(docId) };
   if (requirements) body.requirements = requirements;
+  if (sectionContext) body.sectionContext = sectionContext;
   return request<StudyNoteRecord>("/notes/generate", {
     method: "POST",
     body: JSON.stringify(body),
@@ -325,11 +326,12 @@ export async function listFlashcardsByDeck(deckId: number): Promise<FlashcardIte
   return request<FlashcardItem[]>(`/flashcards?deckId=${deckId}`);
 }
 
-export async function generateFlashcards(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal): Promise<FlashcardItem[]> {
+export async function generateFlashcards(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string): Promise<FlashcardItem[]> {
   const body: Record<string, string> = {};
   if (sessionId) body.sessionId = String(sessionId);
   if (docId && !sessionId) body.docId = String(docId);
   if (docUuid && !sessionId) body.docUuid = docUuid;
+  if (sectionContext) body.sectionContext = sectionContext;
   return request<FlashcardItem[]>("/flashcards/generate", {
     method: "POST",
     body: JSON.stringify(body),
@@ -426,11 +428,12 @@ export async function listQuizAttempts(docId: number): Promise<QuizAttemptRecord
   return request<QuizAttemptRecord[]>(`/quizzes/attempts?docId=${docId}`);
 }
 
-export async function generateQuizzes(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal): Promise<QuizItem[]> {
+export async function generateQuizzes(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string): Promise<QuizItem[]> {
   const body: Record<string, string> = {};
   if (sessionId) body.sessionId = String(sessionId);
   if (docId && !sessionId) body.docId = String(docId);
   if (docUuid && !sessionId) body.docUuid = docUuid;
+  if (sectionContext) body.sectionContext = sectionContext;
   return request<QuizItem[]>("/quizzes/generate", {
     method: "POST",
     body: JSON.stringify(body),

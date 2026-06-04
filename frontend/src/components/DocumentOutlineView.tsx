@@ -23,7 +23,7 @@ import {
   BookOpen, FileText, Presentation, Wrench,
   ChevronRight, ChevronDown, Check, Minus, Pencil,
   RotateCw, Sparkles, Layers, GitFork, HelpCircle, NotebookText,
-  Loader2, RefreshCw,
+  Loader2, RefreshCw, Download,
 } from "lucide-react";
 
 // ═══════ 文档类型配置 ═══════
@@ -51,7 +51,7 @@ interface Props {
   embedded?: boolean;
   onContextChange?: (hint: string) => void;
   /** 当用户点击"生成xxx"时回调，传入选中的 section ids */
-  onGenerate?: (type: "note" | "mindmap" | "flashcard" | "quiz", selectedSections: string[]) => void;
+  onGenerate?: (type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string) => void;
 }
 
 // ═══════ 选择状态枚举 ═══════
@@ -107,12 +107,34 @@ export function DocumentOutlineView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
 
-  // 加载大纲
+  const handleExportMarkdown = () => {
+    if (!outline) return;
+    const lines: string[] = [`# 文档大纲`, "", `**类型**: ${outline.outline.docTypeLabel}`, `**总切块数**: ${outline.outline.totalChunks}`, ""];
+    const renderSection = (s: OutlineSection, depth: number) => {
+      lines.push(`${"#".repeat(depth + 1)} ${s.title}`);
+      lines.push(`> 切块范围: ${s.startChunk} - ${s.endChunk}`);
+      lines.push("");
+      s.children.forEach((c) => renderSection(c, depth + 1));
+    };
+    outline.outline.sections.forEach((s) => renderSection(s, 1));
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `文档大纲_${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("已导出 Markdown");
+  };
+
+  // 加载大纲 — 如果大纲不存在且文档已处理完成，自动生成
   useEffect(() => {
     if (!docId) { setLoading(false); return; }
+    let cancelled = false;
     setLoading(true);
     getDocumentOutline(docId)
       .then((data) => {
+        if (cancelled) return;
         setOutline(data);
         // 默认全选 + 全展开
         const allIds = data.outline.sections.flatMap(collectIds);
@@ -122,9 +144,49 @@ export function DocumentOutlineView({
           .map((s) => s.id);
         setExpanded(new Set(expandable));
       })
-      .catch(() => setOutline(null))
-      .finally(() => setLoading(false));
-  }, [docId]);
+      .catch(() => {
+        if (cancelled) return;
+        setOutline(null);
+        // 大纲不存在 + 文档已处理完成 → 自动生成 (仅一次)
+        if (docStatus === "COMPLETED" && !generating) {
+          setGenerating(true);
+          regenerateDocumentOutline(docId)
+            .then((data) => {
+              if (cancelled) return;
+              setOutline(data);
+              const allIds = data.outline.sections.flatMap(collectIds);
+              setSelected(new Set(allIds));
+              const expandable = data.outline.sections
+                .filter((s) => s.children.length > 0)
+                .map((s) => s.id);
+              setExpanded(new Set(expandable));
+            })
+            .catch(() => { /* 生成失败，用户可手动重试 */ })
+            .finally(() => { if (!cancelled) setGenerating(false); });
+        }
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [docId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 轮询等待大纲 — 当大纲正在后台生成时，定期检查是否已就绪
+  useEffect(() => {
+    if (!docId || outline || docStatus !== "COMPLETED") return;
+    const timer = setInterval(() => {
+      getDocumentOutline(docId)
+        .then((data) => {
+          setOutline(data);
+          const allIds = data.outline.sections.flatMap(collectIds);
+          setSelected(new Set(allIds));
+          const expandable = data.outline.sections
+            .filter((s) => s.children.length > 0)
+            .map((s) => s.id);
+          setExpanded(new Set(expandable));
+        })
+        .catch(() => { /* 还没生成完，继续等 */ });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [docId, outline, docStatus]);
 
   // 上报上下文
   useEffect(() => {
@@ -238,6 +300,17 @@ export function DocumentOutlineView({
     return outline.outline.sections.flatMap(collectIds).filter((id) => selected.has(id));
   }, [outline, selected]);
 
+  const selectedSectionContext = useMemo(() => {
+    if (!outline) return "";
+    const pairs: string[] = [];
+    const walk = (s: OutlineSection) => {
+      if (selected.has(s.id)) pairs.push(`${s.id} ${s.title}`);
+      s.children.forEach(walk);
+    };
+    outline.outline.sections.forEach(walk);
+    return pairs.join("; ");
+  }, [outline, selected]);
+
   // ═══════ Loading ═══════
   if (loading) {
     return (
@@ -286,8 +359,8 @@ export function DocumentOutlineView({
   return (
     <div className="flex flex-col h-full">
       {/* ── 顶部栏 ── */}
-      {!embedded && (
-        <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
+      <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
+        {!embedded && (
           <div className="flex items-center gap-2.5">
             <BookOpen className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-medium text-foreground/80">文档大纲</h2>
@@ -299,24 +372,36 @@ export function DocumentOutlineView({
               {docTypeConf.label}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+        )}
+        {embedded && <div />}
+        <div className="flex items-center gap-2">
+          {outline && (
             <Button
               size="sm"
               variant="outline"
               className="rounded-xl gap-1.5 h-8 text-xs"
-              onClick={handleRegenerate}
-              disabled={generating}
+              onClick={handleExportMarkdown}
             >
-              {generating ? (
-                <RotateCw className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-              重新生成
+              <Download className="h-3.5 w-3.5" />
+              导出
             </Button>
-          </div>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-xl gap-1.5 h-8 text-xs"
+            onClick={handleRegenerate}
+            disabled={generating}
+          >
+            {generating ? (
+              <RotateCw className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            重新生成
+          </Button>
         </div>
-      )}
+      </div>
 
       {/* ── 选择统计栏 ── */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 shrink-0">
@@ -378,7 +463,7 @@ export function DocumentOutlineView({
                   size="sm"
                   variant="outline"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("note", selectedSectionIds)}
+                  onClick={() => onGenerate?.("note", selectedSectionContext)}
                 >
                   <NotebookText className="h-3.5 w-3.5" />
                   笔记
@@ -387,7 +472,7 @@ export function DocumentOutlineView({
                   size="sm"
                   variant="outline"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("mindmap", selectedSectionIds)}
+                  onClick={() => onGenerate?.("mindmap", selectedSectionContext)}
                 >
                   <GitFork className="h-3.5 w-3.5" />
                   导图
@@ -396,7 +481,7 @@ export function DocumentOutlineView({
                   size="sm"
                   variant="outline"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("flashcard", selectedSectionIds)}
+                  onClick={() => onGenerate?.("flashcard", selectedSectionContext)}
                 >
                   <Layers className="h-3.5 w-3.5" />
                   卡片
@@ -404,7 +489,7 @@ export function DocumentOutlineView({
                 <Button
                   size="sm"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("quiz", selectedSectionIds)}
+                  onClick={() => onGenerate?.("quiz", selectedSectionContext)}
                 >
                   <HelpCircle className="h-3.5 w-3.5" />
                   测验
