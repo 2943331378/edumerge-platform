@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "docx": {
+      "command": "npx",
+      "args": ["-y", "@usejunior/docx-mcp"]
+    }
+  }
+}

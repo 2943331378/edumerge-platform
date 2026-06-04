@@ -162,7 +162,7 @@ controller/          → REST 端点（Result<T> 统一响应）— 14 个控制
 POST /api/documents/upload → 保存文件 → EmbeddingProducer.sendEmbeddingTask()
   → RabbitMQ EMBEDDING_QUEUE → DocumentListener.handleEmbeddingTask()
       → Apache PDFBox 提取文本
-      → DocumentSplitters.recursive(500, 50) 切块
+      → DocumentSplitters.recursive(1000, 100) 切块
       → EmbeddingModel 逐块向量化
       → MilvusEmbeddingStore.addAll() 存入 Milvus（metadata: document_id, chunk_index）
 ```
