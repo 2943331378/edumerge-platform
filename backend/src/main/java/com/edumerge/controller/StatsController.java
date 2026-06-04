@@ -74,19 +74,14 @@ public class StatsController {
     public Result<String> updateEvalMetrics(@RequestBody Map<String, Object> body) {
         log.info("[数据看板] 接收评测指标推送: hitRate={}, faithfulness={}, correctness={}",
                 body.get("hitRate"), body.get("avgFaithfulness"), body.get("avgCorrectness"));
-        try {
-            statsService.updateEvalMetrics(
-                    toDouble(body.get("hitRate")),
-                    toDouble(body.get("avgFaithfulness")),
-                    toDouble(body.get("avgCorrectness")),
-                    toDouble(body.get("compositeScore")),
-                    toInt(body.get("totalQuestions"))
-            );
-            return Result.success("评测指标已更新");
-        } catch (Exception e) {
-            log.error("评测指标更新失败: {}", e.getMessage());
-            return Result.fail("评测指标更新失败: " + e.getMessage());
-        }
+        statsService.updateEvalMetrics(
+                toDouble(body.get("hitRate")),
+                toDouble(body.get("avgFaithfulness")),
+                toDouble(body.get("avgCorrectness")),
+                toDouble(body.get("compositeScore")),
+                toInt(body.get("totalQuestions"))
+        );
+        return Result.success("评测指标已更新");
     }
 
     private static double toDouble(Object v) {

@@ -36,7 +36,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
     private CardDeckService cardDeckService;
 
     /** 根据文档内容自动生成学习卡片 (每次生成创建一个 Deck) */
-    public List<Flashcard> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions) {
+    public List<Flashcard> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 10,
                 "核心知识点 关键概念 重要内容 定义 原理 方法 总结 key concepts important content definition principles methods summary");
         if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
@@ -47,7 +47,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         // 拼装已有卡片问题列表，告知 LLM 避免重复
         String existingHint = buildExistingHint(existingQuestions);
 
-        String llmResponse = callLLM(context, existingHint);
+        String llmResponse = callLLM(context, existingHint, sectionContext);
         log.info("LLM 卡片生成响应: 长度={} 字符", llmResponse.length());
 
         // 创建卡片组, 将本次生成的卡片绑定到该组
@@ -67,7 +67,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         return sb.toString();
     }
 
-    private String callLLM(String context, String existingHint) {
+    private String callLLM(String context, String existingHint, String sectionContext) {
         String template = """
                 你是一个严谨的 AI 学习导师。请分析提供的文档片段，提取5个核心知识点并转化为学习卡片。
 
@@ -100,13 +100,18 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
 
                 deckTitle 要求: 提炼文档核心主题, 如"Java并发编程核心概念"、"机器学习基础术语"、"分布式系统设计要点"。
 
+                {SECTION_HINT}
                 # 文档上下文
                 {CONTEXT}
                 {EXISTING_HINT}
                 """;
+        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
+                ? "# 重点关注章节\n请重点围绕以下章节生成学习卡片：" + sectionContext.strip() + "\n"
+                : "";
         SystemMessage system = new SystemMessage(template
                 .replace("{CONTEXT}", context)
-                .replace("{EXISTING_HINT}", existingHint));
+                .replace("{EXISTING_HINT}", existingHint)
+                .replace("{SECTION_HINT}", sectionHint));
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);

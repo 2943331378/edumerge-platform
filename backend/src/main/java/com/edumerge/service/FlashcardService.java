@@ -1,20 +1,22 @@
 package com.edumerge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.edumerge.ai.AiFlashcardGenerator;
 import com.edumerge.entity.Flashcard;
+import com.edumerge.entity.FlashcardReviewLog;
 import com.edumerge.mapper.FlashcardMapper;
+import com.edumerge.mapper.FlashcardReviewLogMapper;
+import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-import com.edumerge.entity.FlashcardReviewLog;
-import com.edumerge.mapper.FlashcardReviewLogMapper;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 学习卡片 CRUD 服务 (AI 生成逻辑已抽离至 ai.AiFlashcardGenerator)
+ * 学习卡片业务服务 — CRUD + SM-2 间隔重复 + AI 生成
  */
 @Slf4j
 @Service
@@ -22,13 +24,23 @@ public class FlashcardService {
 
     private final FlashcardMapper flashcardMapper;
     private final FlashcardReviewLogMapper reviewLogMapper;
+    private final AiFlashcardGenerator aiFlashcardGenerator;
+    private final SessionService sessionService;
 
     @Autowired
-    public FlashcardService(FlashcardMapper flashcardMapper, FlashcardReviewLogMapper reviewLogMapper) {
+    public FlashcardService(FlashcardMapper flashcardMapper,
+                            FlashcardReviewLogMapper reviewLogMapper,
+                            AiFlashcardGenerator aiFlashcardGenerator,
+                            SessionService sessionService) {
         this.flashcardMapper = flashcardMapper;
         this.reviewLogMapper = reviewLogMapper;
+        this.aiFlashcardGenerator = aiFlashcardGenerator;
+        this.sessionService = sessionService;
     }
 
+    // ═══════ CRUD ═══════
+
+    @Transactional(readOnly = true)
     public List<Flashcard> listByDocId(Long docId) {
         return flashcardMapper.selectList(
                 new LambdaQueryWrapper<Flashcard>()
@@ -36,12 +48,14 @@ public class FlashcardService {
                         .orderByAsc(Flashcard::getId));
     }
 
+    @Transactional
     public Flashcard create(Flashcard card) {
         flashcardMapper.insert(card);
         log.info("学习卡片已创建: id={}, docId={}", card.getId(), card.getDocId());
         return card;
     }
 
+    @Transactional
     public void batchCreate(List<Flashcard> cards) {
         if (!cards.isEmpty()) {
             flashcardMapper.insert(cards, 50);
@@ -49,6 +63,7 @@ public class FlashcardService {
         }
     }
 
+    @Transactional(readOnly = true)
     public List<Flashcard> listByDeckId(Long deckId) {
         return flashcardMapper.selectList(
                 new LambdaQueryWrapper<Flashcard>()
@@ -56,20 +71,69 @@ public class FlashcardService {
                         .orderByAsc(Flashcard::getId));
     }
 
+    @Transactional
     public void updateById(Flashcard card) {
         flashcardMapper.updateById(card);
         log.info("学习卡片已更新: id={}", card.getId());
     }
 
+    @Transactional
     public int deleteById(Long id) {
         int rows = flashcardMapper.deleteById(id);
         if (rows > 0) log.info("学习卡片已删除: id={}", id);
         return rows;
     }
 
+    @Transactional(readOnly = true)
     public Flashcard getById(Long id) {
         return flashcardMapper.selectById(id);
     }
+
+    /** sessionId → docId 委托 */
+    public Long resolveDocId(Long sessionId) {
+        return sessionService.resolveDocId(sessionId);
+    }
+
+    // ═══════ AI 生成 ═══════
+
+    /**
+     * 生成学习卡片（支持 sessionId 或 docId+docUuid 两种入参）
+     *
+     * @return 生成的卡片列表
+     * @throws IllegalArgumentException 参数校验失败
+     */
+    @Transactional
+    public List<Flashcard> generate(String docIdStr, String docUuid, String sessionIdStr, String sectionContext) {
+        // sessionId 优先: 解析为 docId + docUuid
+        if (sessionIdStr != null && !sessionIdStr.isBlank()) {
+            try {
+                Long sid = Long.parseLong(sessionIdStr);
+                docIdStr = String.valueOf(sessionService.resolveDocId(sid));
+                docUuid = sessionService.resolveDocUuid(sid);
+            } catch (Exception e) {
+                throw new IllegalArgumentException("会话无效: " + e.getMessage());
+            }
+        }
+
+        if (docIdStr == null || docUuid == null) {
+            throw new IllegalArgumentException("docId/sessionId 和 docUuid 不能为空");
+        }
+
+        Long docId = Long.parseLong(docIdStr);
+        Long userId = SecurityUtils.getCurrentUserId();
+
+        // 加载已有卡片，传问题列表给 AI 以避免重复
+        List<String> existingQuestions = listByDocId(docId).stream()
+                .map(Flashcard::getQuestion).toList();
+
+        List<Flashcard> cards = aiFlashcardGenerator.generate(docId, userId, docUuid, existingQuestions, sectionContext);
+        if (cards.isEmpty()) {
+            throw new IllegalStateException("未检索到文档内容，生成失败");
+        }
+        return cards;
+    }
+
+    // ═══════ SM-2 间隔重复 ═══════
 
     /**
      * SM-2 间隔重复: 执行自评并更新卡片复习参数
@@ -79,6 +143,7 @@ public class FlashcardService {
      * @param userId 当前用户 ID（用于记录复习日志）
      * @return 更新后的卡片
      */
+    @Transactional
     public Flashcard review(Long cardId, int quality, Long userId) {
         Flashcard card = getById(cardId);
         if (card == null) throw new IllegalArgumentException("卡片不存在: " + cardId);
@@ -132,6 +197,7 @@ public class FlashcardService {
      * - nextReviewAt <= now (已到复习时间)
      * - 或 nextReviewAt 为 null 且 reviewCount == 0 (新卡片从未复习过)
      */
+    @Transactional(readOnly = true)
     public List<Flashcard> listDueCards(Long docId) {
         LocalDateTime now = LocalDateTime.now();
         return flashcardMapper.selectList(

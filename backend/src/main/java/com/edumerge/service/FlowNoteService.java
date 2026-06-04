@@ -8,6 +8,7 @@ import com.edumerge.mapper.ChatHistoryMapper;
 import com.edumerge.mapper.FlowNoteMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -29,6 +30,7 @@ public class FlowNoteService {
     }
 
     /** 按文档查询所有条目 */
+    @Transactional(readOnly = true)
     public List<FlowNote> listByDocId(Long docId) {
         return flowNoteMapper.selectList(
                 new LambdaQueryWrapper<FlowNote>()
@@ -37,6 +39,7 @@ public class FlowNoteService {
     }
 
     /** 按文档 + 分类筛选 */
+    @Transactional(readOnly = true)
     public List<FlowNote> listByDocIdAndCategory(Long docId, String category) {
         return flowNoteMapper.selectList(
                 new LambdaQueryWrapper<FlowNote>()
@@ -46,6 +49,7 @@ public class FlowNoteService {
     }
 
     /** 创建条目 */
+    @Transactional
     public FlowNote create(FlowNote note) {
         flowNoteMapper.insert(note);
         log.info("FlowNote 条目已创建: id={}, category={}", note.getId(), note.getCategory());
@@ -53,6 +57,7 @@ public class FlowNoteService {
     }
 
     /** 批量创建 */
+    @Transactional
     public void batchCreate(List<FlowNote> notes) {
         if (notes.isEmpty()) return;
         flowNoteMapper.insert(notes, 50);
@@ -60,17 +65,20 @@ public class FlowNoteService {
     }
 
     /** 更新条目 */
+    @Transactional
     public void update(Long id, FlowNote note) {
         note.setId(id);
         flowNoteMapper.updateById(note);
     }
 
     /** 删除条目 */
+    @Transactional
     public void delete(Long id) {
         flowNoteMapper.deleteById(id);
     }
 
     /** 标记已复习 */
+    @Transactional
     public void markReviewed(Long id) {
         FlowNote note = flowNoteMapper.selectById(id);
         if (note != null) {

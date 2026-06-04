@@ -96,6 +96,7 @@ public class MilvusVectorStoreConfig {
      * 大语言聊天模型 (OpenAI 兼容 API)
      */
     @Bean
+    @org.springframework.context.annotation.Primary
     public ChatLanguageModel chatLanguageModel() {
         log.info("初始化 OpenAI Chat 模型: {} (baseUrl={})", chatModelName, baseUrl);
         return OpenAiChatModel.builder()
@@ -104,6 +105,22 @@ public class MilvusVectorStoreConfig {
                 .modelName(chatModelName)
                 .temperature(0.1)
                 .timeout(Duration.ofSeconds(300))
+                .tokenizer(tokenizer())
+                .build();
+    }
+
+    /**
+     * 大纲生成专用快速模型 (deepseek-chat, 比 deepseek-v4-pro 快 5-10 倍)
+     */
+    @Bean("outlineChatModel")
+    public ChatLanguageModel outlineChatModel() {
+        log.info("初始化大纲生成专用模型: deepseek-chat (baseUrl={})", baseUrl);
+        return OpenAiChatModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .modelName("deepseek-chat")
+                .temperature(0.1)
+                .timeout(Duration.ofSeconds(120))
                 .tokenizer(tokenizer())
                 .build();
     }

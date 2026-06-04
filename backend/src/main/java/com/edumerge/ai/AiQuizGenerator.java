@@ -36,7 +36,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
     private CardDeckService cardDeckService;
 
     /** 根据文档内容自动生成测试题 (每次生成创建一个 Deck) */
-    public List<Quiz> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions) {
+    public List<Quiz> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext) {
         List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 15,
                 "核心概念 定义 原理 方法 应用场景 实践案例 技术细节 架构设计 关键要点 总结归纳 key concepts definition principles methods use cases examples technical details architecture key points summary");
         if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
@@ -46,7 +46,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
 
         String existingHint = buildExistingHint(existingQuestions);
 
-        String llmResponse = callLLM(context, existingHint);
+        String llmResponse = callLLM(context, existingHint, sectionContext);
         log.info("LLM 测试题生成响应: 长度={} 字符", llmResponse.length());
 
         String deckTitle = extractDeckTitle(llmResponse);
@@ -65,7 +65,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
         return sb.toString();
     }
 
-    private String callLLM(String context, String existingHint) {
+    private String callLLM(String context, String existingHint, String sectionContext) {
         String template = """
                 你是一个严谨的 AI 学习导师。请分析提供的文档片段，生成5道高质量测试题，包含选择题和填空题两种题型。
 
@@ -112,13 +112,18 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 选择题的 options 必须有4项；填空题的 options 必须为空数组[]。
                 deckTitle 要求: 提炼文档核心主题, 如"Java并发编程测试"、"机器学习基础测验"、"分布式系统设计题"。
 
+                {SECTION_HINT}
                 # 文档上下文
                 {CONTEXT}
                 {EXISTING_HINT}
                 """;
+        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
+                ? "# 重点关注章节\n请重点围绕以下章节生成测试题：" + sectionContext.strip() + "\n"
+                : "";
         SystemMessage system = new SystemMessage(template
                 .replace("{CONTEXT}", context)
-                .replace("{EXISTING_HINT}", existingHint));
+                .replace("{EXISTING_HINT}", existingHint)
+                .replace("{SECTION_HINT}", sectionHint));
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);

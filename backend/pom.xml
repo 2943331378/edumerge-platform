@@ -205,7 +205,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
                     <!-- fork=false: 在 Maven 同 JVM 内运行, 绕开 Windows 命令行 classpath 32767 字符限制 -->
-                    <fork>false</fork>
+<!--                    <fork>false</fork>-->
                     <jvmArguments>-Dfile.encoding=UTF-8</jvmArguments>
                     <excludes>
                         <exclude>

@@ -1,9 +1,11 @@
 package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.*;
 import com.edumerge.entity.Conversation;
 import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.ConversationService;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -24,20 +26,18 @@ public class ConversationController {
     }
 
     @GetMapping
-    public Result<List<Conversation>> list(@RequestParam(required = false) Long docId) {
+    public Result<List<ConversationResponse>> list(@RequestParam(required = false) Long docId) {
         Long userId = SecurityUtils.getCurrentUserId();
-        if (docId != null) {
-            return Result.success(conversationService.listByDocId(userId, docId));
-        }
-        return Result.success(conversationService.listByUserId(userId));
+        List<Conversation> list = docId != null
+                ? conversationService.listByDocId(userId, docId)
+                : conversationService.listByUserId(userId);
+        return Result.success(DtoMapper.toConversationResponseList(list));
     }
 
     @PutMapping("/{sessionId}")
-    public Result<Void> rename(@PathVariable String sessionId, @RequestBody Map<String, String> body) {
-        String title = body.get("title");
-        if (title == null || title.isBlank()) return Result.fail("标题不能为空");
+    public Result<Void> rename(@PathVariable String sessionId, @Valid @RequestBody RenameConversationRequest req) {
         Long userId = SecurityUtils.getCurrentUserId();
-        conversationService.updateTitle(sessionId, title.trim(), userId);
+        conversationService.updateTitle(sessionId, req.getTitle().trim(), userId);
         return Result.success("已重命名", null);
     }
 

@@ -44,8 +44,10 @@ public class AiMindMapGenerator extends AiGeneratorBase {
      * @return 生成结果 (含 deckId、title、content)
      */
     public MindMapResult generate(Long docId, Long userId, String docUuid, String sectionContext) {
-        // 步骤 1: 从 Milvus 检索文档核心内容 — 非结构化数据提取
-        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 20,
+        long startTime = System.currentTimeMillis();
+
+        // 步骤 1: 从 Milvus 检索文档核心内容 — top-K=12 平衡质量与速度
+        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 12,
                 "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容 定义 原理 方法 总结 document structure headings core topic key concepts hierarchy outline main content definition principles methods summary");
         if (matches.isEmpty()) {
             log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
@@ -54,11 +56,12 @@ public class AiMindMapGenerator extends AiGeneratorBase {
 
         // 步骤 2: 拼装上下文 — 标注来源信息实现数据溯源
         String context = buildContextWithPages(matches);
-        log.info("思维导图上下文构建完成: docId={}, 块数={}", docId, matches.size());
+        log.info("思维导图上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
 
-        // 步骤 3: 调用 LLM 生成 Markdown 思维导图 — 非结构化→结构化转化核心
+        // 步骤 3: 调用 LLM 生成 Markdown 思维导图
+        long llmStart = System.currentTimeMillis();
         String markdown = callLLM(context, sectionContext);
-        log.info("LLM 思维导图生成完成: docId={}, 长度={}", docId, markdown.length());
+        log.info("LLM 思维导图生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, markdown.length(), System.currentTimeMillis() - llmStart);
 
         // 步骤 4: 清理验证 — 确保输出符合 Markdown 层级格式
         markdown = cleanMarkdown(markdown);

@@ -1,6 +1,8 @@
 package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.CardDeckResponse;
+import com.edumerge.dto.DtoMapper;
 import com.edumerge.entity.CardDeck;
 import com.edumerge.service.CardDeckService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,9 +22,9 @@ public class DeckController {
     }
 
     @GetMapping
-    public Result<List<CardDeck>> list(@RequestParam(required = false) Long docId,
-                                        @RequestParam(required = false) String type) {
-        return Result.success(cardDeckService.listByDocIdAndType(docId, type));
+    public Result<List<CardDeckResponse>> list(@RequestParam(required = false) Long docId,
+                                                @RequestParam(required = false) String type) {
+        return Result.success(DtoMapper.toDeckResponseList(cardDeckService.listByDocIdAndType(docId, type)));
     }
 
     @DeleteMapping("/{id}")

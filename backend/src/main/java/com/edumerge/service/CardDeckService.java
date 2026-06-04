@@ -6,6 +6,7 @@ import com.edumerge.mapper.CardDeckMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -23,6 +24,7 @@ public class CardDeckService {
     }
 
     /** 创建卡片组 (默认标题) */
+    @Transactional
     public CardDeck create(Long docId, String type) {
         String suffix = switch (type) {
             case "FLASHCARD" -> "核心概念提取";
@@ -36,6 +38,7 @@ public class CardDeckService {
     }
 
     /** 创建卡片组 (自定义标题) */
+    @Transactional
     public CardDeck create(Long docId, String type, String customTitle) {
         String title = (customTitle != null && !customTitle.isBlank()) ? customTitle.trim() : null;
         if (title == null) return create(docId, type);
@@ -51,6 +54,7 @@ public class CardDeckService {
     }
 
     /** 按文档和类型列出卡片组 */
+    @Transactional(readOnly = true)
     public List<CardDeck> listByDocIdAndType(Long docId, String type) {
         return cardDeckMapper.selectList(
                 new LambdaQueryWrapper<CardDeck>()
@@ -60,11 +64,13 @@ public class CardDeckService {
     }
 
     /** 按 ID 查询 */
+    @Transactional(readOnly = true)
     public CardDeck getById(Long id) {
         return cardDeckMapper.selectById(id);
     }
 
     /** 删除卡片组 */
+    @Transactional
     public void delete(Long id) {
         cardDeckMapper.deleteById(id);
         log.info("卡片组已删除: id={}", id);

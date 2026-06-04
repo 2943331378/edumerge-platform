@@ -6,6 +6,7 @@ import com.edumerge.entity.*;
 import com.edumerge.mapper.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -35,11 +36,13 @@ public class KnowledgeGraphService {
     }
 
     /** 触发 AI 生成 */
+    @Transactional
     public AiKnowledgeGraphGenerator.KnowledgeGraphResult generate(Long userId) {
         return generator.generate(userId);
     }
 
     /** 获取完整图谱数据 */
+    @Transactional(readOnly = true)
     public Map<String, Object> getGraph(Long userId) {
         List<KnowledgeConcept> concepts = conceptMapper.selectList(
                 new LambdaQueryWrapper<KnowledgeConcept>()
@@ -86,6 +89,7 @@ public class KnowledgeGraphService {
     }
 
     /** 获取概念详情 */
+    @Transactional(readOnly = true)
     public Map<String, Object> getConceptDetail(Long conceptId) {
         KnowledgeConcept concept = conceptMapper.selectById(conceptId);
         if (concept == null) return null;
@@ -136,6 +140,7 @@ public class KnowledgeGraphService {
     }
 
     /** 获取概念在各文档中的来源 */
+    @Transactional(readOnly = true)
     public List<Map<String, Object>> getConceptDocuments(Long conceptId) {
         List<ConceptDocument> docs = conceptDocMapper.selectList(
                 new LambdaQueryWrapper<ConceptDocument>().eq(ConceptDocument::getConceptId, conceptId));

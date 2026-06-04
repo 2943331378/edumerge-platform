@@ -9,6 +9,7 @@ import com.edumerge.mapper.ConversationMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -24,6 +25,7 @@ public class ConversationService {
     }
 
     /** 确保会话存在 — 不存在则创建 (关联文档), 存在时更新 docId */
+    @Transactional
     public Conversation ensure(String sessionId, Long userId, String title, Long docId) {
         Conversation existing = getBySessionId(sessionId);
         if (existing != null) {
@@ -44,6 +46,7 @@ public class ConversationService {
     }
 
     /** 更新会话标题 (带归属校验) */
+    @Transactional
     public void updateTitle(String sessionId, String title, Long userId) {
         Conversation c = getBySessionId(sessionId);
         if (c == null || !c.getUserId().equals(userId)) {
@@ -56,6 +59,7 @@ public class ConversationService {
     }
 
     /** 列出用户的所有会话 */
+    @Transactional(readOnly = true)
     public List<Conversation> listByUserId(Long userId) {
         return conversationMapper.selectList(
                 new LambdaQueryWrapper<Conversation>()
@@ -64,6 +68,7 @@ public class ConversationService {
     }
 
     /** 按文档列出会话 */
+    @Transactional(readOnly = true)
     public List<Conversation> listByDocId(Long userId, Long docId) {
         return conversationMapper.selectList(
                 new LambdaQueryWrapper<Conversation>()
@@ -73,6 +78,7 @@ public class ConversationService {
     }
 
     /** 按 sessionId 查找 */
+    @Transactional(readOnly = true)
     public Conversation getBySessionId(String sessionId) {
         return conversationMapper.selectOne(
                 new LambdaQueryWrapper<Conversation>()
@@ -80,6 +86,7 @@ public class ConversationService {
     }
 
     /** 删除会话 (软删除，带归属校验) */
+    @Transactional
     public void delete(String sessionId, Long userId) {
         Conversation c = getBySessionId(sessionId);
         if (c == null || !c.getUserId().equals(userId)) {

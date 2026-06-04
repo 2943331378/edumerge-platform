@@ -1,7 +1,9 @@
 package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.DtoMapper;
 import com.edumerge.dto.FlowNoteExtractRequest;
+import com.edumerge.dto.FlowNoteResponse;
 import com.edumerge.entity.FlowNote;
 import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.DocumentService;
@@ -27,14 +29,14 @@ public class FlowNoteController {
 
     /** 查询 FlowNote 条目列表 */
     @GetMapping
-    public Result<List<FlowNote>> list(@RequestParam Long docId,
-                                        @RequestParam(required = false) String category) {
-        return Result.success(flowNoteService.listByDocIdAndCategory(docId, category));
+    public Result<List<FlowNoteResponse>> list(@RequestParam Long docId,
+                                                @RequestParam(required = false) String category) {
+        return Result.success(DtoMapper.toFlowNoteResponseList(flowNoteService.listByDocIdAndCategory(docId, category)));
     }
 
     /** AI 从对话中提取 FlowNote 条目 */
     @PostMapping("/extract")
-    public Result<List<FlowNote>> extract(@RequestBody FlowNoteExtractRequest req) {
+    public Result<List<FlowNoteResponse>> extract(@RequestBody FlowNoteExtractRequest req) {
         if (req.getDocId() == null) {
             return Result.fail("docId 不能为空");
         }
@@ -47,24 +49,19 @@ public class FlowNoteController {
         int maxExchanges = req.getMaxExchanges() != null ? req.getMaxExchanges() : 10;
         Long userId = SecurityUtils.getCurrentUserId();
 
-        try {
-            List<FlowNote> notes = flowNoteService.extractFromChat(
-                    req.getDocId(), doc.getDocumentId(), userId,
-                    req.getSessionId(), maxExchanges);
-            return Result.success("提取完成，共生成 " + notes.size() + " 条笔记", notes);
-        } catch (Exception e) {
-            log.error("FlowNote 提取失败: {}", e.getMessage(), e);
-            return Result.fail("提取失败: " + e.getMessage());
-        }
+        List<FlowNote> notes = flowNoteService.extractFromChat(
+                req.getDocId(), doc.getDocumentId(), userId,
+                req.getSessionId(), maxExchanges);
+        return Result.success("提取完成，共生成 " + notes.size() + " 条笔记", DtoMapper.toFlowNoteResponseList(notes));
     }
 
     /** 手动创建条目 */
     @PostMapping("/entries")
-    public Result<FlowNote> create(@RequestBody FlowNote note) {
+    public Result<FlowNoteResponse> create(@RequestBody FlowNote note) {
         note.setUserId(SecurityUtils.getCurrentUserId());
         note.setSourceType(note.getSourceType() != null ? note.getSourceType() : "USER_WRITTEN");
         flowNoteService.create(note);
-        return Result.success("条目已创建", note);
+        return Result.success("条目已创建", DtoMapper.toResponse(note));
     }
 
     /** 更新条目 */

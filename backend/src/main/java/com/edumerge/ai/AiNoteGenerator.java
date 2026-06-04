@@ -29,8 +29,11 @@ public class AiNoteGenerator extends AiGeneratorBase {
     @Autowired
     private StudyNoteService studyNoteService;
 
-    public StudyNoteResult generate(Long docId, Long userId, String docUuid, String requirements) {
-        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 25,
+    public StudyNoteResult generate(Long docId, Long userId, String docUuid, String requirements, String sectionContext) {
+        long startTime = System.currentTimeMillis();
+
+        // top-K=15 平衡质量与速度（之前 25 太多，LLM 处理慢）
+        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 15,
                 "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 结论 复习重点 study notes summary chapter highlights key concepts main ideas methods principles conclusions review points");
         if (matches.isEmpty()) {
             log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
@@ -38,7 +41,11 @@ public class AiNoteGenerator extends AiGeneratorBase {
         }
 
         String context = buildContext(matches);
-        String content = cleanMarkdown(callLLM(context, requirements));
+        log.info("笔记上下文构建完成: docId={}, 块数={}, 检索耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
+
+        long llmStart = System.currentTimeMillis();
+        String content = cleanMarkdown(callLLM(context, requirements, sectionContext));
+        log.info("LLM 笔记生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, content.length(), System.currentTimeMillis() - llmStart);
         if (content.isBlank()) {
             return StudyNoteResult.empty(docId);
         }
@@ -52,7 +59,7 @@ public class AiNoteGenerator extends AiGeneratorBase {
         return StudyNoteResult.success(docId, deck.getId(), title, content, sourceSummary, requirements);
     }
 
-    private String callLLM(String context, String requirements) {
+    private String callLLM(String context, String requirements, String sectionContext) {
         String template = """
                 你是一个严谨的 AI 学习笔记助手。请基于提供的文档片段，生成一份适合学生复习的 Markdown 学习笔记。
 
@@ -90,10 +97,13 @@ public class AiNoteGenerator extends AiGeneratorBase {
         String reqSection = (requirements != null && !requirements.isBlank())
                 ? "# 用户个性化要求\n请特别注意用户的以下要求：" + requirements.strip() + "\n\n"
                 : "";
+        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
+                ? "# 重点关注章节\n请重点围绕以下章节生成笔记，但保持整体结构完整：" + sectionContext.strip() + "\n\n"
+                : "";
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new java.util.ArrayList<>();
         messages.add(new SystemMessage(template
-                .replace("{REQUIREMENTS}", reqSection)
+                .replace("{REQUIREMENTS}", reqSection + sectionHint)
                 .replace("{CONTEXT}", context)));
         messages.add(new UserMessage("请基于以上文档内容生成一份结构化中文学习笔记。"));
         Response<AiMessage> response = chatLanguageModel.generate(messages);

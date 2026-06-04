@@ -48,6 +48,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 文档向量化消费者 — 监听向量化队列, 执行文档解析 → 文本切块 → 向量化 → 存入 Milvus 全流程
@@ -61,6 +63,7 @@ public class DocumentListener {
     private final DocumentService documentService;
     private final DocumentChunkMapper documentChunkMapper;
     private final AiOutlineGenerator outlineGenerator;
+    private final ExecutorService documentTaskExecutor;
 
     @Value("${app.document.ocr.enabled:true}")
     private boolean ocrEnabled;
@@ -78,12 +81,14 @@ public class DocumentListener {
                             MilvusEmbeddingStore embeddingStore,
                             DocumentService documentService,
                             DocumentChunkMapper documentChunkMapper,
-                            AiOutlineGenerator outlineGenerator) {
+                            AiOutlineGenerator outlineGenerator,
+                            @org.springframework.beans.factory.annotation.Qualifier("documentTaskExecutor") ExecutorService documentTaskExecutor) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.documentService = documentService;
         this.documentChunkMapper = documentChunkMapper;
         this.outlineGenerator = outlineGenerator;
+        this.documentTaskExecutor = documentTaskExecutor;
     }
 
     @RabbitListener(queues = RabbitMQConfig.EMBEDDING_QUEUE)
@@ -106,22 +111,25 @@ public class DocumentListener {
         }
 
         try {
+            long pipelineStart = System.currentTimeMillis();
             updateDocStatus(filePath, "PROCESSING", null, null, null);
 
             // 2. 提取文本
+            long stepStart = System.currentTimeMillis();
             String text = extractDocumentText(documentPath);
             if (text.isBlank()) {
                 log.warn("文档文本为空: documentId={}", documentId);
                 updateDocStatus(filePath, "FAILED", null, null, "无法提取文本(可能为加密、图片型文档或不支持的文件格式)");
                 return;
             }
-            log.info("文档文本提取完成: documentId={}, 长度={} 字符", documentId, text.length());
+            log.info("文本提取完成: documentId={}, 长度={} 字符, 耗时={}ms", documentId, text.length(), System.currentTimeMillis() - stepStart);
 
-            // 3. 使用递归切分器切块 (chunkSize=500, overlap=50)
-            DocumentSplitter splitter = DocumentSplitters.recursive(500, 50);
+            // 3. 使用递归切分器切块 (chunkSize=1000, overlap=100)
+            stepStart = System.currentTimeMillis();
+            DocumentSplitter splitter = DocumentSplitters.recursive(1000, 100);
             Document langDoc = Document.from(text);
             List<TextSegment> segments = splitter.split(langDoc);
-            log.info("文本切块完成: documentId={}, 块数={}", documentId, segments.size());
+            log.info("文本切块完成: documentId={}, 块数={}, 耗时={}ms", documentId, segments.size(), System.currentTimeMillis() - stepStart);
 
             if (segments.isEmpty()) {
                 log.warn("文本切块后无内容: documentId={}", documentId);
@@ -129,23 +137,25 @@ public class DocumentListener {
                 return;
             }
 
-            // 3.5 保存切块到 MySQL document_chunks 表
+            // 3.5 批量保存切块到 MySQL document_chunks 表
+            stepStart = System.currentTimeMillis();
             com.edumerge.entity.Document doc = documentService.getByFilePath(filePath);
             if (doc != null) {
+                List<DocumentChunk> chunkBatch = new ArrayList<>(segments.size());
                 for (int i = 0; i < segments.size(); i++) {
-                    DocumentChunk chunk = DocumentChunk.builder()
+                    chunkBatch.add(DocumentChunk.builder()
                             .documentId(doc.getId())
                             .chunkIndex(i)
                             .content(segments.get(i).text())
                             .embeddingStatus("PENDING")
-                            .build();
-                    documentChunkMapper.insert(chunk);
+                            .build());
                 }
-                log.info("文档切块已入库: docId={}, 块数={}", doc.getId(), segments.size());
+                documentChunkMapper.insertBatch(chunkBatch);
+                log.info("文档切块批量入库: docId={}, 块数={}, 耗时={}ms", doc.getId(), chunkBatch.size(), System.currentTimeMillis() - stepStart);
             }
 
             // 4. 为每个块附加元数据 (document_id + chunk_index)
-            List<TextSegment> enrichedSegments = new ArrayList<>();
+            List<TextSegment> enrichedSegments = new ArrayList<>(segments.size());
             for (int i = 0; i < segments.size(); i++) {
                 Metadata meta = new Metadata()
                         .put("document_id", documentId)
@@ -153,19 +163,52 @@ public class DocumentListener {
                 enrichedSegments.add(TextSegment.from(segments.get(i).text(), meta));
             }
 
-            // 5. 批量向量化
-            log.info("开始批量向量化: documentId={}, 块数={}", documentId, enrichedSegments.size());
-            List<Embedding> embeddings = new ArrayList<>();
-            for (TextSegment segment : enrichedSegments) {
-                Response<Embedding> response = embeddingModel.embed(segment);
-                embeddings.add(response.content());
+            // 4.5 提前触发大纲生成 — 大纲只需前 8 个 chunk (从 MySQL 读取)，不依赖向量化
+            if (doc != null) {
+                final Long outlineDocId = doc.getId();
+                final Long outlineUserId = doc.getUserId();
+                final int outlineChunkCount = enrichedSegments.size();
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        outlineGenerator.generateAndSave(outlineDocId, outlineUserId, outlineChunkCount);
+                        log.info("文档大纲生成完成: docId={}", outlineDocId);
+                    } catch (Exception e) {
+                        log.warn("文档大纲生成失败(不影响主流程): docId={}, error={}", outlineDocId, e.getMessage());
+                    }
+                }, documentTaskExecutor);
             }
-            log.info("向量化完成: documentId={}, 向量数={}", documentId, embeddings.size());
 
-            // 6. 存入 Milvus（此前在此处因重复 createIndex 可能长时间阻塞）
+            // 5. 并发向量化 — 多线程分批调用 embedAll (DashScope text-embedding-v3 单次上限 10 条)
+            long embedStart = System.currentTimeMillis();
+            int totalChunks = enrichedSegments.size();
+            int batchSize = 10;
+            int batchCount = (totalChunks + batchSize - 1) / batchSize;
+
+            // 按批次提交并发任务
+            @SuppressWarnings("unchecked")
+            CompletableFuture<Response<List<Embedding>>>[] futures = new CompletableFuture[batchCount];
+            for (int b = 0; b < batchCount; b++) {
+                final int offset = b * batchSize;
+                final int end = Math.min(offset + batchSize, totalChunks);
+                final List<TextSegment> batch = enrichedSegments.subList(offset, end);
+                futures[b] = CompletableFuture.supplyAsync(() -> embeddingModel.embedAll(batch), documentTaskExecutor);
+            }
+
+            // 等待所有批次完成并按顺序收集结果
+            List<Embedding> embeddings = new ArrayList<>(totalChunks);
+            for (int b = 0; b < batchCount; b++) {
+                Response<List<Embedding>> resp = futures[b].join();
+                embeddings.addAll(resp.content());
+                log.info("向量化进度: {}/{} 块", Math.min((b + 1) * batchSize, totalChunks), totalChunks);
+            }
+            log.info("向量化完成: documentId={}, 向量数={}, 批次={}, 耗时={}ms",
+                    documentId, embeddings.size(), batchCount, System.currentTimeMillis() - embedStart);
+
+            // 6. 存入 Milvus
+            stepStart = System.currentTimeMillis();
             log.info("开始写入 Milvus: documentId={}, 块数={}", documentId, enrichedSegments.size());
             embeddingStore.addAll(embeddings, enrichedSegments);
-            log.info("向量存储完成: documentId={}, 块数={}", documentId, enrichedSegments.size());
+            log.info("向量存储完成: documentId={}, 块数={}, 耗时={}ms", documentId, enrichedSegments.size(), System.currentTimeMillis() - stepStart);
 
             // 6.5 批量更新 document_chunks 状态为 COMPLETED
             if (doc != null) {
@@ -177,21 +220,8 @@ public class DocumentListener {
 
             // 7. 更新 MySQL 文档状态为 COMPLETED
             updateDocStatus(filePath, "COMPLETED", enrichedSegments.size(), embeddings.size(), null);
-
-            // 8. 异步触发文档大纲生成 (AI 识别文档类型 + 章节结构, 不阻塞消费者线程)
-            if (doc != null) {
-                final Long outlineDocId = doc.getId();
-                final Long outlineUserId = doc.getUserId();
-                final int outlineChunkCount = enrichedSegments.size();
-                java.util.concurrent.CompletableFuture.runAsync(() -> {
-                    try {
-                        outlineGenerator.generateAndSave(outlineDocId, outlineUserId, outlineChunkCount);
-                        log.info("文档大纲生成完成: docId={}", outlineDocId);
-                    } catch (Exception e) {
-                        log.warn("文档大纲生成失败(不影响主流程): docId={}, error={}", outlineDocId, e.getMessage());
-                    }
-                });
-            }
+            log.info("文档处理全流程完成: documentId={}, 总块数={}, 总耗时={}ms",
+                    documentId, enrichedSegments.size(), System.currentTimeMillis() - pipelineStart);
 
         } catch (IOException e) {
             log.error("文档解析失败: documentId={}, error={}", documentId, e.getMessage(), e);

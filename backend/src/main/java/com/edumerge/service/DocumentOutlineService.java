@@ -6,6 +6,7 @@ import com.edumerge.mapper.DocumentOutlineMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 文档大纲 CRUD 服务 — 业务逻辑层
@@ -29,6 +30,7 @@ public class DocumentOutlineService {
     /**
      * 按文档 ID 查询最新版本的大纲
      */
+    @Transactional(readOnly = true)
     public DocumentOutline getByDocId(Long docId) {
         return outlineMapper.selectOne(
                 new LambdaQueryWrapper<DocumentOutline>()
@@ -38,6 +40,7 @@ public class DocumentOutlineService {
     }
 
     /** 创建大纲记录 */
+    @Transactional
     public DocumentOutline create(DocumentOutline outline) {
         outlineMapper.insert(outline);
         log.info("文档大纲已创建: id={}, docId={}, docType={}", outline.getId(), outline.getDocId(), outline.getDocType());
@@ -45,6 +48,7 @@ public class DocumentOutlineService {
     }
 
     /** 更新大纲内容 (用户编辑后调用, version 自增) */
+    @Transactional
     public DocumentOutline update(Long docId, String outlineJson, Long userId) {
         DocumentOutline existing = getByDocId(docId);
         if (existing == null) {
@@ -58,6 +62,7 @@ public class DocumentOutlineService {
     }
 
     /** 删除文档的大纲 (级联删除文档时调用) */
+    @Transactional
     public void deleteByDocId(Long docId) {
         int rows = outlineMapper.delete(
                 new LambdaQueryWrapper<DocumentOutline>()
@@ -66,6 +71,7 @@ public class DocumentOutlineService {
     }
 
     /** 删除指定版本以外的所有旧版本大纲 (重新生成后清理) */
+    @Transactional
     public void deleteOldVersions(Long docId, int keepVersion) {
         int rows = outlineMapper.delete(
                 new LambdaQueryWrapper<DocumentOutline>()
@@ -75,6 +81,7 @@ public class DocumentOutlineService {
     }
 
     /** 判断文档是否已有大纲 */
+    @Transactional(readOnly = true)
     public boolean existsByDocId(Long docId) {
         return outlineMapper.selectCount(
                 new LambdaQueryWrapper<DocumentOutline>()

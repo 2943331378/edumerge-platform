@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * AI 文档大纲生成器 (架构红线: LangChain4j 隔离在 ai 包)
@@ -32,6 +33,7 @@ import java.util.List;
 public class AiOutlineGenerator extends AiGeneratorBase {
 
     @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("outlineChatModel")
     private ChatLanguageModel chatLanguageModel;
 
     @Autowired
@@ -39,6 +41,9 @@ public class AiOutlineGenerator extends AiGeneratorBase {
 
     @Autowired
     private DocumentChunkMapper documentChunkMapper;
+
+    /** 防重复生成锁: docId → true 表示正在生成中 */
+    private final ConcurrentHashMap<Long, Boolean> generatingLocks = new ConcurrentHashMap<>();
 
     /**
      * 生成文档大纲并持久化
@@ -49,19 +54,37 @@ public class AiOutlineGenerator extends AiGeneratorBase {
      * @return 生成的大纲, 失败时返回 null
      */
     public DocumentOutline generateAndSave(Long docId, Long userId, int totalChunks) {
-        // 1. 从 MySQL 读取前 8 个 chunks (约 4000 字, 覆盖目录和正文开头)
-        //    再读最后 2 个 chunks (覆盖结尾/总结), 拼接为 LLM 上下文
+        // 防重复: 如果该文档正在生成中，直接返回已有大纲
+        if (generatingLocks.putIfAbsent(docId, true) != null) {
+            log.info("大纲生成已在进行中, 跳过重复调用: docId={}", docId);
+            return outlineService.getByDocId(docId);
+        }
+
+        // 如果大纲已存在，也跳过
+        DocumentOutline existing = outlineService.getByDocId(docId);
+        if (existing != null) {
+            generatingLocks.remove(docId);
+            log.info("大纲已存在, 跳过生成: docId={}", docId);
+            return existing;
+        }
+
+        long startTime = System.currentTimeMillis();
+        log.info("开始生成文档大纲: docId={}, userId={}, totalChunks={}", docId, userId, totalChunks);
+
+        try {
+        // 1. 从 MySQL 读取前 4 个 chunks (覆盖目录和正文开头)
+        //    再读最后 1 个 chunk (覆盖结尾/总结), 拼接为 LLM 上下文
         List<DocumentChunk> frontChunks = documentChunkMapper.selectList(
                 new LambdaQueryWrapper<DocumentChunk>()
                         .eq(DocumentChunk::getDocumentId, docId)
                         .orderByAsc(DocumentChunk::getChunkIndex)
-                        .last("LIMIT 8"));
+                        .last("LIMIT 4"));
 
         List<DocumentChunk> tailChunks = documentChunkMapper.selectList(
                 new LambdaQueryWrapper<DocumentChunk>()
                         .eq(DocumentChunk::getDocumentId, docId)
                         .orderByDesc(DocumentChunk::getChunkIndex)
-                        .last("LIMIT 2"));
+                        .last("LIMIT 1"));
 
         if (frontChunks.isEmpty()) {
             log.warn("文档无切块, 跳过大纲生成: docId={}", docId);
@@ -70,16 +93,17 @@ public class AiOutlineGenerator extends AiGeneratorBase {
 
         // 2. 拼装上下文
         String context = buildOutlineContext(frontChunks, tailChunks, totalChunks);
-        log.info("大纲生成上下文构建完成: docId={}, 前段{}块, 后段{}块, 总{}块",
-                docId, frontChunks.size(), tailChunks.size(), totalChunks);
+        log.info("大纲生成上下文构建完成: docId={}, 前段{}块, 后段{}块, 总{}块, 耗时={}ms",
+                docId, frontChunks.size(), tailChunks.size(), totalChunks, System.currentTimeMillis() - startTime);
 
         // 3. 调用 LLM
+        long llmStart = System.currentTimeMillis();
         String llmResponse = callLLM(context, totalChunks);
         if (llmResponse == null || llmResponse.isBlank()) {
-            log.error("LLM 大纲生成返回空: docId={}", docId);
+            log.error("LLM 大纲生成返回空: docId={}, LLM耗时={}ms", docId, System.currentTimeMillis() - llmStart);
             return null;
         }
-        log.info("LLM 大纲生成完成: docId={}, 响应长度={}字符", docId, llmResponse.length());
+        log.info("LLM 大纲生成完成: docId={}, 响应长度={}字符, LLM耗时={}ms", docId, llmResponse.length(), System.currentTimeMillis() - llmStart);
 
         // 4. 清理并提取 JSON
         String json = extractJsonObject(llmResponse);
@@ -103,8 +127,12 @@ public class AiOutlineGenerator extends AiGeneratorBase {
                 .build();
         outlineService.create(outline);
 
-        log.info("文档大纲已生成并持久化: docId={}, docType={}, version={}", docId, docType, 1);
+        log.info("文档大纲已生成并持久化: docId={}, docType={}, version={}, 总耗时={}ms",
+                docId, docType, 1, System.currentTimeMillis() - startTime);
         return outline;
+        } finally {
+            generatingLocks.remove(docId);
+        }
     }
 
     // ═══════ 上下文构建 ═══════
@@ -135,78 +163,23 @@ public class AiOutlineGenerator extends AiGeneratorBase {
 
     private String callLLM(String context, int totalChunks) {
         String template = """
-                # 角色
-                你是一个专业的文档结构分析专家, 擅长从非结构化文本中识别文档类型、提取章节层级结构。
+                分析文档内容, 判断类型并提取章节大纲, 仅输出JSON。
 
-                # 任务
-                请分析以下文档内容, 完成两个任务:
-                1. **判断文档类型** — 从以下类型中选择最合适的一个:
-                   - TEXTBOOK (教材/教科书): 系统性知识讲解, 含章节编号, 有习题/思考题
-                   - PAPER (学术论文): 含摘要/关键词/引言/方法/结果/参考文献
-                   - NOTE (学习笔记): 个人整理的知识点, 格式灵活, 含要点罗列
-                   - SLIDE (演示文稿/课件): 幻灯片提取的文本, 含【幻灯片N】标记, 要点式
-                   - MANUAL (技术手册/规范): 操作指南, API 文档, 标准规范
-                   - OTHER (其他): 无法归类的文档
+                类型: TEXTBOOK(教材) PAPER(论文) NOTE(笔记) SLIDE(课件) MANUAL(手册) OTHER(其他)
 
-                2. **提取章节大纲** — 识别文档的层级结构, 输出为 JSON 格式
+                JSON格式示例:
+                {"docType":"TEXTBOOK","docTypeLabel":"教材","totalChunks":20,"sections":[{"id":"s1","title":"绪论","level":1,"startChunk":0,"endChunk":5,"children":[{"id":"s1-1","title":"研究背景","level":2,"startChunk":0,"endChunk":2,"children":[]},{"id":"s1-2","title":"研究意义","level":2,"startChunk":3,"endChunk":5,"children":[]}]}]}
 
-                # 大纲 JSON 格式要求
-                ```json
-                {
-                  "docType": "TEXTBOOK",
-                  "docTypeLabel": "教材/教科书",
-                  "totalChunks": {TOTAL_CHUNKS},
-                  "sections": [
-                    {
-                      "id": "s1",
-                      "title": "第一章 章节标题",
-                      "level": 1,
-                      "startChunk": 0,
-                      "endChunk": 15,
-                      "children": [
-                        {
-                          "id": "s1-1",
-                          "title": "1.1 小节标题",
-                          "level": 2,
-                          "startChunk": 0,
-                          "endChunk": 7,
-                          "children": []
-                        },
-                        {
-                          "id": "s1-2",
-                          "title": "1.2 小节标题",
-                          "level": 2,
-                          "startChunk": 8,
-                          "endChunk": 15,
-                          "children": []
-                        }
-                      ]
-                    }
-                  ]
-                }
-                ```
+                规则:
+                - 最多3级(章→节→小节), ID: s1, s1-1, s1-1-1
+                - startChunk/endChunk闭区间, 范围在[0,{TOTAL_CHUNKS}-1]内
+                - 覆盖完整性: 所有章节的chunk范围必须覆盖[0,{TOTAL_CHUNKS}-1], 不得有遗漏
+                - 章节不重叠: 同级章节的chunk范围不得交叉
+                - 一级3-8个章, 每章2-6个子节
+                - 中文标题, 学术风格, 无标点结尾
+                - 无明显结构时按主题划分
 
-                # 大纲生成规则 (严格执行)
-                1. **层级**: 最多 3 级 (章 → 节 → 小节), level 对应 1/2/3
-                2. **ID 规则**: 章 = "s1", 节 = "s1-1", 小节 = "s1-1-1"
-                3. **chunk 范围**: startChunk/endChunk 必须是闭区间, 范围在 [0, {TOTAL_CHUNKS}-1] 内
-                4. **覆盖完整性**: 所有章节的 chunk 范围必须覆盖 [0, {TOTAL_CHUNKS}-1], 不得有遗漏
-                5. **章节不重叠**: 同级章节的 chunk 范围不得交叉
-                6. **章节数量**: 一级章节 3-8 个, 每个章节下 2-6 个子节
-                7. **标题语言**: 必须使用简体中文; 英文文档请翻译章节标题
-                8. **标题风格**: 保持学术严谨, 使用名词短语或动宾结构, 不要加标点符号结尾
-                9. **如果文档无明显章节结构**: 按内容主题自动划分, 并在 docTypeLabel 中注明
-
-                # chunk 范围估算方法
-                - 文档总共有 {TOTAL_CHUNKS} 个切块, 每个切块约 500 字
-                - 根据切块内容中出现的标题/主题变化来划分章节边界
-                - 如果无法精确判断, 按内容比例均匀分配
-
-                # 输出要求
-                - 仅输出 JSON, 严禁包含任何解释文字、引导语、markdown 代码块标记
-                - 确保 JSON 格式合法, 可被直接解析
-
-                # 文档内容
+                文档内容:
                 {CONTEXT}
                 """;
 

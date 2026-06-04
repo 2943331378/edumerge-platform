@@ -8,6 +8,7 @@ import com.edumerge.service.ConversationService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -26,6 +27,7 @@ public class ChatHistoryService {
     }
 
     /** 保存对话记录, 同时确保 conversation 会话存在 */
+    @Transactional
     public ChatHistory save(String query, String response, int retrievedCount, String sessionId) {
         Long userId = SecurityUtils.getCurrentUserId();
         if (sessionId != null && !sessionId.isBlank()) {
@@ -46,6 +48,7 @@ public class ChatHistoryService {
     }
 
     /** 标记反馈 */
+    @Transactional
     public void markHelpful(Long id, int isHelpful) {
         ChatHistory record = chatHistoryMapper.selectById(id);
         if (record != null) {
@@ -56,6 +59,7 @@ public class ChatHistoryService {
     }
 
     /** 按会话查询最近对话历史 */
+    @Transactional(readOnly = true)
     public List<ChatHistory> listBySession(String sessionId, int limit) {
         return chatHistoryMapper.selectList(
                 new LambdaQueryWrapper<ChatHistory>()

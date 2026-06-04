@@ -6,6 +6,7 @@ import com.edumerge.mapper.UserMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -19,6 +20,7 @@ public class UserService {
         this.passwordEncoder = passwordEncoder;
     }
 
+    @Transactional
     public User register(String username, String email, String password, String displayName) {
         User user = User.builder()
                 .username(username)
@@ -32,6 +34,7 @@ public class UserService {
         return user;
     }
 
+    @Transactional(readOnly = true)
     public User login(String username, String password) {
         User user = userMapper.selectOne(
                 new LambdaQueryWrapper<User>().eq(User::getUsername, username));
@@ -47,15 +50,18 @@ public class UserService {
         return user;
     }
 
+    @Transactional(readOnly = true)
     public User getById(Long id) {
         return userMapper.selectById(id);
     }
 
+    @Transactional(readOnly = true)
     public boolean existsByUsername(String username) {
         return userMapper.selectCount(
                 new LambdaQueryWrapper<User>().eq(User::getUsername, username)) > 0;
     }
 
+    @Transactional(readOnly = true)
     public boolean existsByEmail(String email) {
         return userMapper.selectCount(
                 new LambdaQueryWrapper<User>().eq(User::getEmail, email)) > 0;

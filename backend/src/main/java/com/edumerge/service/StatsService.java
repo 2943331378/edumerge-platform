@@ -9,6 +9,7 @@ import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -75,6 +76,7 @@ public class StatsService {
      * 接收评测脚本推送的 RAG 质量指标
      * Hit Rate 基于语义空间向量对齐 (Embedding Cosine Similarity) 计算
      */
+    @Transactional
     public void updateEvalMetrics(double hitRate, double avgFaithfulness,
                                   double avgCorrectness, double compositeScore,
                                   int totalQuestions) {
@@ -94,6 +96,7 @@ public class StatsService {
      * 计算全维度数据资产指标
      * 统计口径: 所有软删除字段为 0 的有效记录
      */
+    @Transactional(readOnly = true)
     public StatsResponse calculate() {
         // ===== 数据资产指标 =====
         StatsResponse.DataAssetMetrics dataMetrics = new StatsResponse.DataAssetMetrics();
@@ -172,6 +175,7 @@ public class StatsService {
      * 生成《数据素质自评报告》Markdown 格式
      * 可直接放入大赛项目书的数据治理章节
      */
+    @Transactional(readOnly = true)
     public String generateReport() {
         StatsResponse stats = calculate();
         StatsResponse.DataAssetMetrics d = stats.getDataAssetMetrics();
@@ -301,6 +305,7 @@ public class StatsService {
      * 计算个人学习行为统计
      * 数据来源: flashcard_review_logs (闪卡复习) + quiz_attempts (测验答题)
      */
+    @Transactional(readOnly = true)
     public LearningStatsResponse calculateLearningStats() {
         Long userId = SecurityUtils.getCurrentUserId();
         LocalDateTime todayStart = LocalDateTime.of(LocalDate.now(), LocalTime.MIN);

@@ -2,9 +2,11 @@ package com.edumerge.controller;
 
 import com.edumerge.ai.AiRagService;
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.*;
 import com.edumerge.entity.ChatHistory;
 import com.edumerge.service.ChatHistoryService;
 import com.edumerge.service.SessionService;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -34,18 +36,14 @@ public class RagChatController {
     }
 
     @PostMapping("/chat")
-    public Result<Map<String, Object>> chat(@RequestBody Map<String, String> body) {
-        String message = body.get("message");
-        String documentId = body.get("documentId");
-        String sessionIdStr = body.get("sessionId");
-        String docIdStr = body.get("docId");
-        String activityType = body.get("activityType");
-        String contextHint = body.get("contextHint");
+    public Result<Map<String, Object>> chat(@Valid @RequestBody ChatRequest req) {
+        String documentId = req.getDocumentId();
+        String sessionIdStr = req.getSessionId();
 
         // 解析 docId
         Long docId = null;
-        if (docIdStr != null && !docIdStr.isBlank()) {
-            try { docId = Long.parseLong(docIdStr); } catch (NumberFormatException ignored) {}
+        if (req.getDocId() != null && !req.getDocId().isBlank()) {
+            try { docId = Long.parseLong(req.getDocId()); } catch (NumberFormatException ignored) {}
         }
 
         // sessionId 优先: 解析为 documentUuid
@@ -57,13 +55,9 @@ public class RagChatController {
             }
         }
 
-        if (message == null || message.isBlank()) {
-            return Result.fail("消息不能为空");
-        }
+        log.info("RAG 对话请求: message='{}', documentId='{}'", req.getMessage(), documentId);
 
-        log.info("RAG 对话请求: message='{}', documentId='{}'", message, documentId);
-
-        AiRagService.AiRagResult result = aiRagService.chat(message, documentId, sessionIdStr, docId, activityType, contextHint);
+        AiRagService.AiRagResult result = aiRagService.chat(req.getMessage(), documentId, sessionIdStr, docId, req.getActivityType(), req.getContextHint());
 
         if (result.isSuccess()) {
             return Result.success("RAG 回答生成成功", Map.of(
@@ -76,17 +70,13 @@ public class RagChatController {
     }
 
     @GetMapping("/history")
-    public Result<List<ChatHistory>> history(@RequestParam(required = false) String sessionId) {
-        return Result.success(chatHistoryService.listBySession(sessionId, 100));
+    public Result<List<ChatHistoryResponse>> history(@RequestParam(required = false) String sessionId) {
+        return Result.success(DtoMapper.toChatHistoryResponseList(chatHistoryService.listBySession(sessionId, 100)));
     }
 
     @PutMapping("/history/{id}/feedback")
-    public Result<Void> feedback(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
-        Integer isHelpful = body.get("isHelpful");
-        if (isHelpful == null || (isHelpful != 0 && isHelpful != 1)) {
-            return Result.fail("isHelpful 必须为 0 或 1");
-        }
-        chatHistoryService.markHelpful(id, isHelpful);
+    public Result<Void> feedback(@PathVariable Long id, @Valid @RequestBody FeedbackRequest req) {
+        chatHistoryService.markHelpful(id, req.getIsHelpful());
         return Result.success("感谢反馈", null);
     }
 }
