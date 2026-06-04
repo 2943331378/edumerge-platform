@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
@@ -114,7 +113,6 @@ function ProcessingStatusCard({ fileName, status, chunkCount }: {
 }
 
 export default function HomePage() {
-  const router = useRouter();
   const auth = useAuth();
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -219,11 +217,12 @@ export default function HomePage() {
   }, [loadSessions]);
 
   // Auth guard: redirect to landing page if not authenticated
+  // 登出后 token 清除，跳转登录页（中间件处理首次访问）
   useEffect(() => {
     if (!auth.loading && !auth.token) {
-      router.replace("/landing");
+      window.location.href = "/login";
     }
-  }, [auth.loading, auth.token, router]);
+  }, [auth.loading, auth.token]);
 
   // 文档向量化异步处理中，自适应轮询（处理中 2s，空闲 10s）
   useEffect(() => {
@@ -585,7 +584,6 @@ export default function HomePage() {
     }
   };
 
-  // Show loading while checking auth
   if (auth.loading || !auth.token) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -685,7 +683,7 @@ export default function HomePage() {
                     <div className="p-1">
                       <button
                         type="button"
-                        onClick={() => { auth.logout(); setUserMenuOpen(false); window.location.href = "/login"; }}
+                        onClick={() => { auth.logout(); setUserMenuOpen(false); }}
                         className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
                       >
                         <LogOut className="h-3 w-3" />

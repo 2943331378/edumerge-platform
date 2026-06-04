@@ -24,6 +24,15 @@ const TOKEN_KEY = "edumerge_token";
 const USER_KEY = "edumerge_user";
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
+function setCookie(name: string, value: string, days = 7) {
+  const maxAge = days * 24 * 60 * 60;
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+}
+
+function deleteCookie(name: string) {
+  document.cookie = `${name}=; path=/; max-age=0`;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -47,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const saveAuth = (t: string, u: UserInfo) => {
     localStorage.setItem(TOKEN_KEY, t);
     localStorage.setItem(USER_KEY, JSON.stringify(u));
+    setCookie(TOKEN_KEY, t);
     setToken(t);
     setUser(u);
   };
@@ -76,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    deleteCookie(TOKEN_KEY);
     setToken(null);
     setUser(null);
   }, []);
