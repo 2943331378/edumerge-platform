@@ -147,12 +147,17 @@ public class MindMapService {
             throw new IllegalStateException("思维导图生成失败: 未从文档中提取到足够的内容");
         }
 
+        // 持久化 — 创建 deck + mind_map 记录
+        CardDeck deck = cardDeckService.create(docId, "MIND_MAP", genResult.getTitle());
+        MindMap saved = create(docId, deck.getId(), genResult.getContent());
+        log.info("思维导图已持久化: docId={}, deckId={}", docId, deck.getId());
+
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("deckId", genResult.getDeckId());
-        data.put("docId", genResult.getDocId());
-        data.put("title", genResult.getTitle());
+        data.put("deckId", deck.getId());
+        data.put("docId", docId);
+        data.put("title", deck.getTitle());
         data.put("content", genResult.getContent());
-        data.put("createdAt", genResult.getCreatedAt());
+        data.put("createdAt", saved.getCreatedAt() != null ? saved.getCreatedAt().toString() : null);
         return data;
     }
 

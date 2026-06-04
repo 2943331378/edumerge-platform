@@ -1,8 +1,5 @@
 package com.edumerge.ai;
 
-import com.edumerge.entity.CardDeck;
-import com.edumerge.service.CardDeckService;
-import com.edumerge.service.MindMapService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -29,12 +26,6 @@ public class AiMindMapGenerator extends AiGeneratorBase {
 
     @Autowired
     private ChatLanguageModel chatLanguageModel;
-
-    @Autowired
-    private CardDeckService cardDeckService;
-
-    @Autowired
-    private MindMapService mindMapService;
 
     /**
      * 根据文档内容生成思维导图
@@ -70,15 +61,10 @@ public class AiMindMapGenerator extends AiGeneratorBase {
             return MindMapResult.empty(docId);
         }
 
-        // 步骤 5: 持久化 — 创建 deck + mind_map (不再删除旧的)
+        // 步骤 5: 提取标题，持久化由 MindMapService 负责（避免循环依赖）
         String title = extractTitle(markdown);
-        CardDeck deck = cardDeckService.create(docId, "MIND_MAP", title);
-        mindMapService.create(docId, deck.getId(), markdown);
-
-        String createdAt = deck.getCreatedAt() != null
-                ? deck.getCreatedAt().toString() : java.time.LocalDateTime.now().toString();
-        log.info("思维导图已持久化: docId={}, deckId={}", docId, deck.getId());
-        return MindMapResult.success(docId, deck.getId(), deck.getTitle(), markdown, createdAt);
+        log.info("思维导图内容生成完成: docId={}, title={}", docId, title);
+        return MindMapResult.success(docId, null, title, markdown, null);
     }
 
     /** 调用大模型, 使用专用 Prompt 强制输出结构化 Markdown */
