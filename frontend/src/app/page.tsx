@@ -685,7 +685,7 @@ export default function HomePage() {
                     <div className="p-1">
                       <button
                         type="button"
-                        onClick={() => { auth.logout(); setUserMenuOpen(false); router.replace("/login"); }}
+                        onClick={() => { auth.logout(); setUserMenuOpen(false); window.location.href = "/login"; }}
                         className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
                       >
                         <LogOut className="h-3 w-3" />
