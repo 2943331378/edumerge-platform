@@ -2,6 +2,7 @@ package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
 import com.edumerge.entity.StudyNote;
+import com.edumerge.service.DocumentService;
 import com.edumerge.service.StudyNoteService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,14 +20,17 @@ import java.util.Map;
 public class StudyNoteController {
 
     private final StudyNoteService studyNoteService;
+    private final DocumentService documentService;
 
     @Autowired
-    public StudyNoteController(StudyNoteService studyNoteService) {
+    public StudyNoteController(StudyNoteService studyNoteService, DocumentService documentService) {
         this.studyNoteService = studyNoteService;
+        this.documentService = documentService;
     }
 
     @GetMapping
     public Result<Map<String, Object>> getNote(@RequestParam Long docId) {
+        documentService.verifyOwnership(docId);
         StudyNote note = studyNoteService.getByDocId(docId);
         if (note == null) {
             return Result.fail("该文档暂无学习笔记");
@@ -36,6 +40,7 @@ public class StudyNoteController {
 
     @GetMapping("/history")
     public Result<List<Map<String, Object>>> getHistory(@RequestParam Long docId) {
+        documentService.verifyOwnership(docId);
         List<StudyNote> notes = studyNoteService.listByDocId(docId);
         return Result.success(notes.stream().map(studyNoteService::toMap).toList());
     }

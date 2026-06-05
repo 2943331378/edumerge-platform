@@ -19,6 +19,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -81,16 +84,19 @@ public class DocumentService {
     }
 
     @Transactional(readOnly = true)
-    public List<Document> listRecent() {
-        return documentMapper.selectList(
-                new LambdaQueryWrapper<Document>()
-                        .orderByDesc(Document::getCreatedAt)
-                        .last("LIMIT 50"));
-    }
-
-    @Transactional(readOnly = true)
     public Document getById(Long id) {
         return documentMapper.selectById(id);
+    }
+
+    /** 校验文档归属当前用户，不归属则抛 403 */
+    @Transactional(readOnly = true)
+    public void verifyOwnership(Long docId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Document doc = getById(docId);
+        if (doc == null || !doc.getUserId().equals(userId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权访问此文档");
+        }
     }
 
     @Transactional(readOnly = true)
@@ -117,6 +123,30 @@ public class DocumentService {
         if (message != null) doc.setStatusMessage(message);
         documentMapper.updateById(doc);
         log.info("文档状态已更新: id={}, status={}", id, status);
+    }
+
+    @Transactional
+    public void updatePageCount(Long id, int pageCount) {
+        Document doc = new Document();
+        doc.setId(id);
+        doc.setPageCount(pageCount);
+        documentMapper.updateById(doc);
+    }
+
+    @Transactional
+    public void rename(Long id, String title) {
+        Document doc = documentMapper.selectById(id);
+        if (doc == null) throw new IllegalArgumentException("文档不存在: " + id);
+        Document update = new Document();
+        update.setId(id);
+        update.setTitle(title);
+        documentMapper.updateById(update);
+        // 同步更新关联会话标题
+        sessionMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Session>()
+                        .eq(Session::getDocId, id)
+                        .set(Session::getTitle, title));
+        log.info("文档已重命名: id={}, newTitle={}", id, title);
     }
 
     @Transactional
@@ -160,6 +190,79 @@ public class DocumentService {
         log.info("文档已删除: id={}, fileName={}", id, doc.getFileName());
     }
 
+    // ═══════ 重试处理 ═══════
+
+    /**
+     * 重试失败文档的向量化处理：
+     * 1. 校验文档状态和文件存在性
+     * 2. 清理旧切块数据，重置状态为 UPLOADING（事务内）
+     * 3. 事务提交后发送 RabbitMQ 消息（失败时将状态回滚为 FAILED）
+     */
+    @Transactional
+    public void retryAndSendMessage(Long id) {
+        Document doc = documentMapper.selectById(id);
+        if (doc == null) {
+            throw new IllegalArgumentException("文档不存在: " + id);
+        }
+        if (!"FAILED".equals(doc.getStatus())) {
+            throw new IllegalArgumentException("仅 FAILED 状态的文档可重试，当前状态: " + doc.getStatus());
+        }
+        if (doc.getFilePath() == null || !Files.exists(Path.of(doc.getFilePath()))) {
+            throw new IllegalArgumentException("原始文件已丢失，无法重试，请重新上传");
+        }
+
+        // 清理旧的切块数据
+        documentChunkMapper.delete(new LambdaQueryWrapper<DocumentChunk>()
+                .eq(DocumentChunk::getDocumentId, id));
+
+        // 重置状态
+        updateStatus(id, "UPLOADING", null, null, null);
+
+        // 事务提交后再发送消息，避免状态回滚不一致
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    boolean sent = embeddingProducer.sendEmbeddingTask(
+                            doc.getDocumentId(), doc.getFilePath(), doc.getFileName(), doc.getUserId());
+                    if (!sent) {
+                        updateStatus(id, "FAILED", null, null, "消息队列不可用，请稍后重试");
+                        log.error("重试消息发送失败, 已回滚状态为 FAILED: docId={}", id);
+                    } else {
+                        log.info("文档重试已提交: id={}, fileName={}", id, doc.getFileName());
+                    }
+                } catch (Exception e) {
+                    log.error("afterCommit 异常, 尝试回滚状态为 FAILED: docId={}", id, e);
+                    try { updateStatus(id, "FAILED", null, null, "重试异常: " + e.getMessage()); } catch (Exception ignored) {}
+                }
+            }
+        });
+    }
+
+    // ═══════ 文件名清洗 ═══════
+
+    /** 匹配 HTML 标签和危险字符 */
+    private static final Pattern HTML_TAG = Pattern.compile("<[^>]*>");
+    private static final Pattern DANGEROUS_CHARS = Pattern.compile("[\"'\\\\;`$|&<>]");
+
+    /**
+     * 清洗用户上传的原始文件名：
+     * 1. 去除 HTML 标签
+     * 2. 去除危险字符
+     * 3. 压缩连续空白
+     * 4. 截断到 200 字符
+     */
+    static String sanitizeFileName(String name) {
+        if (name == null || name.isBlank()) return "未命名文件";
+        String clean = HTML_TAG.matcher(name).replaceAll("");
+        clean = DANGEROUS_CHARS.matcher(clean).replaceAll("");
+        clean = clean.replaceAll("\\s+", " ").trim();
+        if (clean.length() > 200) clean = clean.substring(0, 200).trim();
+        // 去掉清洗后只剩扩展名的情况
+        if (clean.startsWith(".")) clean = "未命名文件" + clean;
+        return clean.isEmpty() ? "未命名文件" : clean;
+    }
+
     // ═══════ 文档上传 ═══════
 
     /**
@@ -173,7 +276,43 @@ public class DocumentService {
     public Map<String, Object> upload(String originalName, long fileSize, java.io.InputStream inputStream) {
         String extension = getSupportedExtension(originalName);
         if (extension == null) {
-            throw new IllegalArgumentException("仅支持 PDF、Word、PPT、TXT 文件");
+            throw new IllegalArgumentException("仅支持 PDF、Word、PPT、TXT、Markdown、HTML、Excel、CSV 文件");
+        }
+
+        // 文件大小二次校验（multipart 配置之外的兜底）
+        if (fileSize > 50L * 1024 * 1024) {
+            throw new IllegalArgumentException("文件大小超过限制（最大 50MB），请压缩后重试");
+        }
+
+        // 清洗文件名
+        String safeName = sanitizeFileName(originalName);
+        // 确保清洗后的文件名仍保留扩展名
+        if (!safeName.toLowerCase(Locale.ROOT).endsWith("." + extension)) {
+            safeName = safeName.replaceAll("(?i)\\.[^.]+$", "") + "." + extension;
+        }
+
+        Long userId = SecurityUtils.getCurrentUserId();
+
+        // 并发去重：同一用户 60 秒内上传同名同大小文件视为重复
+        Document recentDuplicate = documentMapper.selectOne(
+                new LambdaQueryWrapper<Document>()
+                        .eq(Document::getUserId, userId)
+                        .eq(Document::getFileName, safeName)
+                        .eq(Document::getFileSize, fileSize)
+                        .ge(Document::getCreatedAt, java.time.LocalDateTime.now().minusSeconds(60))
+                        .last("LIMIT 1"));
+        if (recentDuplicate != null) {
+            log.warn("检测到重复上传: userId={}, fileName={}, 跳过", userId, safeName);
+            Session existingSession = sessionMapper.selectOne(
+                    new LambdaQueryWrapper<Session>().eq(Session::getDocId, recentDuplicate.getId()).last("LIMIT 1"));
+            Long sessionId = existingSession != null ? existingSession.getId() : 0L;
+            return Map.of(
+                    "documentId", recentDuplicate.getDocumentId(),
+                    "sessionId", sessionId,
+                    "fileName", safeName,
+                    "size", fileSize,
+                    "status", recentDuplicate.getStatus()
+            );
         }
 
         String uuid = UUID.randomUUID().toString().replace("-", "");
@@ -191,15 +330,13 @@ public class DocumentService {
             throw new RuntimeException("文件保存失败: " + e.getMessage(), e);
         }
 
-        log.info("文件上传成功: uuid={}, name={}, size={}", uuid, originalName, fileSize);
-
-        Long userId = SecurityUtils.getCurrentUserId();
+        log.info("文件上传成功: uuid={}, name={}, size={}", uuid, safeName, fileSize);
 
         Document doc = Document.builder()
                 .userId(userId)
                 .documentId(uuid)
-                .title(originalName.replaceAll("(?i)\\.[^.]+$", ""))
-                .fileName(originalName)
+                .title(safeName.replaceAll("(?i)\\.[^.]+$", ""))
+                .fileName(safeName)
                 .fileSize(fileSize)
                 .fileType(extension)
                 .filePath(filePath.toString())
@@ -208,12 +345,12 @@ public class DocumentService {
         create(doc);
 
         Session session = sessionService.create(userId, doc.getId(), doc.getTitle());
-        boolean sent = embeddingProducer.sendEmbeddingTask(uuid, filePath.toString(), originalName, userId);
+        boolean sent = embeddingProducer.sendEmbeddingTask(uuid, filePath.toString(), safeName, userId);
 
         return Map.of(
                 "documentId", uuid,
                 "sessionId", session.getId(),
-                "fileName", originalName,
+                "fileName", safeName,
                 "size", fileSize,
                 "status", sent ? "processing" : "pending"
         );
@@ -225,7 +362,7 @@ public class DocumentService {
         }
         String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
         return switch (extension) {
-            case "pdf", "doc", "docx", "ppt", "pptx", "txt" -> extension;
+            case "pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "html", "htm", "xlsx", "csv" -> extension;
             default -> null;
         };
     }

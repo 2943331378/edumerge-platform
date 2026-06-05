@@ -4,6 +4,7 @@ import com.edumerge.common.result.Result;
 import com.edumerge.dto.*;
 import com.edumerge.entity.Flashcard;
 import com.edumerge.security.SecurityUtils;
+import com.edumerge.service.DocumentService;
 import com.edumerge.service.FlashcardService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -22,10 +23,12 @@ import java.util.Map;
 public class FlashcardController {
 
     private final FlashcardService flashcardService;
+    private final DocumentService documentService;
 
     @Autowired
-    public FlashcardController(FlashcardService flashcardService) {
+    public FlashcardController(FlashcardService flashcardService, DocumentService documentService) {
         this.flashcardService = flashcardService;
+        this.documentService = documentService;
     }
 
     @PostMapping("/generate")
@@ -43,6 +46,7 @@ public class FlashcardController {
         if (deckId != null) cards = flashcardService.listByDeckId(deckId);
         else {
             if (sessionId != null) docId = flashcardService.resolveDocId(sessionId);
+            if (docId != null) documentService.verifyOwnership(docId);
             cards = docId != null ? flashcardService.listByDocId(docId) : List.of();
         }
         return Result.success(DtoMapper.toFlashcardResponseList(cards));
@@ -75,6 +79,7 @@ public class FlashcardController {
 
     @GetMapping("/due")
     public Result<List<FlashcardResponse>> listDue(@RequestParam Long docId) {
+        documentService.verifyOwnership(docId);
         return Result.success(DtoMapper.toFlashcardResponseList(flashcardService.listDueCards(docId)));
     }
 }

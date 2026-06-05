@@ -2,6 +2,7 @@ package com.edumerge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edumerge.ai.AiFlashcardGenerator;
+import com.edumerge.entity.Document;
 import com.edumerge.entity.Flashcard;
 import com.edumerge.entity.FlashcardReviewLog;
 import com.edumerge.mapper.FlashcardMapper;
@@ -26,16 +27,19 @@ public class FlashcardService {
     private final FlashcardReviewLogMapper reviewLogMapper;
     private final AiFlashcardGenerator aiFlashcardGenerator;
     private final SessionService sessionService;
+    private final DocumentService documentService;
 
     @Autowired
     public FlashcardService(FlashcardMapper flashcardMapper,
                             FlashcardReviewLogMapper reviewLogMapper,
                             AiFlashcardGenerator aiFlashcardGenerator,
-                            SessionService sessionService) {
+                            SessionService sessionService,
+                            DocumentService documentService) {
         this.flashcardMapper = flashcardMapper;
         this.reviewLogMapper = reviewLogMapper;
         this.aiFlashcardGenerator = aiFlashcardGenerator;
         this.sessionService = sessionService;
+        this.documentService = documentService;
     }
 
     // ═══════ CRUD ═══════
@@ -73,15 +77,28 @@ public class FlashcardService {
 
     @Transactional
     public void updateById(Flashcard card) {
+        verifyOwnership(card.getId());
         flashcardMapper.updateById(card);
         log.info("学习卡片已更新: id={}", card.getId());
     }
 
     @Transactional
     public int deleteById(Long id) {
+        verifyOwnership(id);
         int rows = flashcardMapper.deleteById(id);
         if (rows > 0) log.info("学习卡片已删除: id={}", id);
         return rows;
+    }
+
+    private void verifyOwnership(Long cardId) {
+        Flashcard card = getById(cardId);
+        if (card == null) throw new IllegalArgumentException("卡片不存在: " + cardId);
+        Long userId = SecurityUtils.getCurrentUserId();
+        Document doc = documentService.getById(card.getDocId());
+        if (doc == null || !doc.getUserId().equals(userId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权操作此卡片");
+        }
     }
 
     @Transactional(readOnly = true)

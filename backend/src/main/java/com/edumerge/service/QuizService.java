@@ -2,6 +2,7 @@ package com.edumerge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edumerge.ai.AiQuizGenerator;
+import com.edumerge.entity.Document;
 import com.edumerge.entity.Quiz;
 import com.edumerge.entity.QuizAttempt;
 import com.edumerge.mapper.QuizAttemptMapper;
@@ -26,6 +27,7 @@ public class QuizService {
     private final QuizAttemptMapper quizAttemptMapper;
     private final AiQuizGenerator aiQuizGenerator;
     private final SessionService sessionService;
+    private final DocumentService documentService;
     private final ObjectMapper objectMapper;
 
     @Autowired
@@ -33,11 +35,13 @@ public class QuizService {
                        QuizAttemptMapper quizAttemptMapper,
                        AiQuizGenerator aiQuizGenerator,
                        SessionService sessionService,
+                       DocumentService documentService,
                        ObjectMapper objectMapper) {
         this.quizMapper = quizMapper;
         this.quizAttemptMapper = quizAttemptMapper;
         this.aiQuizGenerator = aiQuizGenerator;
         this.sessionService = sessionService;
+        this.documentService = documentService;
         this.objectMapper = objectMapper;
     }
 
@@ -83,15 +87,28 @@ public class QuizService {
 
     @Transactional
     public void updateById(Quiz quiz) {
+        verifyOwnership(quiz.getId());
         quizMapper.updateById(quiz);
         log.info("测试题已更新: id={}", quiz.getId());
     }
 
     @Transactional
     public int deleteById(Long id) {
+        verifyOwnership(id);
         int rows = quizMapper.deleteById(id);
         if (rows > 0) log.info("测试题已删除: id={}", id);
         return rows;
+    }
+
+    private void verifyOwnership(Long quizId) {
+        Quiz quiz = getById(quizId);
+        if (quiz == null) throw new IllegalArgumentException("题目不存在: " + quizId);
+        Long userId = SecurityUtils.getCurrentUserId();
+        Document doc = documentService.getById(quiz.getDocId());
+        if (doc == null || !doc.getUserId().equals(userId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权操作此题目");
+        }
     }
 
     @Transactional(readOnly = true)
@@ -154,12 +171,14 @@ public class QuizService {
         return attempt;
     }
 
-    /** 查询某文档的答题历史 */
+    /** 查询某文档的答题历史（仅当前用户） */
     @Transactional(readOnly = true)
     public List<QuizAttempt> listAttempts(Long docId) {
+        Long userId = SecurityUtils.getCurrentUserId();
         return quizAttemptMapper.selectList(
                 new LambdaQueryWrapper<QuizAttempt>()
                         .eq(QuizAttempt::getDocId, docId)
+                        .eq(QuizAttempt::getUserId, userId)
                         .orderByDesc(QuizAttempt::getCreatedAt));
     }
 

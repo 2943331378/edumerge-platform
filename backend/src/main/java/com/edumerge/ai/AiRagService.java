@@ -265,7 +265,8 @@ public class AiRagService {
     private void tryAutoExtractFlowNote(String sessionId, Long userId, String documentId,
                                          Long docId) {
         try {
-            int count = exchangeCounters.merge(sessionId, 1, Integer::sum);
+            String counterKey = userId + ":" + sessionId;
+            int count = exchangeCounters.merge(counterKey, 1, Integer::sum);
             if (count % 5 != 0) return;
 
             // 优先用 docId（数据库主键）查找文档，回退到 documentId (Milvus UUID)

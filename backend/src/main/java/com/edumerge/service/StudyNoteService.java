@@ -5,6 +5,7 @@ import com.edumerge.ai.AiNoteGenerator;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.StudyNote;
 import com.edumerge.mapper.StudyNoteMapper;
+import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -78,6 +79,7 @@ public class StudyNoteService {
         if (note == null) {
             throw new IllegalArgumentException("笔记不存在: " + id);
         }
+        verifyOwnership(note.getDocId());
         if (content != null) {
             note.setContent(content);
         }
@@ -96,6 +98,15 @@ public class StudyNoteService {
                 new LambdaQueryWrapper<StudyNote>()
                         .eq(StudyNote::getDocId, docId));
         log.info("旧学习笔记已清理: docId={}", docId);
+    }
+
+    private void verifyOwnership(Long docId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Document doc = documentService.getById(docId);
+        if (doc == null || !doc.getUserId().equals(userId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权操作此笔记");
+        }
     }
 
     // ═══════ AI 生成 ═══════

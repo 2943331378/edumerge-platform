@@ -1,6 +1,7 @@
 package com.edumerge.controller;
 
 import com.edumerge.ai.AiRagService;
+import com.edumerge.service.DocumentService;
 import com.edumerge.service.SessionService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.segment.TextSegment;
@@ -34,11 +35,14 @@ public class LearningChatController {
 
     private final AiRagService aiRagService;
     private final SessionService sessionService;
+    private final DocumentService documentService;
 
     @Autowired
-    public LearningChatController(AiRagService aiRagService, SessionService sessionService) {
+    public LearningChatController(AiRagService aiRagService, SessionService sessionService,
+                                  DocumentService documentService) {
         this.aiRagService = aiRagService;
         this.sessionService = sessionService;
+        this.documentService = documentService;
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -56,6 +60,7 @@ public class LearningChatController {
         if (docIdStr != null && !docIdStr.isBlank()) {
             try { docId = Long.parseLong(docIdStr); } catch (NumberFormatException ignored) {}
         }
+        if (docId != null) documentService.verifyOwnership(docId);
         final Long finalDocId2 = docId;
 
         String resolvedDocId = documentId;

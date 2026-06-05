@@ -6,6 +6,7 @@ import com.edumerge.entity.CardDeck;
 import com.edumerge.entity.Document;
 import com.edumerge.entity.MindMap;
 import com.edumerge.mapper.MindMapMapper;
+import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -176,9 +177,21 @@ public class MindMapService {
     /** 删除思维导图（同时清理 deck 和 mindmap 记录） */
     @Transactional
     public void deleteMindMap(Long deckId) {
+        verifyOwnershipByDeckId(deckId);
         deleteByDeckId(deckId);
         cardDeckService.delete(deckId);
         log.info("思维导图已删除: deckId={}", deckId);
+    }
+
+    public void verifyOwnershipByDeckId(Long deckId) {
+        MindMap mm = getByDeckId(deckId);
+        if (mm == null) throw new IllegalArgumentException("思维导图不存在: " + deckId);
+        Long userId = SecurityUtils.getCurrentUserId();
+        Document doc = documentService.getById(mm.getDocId());
+        if (doc == null || !doc.getUserId().equals(userId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权操作此思维导图");
+        }
     }
 
     // ═══════ 数据转换 ═══════

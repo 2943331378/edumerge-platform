@@ -5,6 +5,7 @@ import com.edumerge.dto.DtoMapper;
 import com.edumerge.dto.DocumentResponse;
 import com.edumerge.dto.OutlineResponse;
 import com.edumerge.entity.Document;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.DocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,38 +43,57 @@ public class DocumentController {
 
     @GetMapping
     public Result<List<DocumentResponse>> list() {
-        return Result.success(DtoMapper.toResponseList(documentService.listRecent()));
+        return Result.success(DtoMapper.toResponseList(documentService.listByUserId(SecurityUtils.getCurrentUserId())));
     }
 
     @GetMapping("/{docId}/chunks")
     public Result<List<com.edumerge.entity.DocumentChunk>> chunks(@PathVariable Long docId) {
-        Document doc = documentService.getById(docId);
-        if (doc == null) {
-            return Result.fail("文档不存在");
-        }
+        documentService.verifyOwnership(docId);
         return Result.success(documentService.listChunks(docId));
+    }
+
+    @PutMapping("/{id}")
+    public Result<Void> rename(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        documentService.verifyOwnership(id);
+        String title = body.get("title");
+        if (title == null || title.isBlank()) {
+            return Result.fail("标题不能为空");
+        }
+        documentService.rename(id, title.trim());
+        return Result.success("已重命名", null);
     }
 
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        documentService.verifyOwnership(id);
         documentService.delete(id);
         return Result.success("文档已删除", null);
+    }
+
+    @PostMapping("/{id}/retry")
+    public Result<Void> retry(@PathVariable Long id) {
+        documentService.verifyOwnership(id);
+        documentService.retryAndSendMessage(id);
+        return Result.success("已重新提交处理", null);
     }
 
     // ═══════ 文档大纲 API ═══════
 
     @GetMapping("/{docId}/outline")
     public Result<OutlineResponse> getOutline(@PathVariable Long docId) {
+        documentService.verifyOwnership(docId);
         return Result.success(documentService.getOutline(docId));
     }
 
     @PutMapping("/{docId}/outline")
     public Result<OutlineResponse> updateOutline(@PathVariable Long docId, @RequestBody String body) {
+        documentService.verifyOwnership(docId);
         return Result.success("大纲已保存", documentService.updateOutline(docId, body));
     }
 
     @PostMapping("/{docId}/outline/regenerate")
     public Result<OutlineResponse> regenerateOutline(@PathVariable Long docId) {
+        documentService.verifyOwnership(docId);
         return Result.success("大纲已重新生成", documentService.regenerateOutline(docId));
     }
 }

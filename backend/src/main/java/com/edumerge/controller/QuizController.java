@@ -4,6 +4,7 @@ import com.edumerge.common.result.Result;
 import com.edumerge.dto.*;
 import com.edumerge.entity.Quiz;
 import com.edumerge.entity.QuizAttempt;
+import com.edumerge.service.DocumentService;
 import com.edumerge.service.QuizService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -22,10 +23,12 @@ import java.util.Map;
 public class QuizController {
 
     private final QuizService quizService;
+    private final DocumentService documentService;
 
     @Autowired
-    public QuizController(QuizService quizService) {
+    public QuizController(QuizService quizService, DocumentService documentService) {
         this.quizService = quizService;
+        this.documentService = documentService;
     }
 
     @PostMapping("/generate")
@@ -43,6 +46,7 @@ public class QuizController {
         if (deckId != null) quizzes = quizService.listByDeckId(deckId);
         else {
             if (sessionId != null) docId = quizService.resolveDocId(sessionId);
+            if (docId != null) documentService.verifyOwnership(docId);
             quizzes = docId != null ? quizService.listByDocId(docId) : List.of();
         }
         return Result.success(DtoMapper.toQuizResponseList(quizzes));
@@ -55,6 +59,7 @@ public class QuizController {
 
     @GetMapping("/attempts")
     public Result<List<QuizAttemptResponse>> listAttempts(@RequestParam Long docId) {
+        documentService.verifyOwnership(docId);
         return Result.success(DtoMapper.toQuizAttemptResponseList(quizService.listAttempts(docId)));
     }
 
@@ -80,11 +85,13 @@ public class QuizController {
 
     @GetMapping("/error-book")
     public Result<List<Map<String, Object>>> listErrorBook(@RequestParam Long docId) {
+        documentService.verifyOwnership(docId);
         return Result.success(quizService.getErrorBook(docId));
     }
 
     @GetMapping("/weakness")
     public Result<List<Map<String, Object>>> listWeakness(@RequestParam Long docId) {
+        documentService.verifyOwnership(docId);
         return Result.success(quizService.getWeakness(docId));
     }
 }

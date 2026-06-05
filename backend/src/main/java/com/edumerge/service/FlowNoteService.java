@@ -6,6 +6,7 @@ import com.edumerge.entity.ChatHistory;
 import com.edumerge.entity.FlowNote;
 import com.edumerge.mapper.ChatHistoryMapper;
 import com.edumerge.mapper.FlowNoteMapper;
+import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,21 +30,23 @@ public class FlowNoteService {
         this.aiFlowNoteGenerator = aiFlowNoteGenerator;
     }
 
-    /** 按文档查询所有条目 */
+    /** 按文档 + 用户查询所有条目 */
     @Transactional(readOnly = true)
-    public List<FlowNote> listByDocId(Long docId) {
+    public List<FlowNote> listByDocId(Long docId, Long userId) {
         return flowNoteMapper.selectList(
                 new LambdaQueryWrapper<FlowNote>()
                         .eq(FlowNote::getDocId, docId)
+                        .eq(FlowNote::getUserId, userId)
                         .orderByDesc(FlowNote::getCreatedAt));
     }
 
-    /** 按文档 + 分类筛选 */
+    /** 按文档 + 用户 + 分类筛选 */
     @Transactional(readOnly = true)
-    public List<FlowNote> listByDocIdAndCategory(Long docId, String category) {
+    public List<FlowNote> listByDocIdAndCategory(Long docId, Long userId, String category) {
         return flowNoteMapper.selectList(
                 new LambdaQueryWrapper<FlowNote>()
                         .eq(FlowNote::getDocId, docId)
+                        .eq(FlowNote::getUserId, userId)
                         .eq(category != null, FlowNote::getCategory, category)
                         .orderByDesc(FlowNote::getCreatedAt));
     }
@@ -67,6 +70,7 @@ public class FlowNoteService {
     /** 更新条目 */
     @Transactional
     public void update(Long id, FlowNote note) {
+        verifyOwnership(id);
         note.setId(id);
         flowNoteMapper.updateById(note);
     }
@@ -74,12 +78,14 @@ public class FlowNoteService {
     /** 删除条目 */
     @Transactional
     public void delete(Long id) {
+        verifyOwnership(id);
         flowNoteMapper.deleteById(id);
     }
 
     /** 标记已复习 */
     @Transactional
     public void markReviewed(Long id) {
+        verifyOwnership(id);
         FlowNote note = flowNoteMapper.selectById(id);
         if (note != null) {
             note.setIsReviewed(1);
@@ -88,9 +94,19 @@ public class FlowNoteService {
         }
     }
 
+    private void verifyOwnership(Long noteId) {
+        FlowNote note = flowNoteMapper.selectById(noteId);
+        if (note == null) throw new IllegalArgumentException("条目不存在: " + noteId);
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (!userId.equals(note.getUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权操作此条目");
+        }
+    }
+
     /** 统计 */
-    public Map<String, Object> stats(Long docId) {
-        List<FlowNote> all = listByDocId(docId);
+    public Map<String, Object> stats(Long docId, Long userId) {
+        List<FlowNote> all = listByDocId(docId, userId);
         long reviewed = all.stream().filter(n -> n.getIsReviewed() != null && n.getIsReviewed() == 1).count();
         Map<String, Long> byCategory = new LinkedHashMap<>();
         for (FlowNote n : all) {
@@ -111,6 +127,7 @@ public class FlowNoteService {
         List<ChatHistory> history = chatHistoryMapper.selectList(
                 new LambdaQueryWrapper<ChatHistory>()
                         .eq(sessionId != null, ChatHistory::getSessionId, sessionId)
+                        .eq(ChatHistory::getUserId, userId)
                         .orderByDesc(ChatHistory::getCreatedAt)
                         .last("LIMIT " + maxExchanges));
 

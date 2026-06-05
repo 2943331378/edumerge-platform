@@ -31,7 +31,8 @@ public class FlowNoteController {
     @GetMapping
     public Result<List<FlowNoteResponse>> list(@RequestParam Long docId,
                                                 @RequestParam(required = false) String category) {
-        return Result.success(DtoMapper.toFlowNoteResponseList(flowNoteService.listByDocIdAndCategory(docId, category)));
+        Long userId = SecurityUtils.getCurrentUserId();
+        return Result.success(DtoMapper.toFlowNoteResponseList(flowNoteService.listByDocIdAndCategory(docId, userId, category)));
     }
 
     /** AI 从对话中提取 FlowNote 条目 */
@@ -88,6 +89,7 @@ public class FlowNoteController {
     /** 统计 */
     @GetMapping("/stats")
     public Result<Map<String, Object>> stats(@RequestParam Long docId) {
-        return Result.success(flowNoteService.stats(docId));
+        Long userId = SecurityUtils.getCurrentUserId();
+        return Result.success(flowNoteService.stats(docId, userId));
     }
 }
