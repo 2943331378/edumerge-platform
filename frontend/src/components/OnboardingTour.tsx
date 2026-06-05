@@ -84,16 +84,17 @@ export function OnboardingTour({ open, onClose }: Props) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100]">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleSkip} />
+    <>
+      {/* Backdrop — header 不遮挡 */}
+      <div className="fixed inset-x-0 top-11 bottom-0 z-[100] bg-black/50 backdrop-blur-sm" onClick={handleSkip} />
 
-      {/* Card */}
-      <div className="absolute inset-0 flex items-center justify-center p-4">
+      {/* Card — 居中弹窗，不覆盖 header */}
+      <div className="fixed inset-x-0 top-11 bottom-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
         <div
           className={cn(
             "relative w-full max-w-md rounded-2xl border border-white/10 bg-card/95 backdrop-blur-xl shadow-2xl",
             "animate-in fade-in zoom-in-95 duration-300",
+            "pointer-events-auto",
           )}
         >
           {/* Header with step indicator */}
@@ -189,7 +190,7 @@ export function OnboardingTour({ open, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

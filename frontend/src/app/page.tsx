@@ -136,7 +136,6 @@ export default function HomePage() {
 
   const [chatOpen, setChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState("");
-  const [showStats, setShowStats] = useState(false);
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
   const [docSearch, setDocSearch] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -630,9 +629,9 @@ export default function HomePage() {
             <Button
               variant="ghost"
               size="icon"
-              className={cn("h-8 w-8 rounded-lg", showStats && "bg-primary/10 text-primary")}
-              onClick={() => { setShowStats((v) => !v); setShowKnowledgeGraph(false); }}
-              title="数据看板"
+              className={cn("h-8 w-8 rounded-lg", userMenuOpen && "bg-primary/10 text-primary")}
+              onClick={() => { setUserMenuOpen((v) => !v); }}
+              title="个人中心"
             >
               <BarChart3 className="h-4 w-4" />
             </Button>
@@ -640,7 +639,7 @@ export default function HomePage() {
               variant="ghost"
               size="icon"
               className={cn("h-8 w-8 rounded-lg", showKnowledgeGraph && "bg-primary/10 text-primary")}
-              onClick={() => { setShowKnowledgeGraph((v) => !v); setShowStats(false); }}
+              onClick={() => { setShowKnowledgeGraph((v) => !v); setUserMenuOpen(false); }}
               title="知识图谱"
             >
               <GitBranch className="h-4 w-4" />
@@ -656,48 +655,21 @@ export default function HomePage() {
             </Button>
             <ThemeToggle />
 
-            {/* User menu */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setUserMenuOpen((v) => !v)}
-                className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-              >
-                <User className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline max-w-[80px] truncate">
-                  {auth.user?.displayName ?? auth.user?.username ?? "用户"}
-                </span>
-              </button>
-              {userMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setUserMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 w-48 rounded-xl border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-150">
-                    <div className="px-3 py-2 border-b border-border/50">
-                      <p className="text-xs font-medium text-foreground truncate">
-                        {auth.user?.displayName ?? auth.user?.username}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground truncate">
-                        {auth.user?.email}
-                      </p>
-                    </div>
-                    <div className="p-1">
-                      <button
-                        type="button"
-                        onClick={() => { auth.logout(); setUserMenuOpen(false); }}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
-                      >
-                        <LogOut className="h-3 w-3" />
-                        退出登录
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+            {/* User menu → 个人中心 */}
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen((v) => !v)}
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <User className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline max-w-[80px] truncate">
+                {auth.user?.displayName ?? auth.user?.username ?? "用户"}
+              </span>
+            </button>
           </div>
         </header>
 
-        {!showStats && !showKnowledgeGraph && (
+        {!showKnowledgeGraph && (
           <LearningPath
             steps={STEPS}
             currentStep={currentStep}
@@ -708,7 +680,7 @@ export default function HomePage() {
 
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
           {/* Contextual step hint — shown on first visit to each step */}
-          {!showStats && !showKnowledgeGraph && (
+          {!showKnowledgeGraph && (
             <StepHint
               step={currentStep}
               visible={stepHintVisible}
@@ -727,9 +699,9 @@ export default function HomePage() {
                 setChatOpen(true);
               }}
             />
-          ) : showStats ? <StatsDashboard /> : renderStep()}
+          ) : renderStep()}
           {/* Floating Ask AI button — visible in steps 2-6 */}
-          {!showStats && !showKnowledgeGraph && currentStep >= 2 && (
+          {!showKnowledgeGraph && currentStep >= 2 && (
             <button
               type="button"
               onClick={() => setChatOpen(true)}
@@ -741,7 +713,7 @@ export default function HomePage() {
           )}
         </div>
 
-        {!showStats && !showKnowledgeGraph && (
+        {!showKnowledgeGraph && (
           <div className="flex items-center justify-between px-3 md:px-6 py-2 md:py-3 border-t border-border/50 bg-background/50 shrink-0">
             <Button
               variant="ghost"
@@ -780,6 +752,55 @@ export default function HomePage() {
         activityType={STEP_ACTIVITY_MAP[currentStep] ?? null}
         contextHint={chatContext || null}
       />
+
+      {/* 个人中心面板 */}
+      {userMenuOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setUserMenuOpen(false)} />
+          <div className="fixed right-0 top-0 bottom-0 z-50 w-[340px] max-w-[85vw] bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            {/* 用户信息 */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-sm font-semibold text-primary shrink-0">
+                  {(auth.user?.displayName ?? auth.user?.username ?? "U")[0]}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {auth.user?.displayName ?? auth.user?.username}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {auth.user?.email}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUserMenuOpen(false)}
+                className="h-7 w-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* 个人看板 */}
+            <div className="flex-1 overflow-y-auto">
+              <StatsDashboard />
+            </div>
+
+            {/* 退出登录 */}
+            <div className="border-t border-border/50 p-3">
+              <button
+                type="button"
+                onClick={() => { auth.logout(); setUserMenuOpen(false); }}
+                className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
+              >
+                <LogOut className="h-4 w-4" />
+                退出登录
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Onboarding tour — first-time user guide */}
       <OnboardingTour open={tourOpen} onClose={() => setTourOpen(false)} />
