@@ -560,6 +560,76 @@ export async function getLearningStats(): Promise<LearningStatsResponse> {
   return request<LearningStatsResponse>("/stats/learning");
 }
 
+export interface LearnerDashboardResponse {
+  today: {
+    reviewedCards: number;
+    quizAttempts: number;
+    quizAccuracy: number;
+    correctCount: number;
+    totalAnswered: number;
+  };
+  rhythm: {
+    streakDays: number;
+    weekly: { date: string; reviews: number; quizzes: number }[];
+    monthly: { date: string; reviews: number; quizzes: number }[];
+  };
+  achievement: {
+    totalReviews: number;
+    totalQuizzes: number;
+    avgAccuracy: number;
+    totalDocs: number;
+    totalFlashcards: number;
+    totalQuizQuestions: number;
+  };
+  dueDocs: { docId: number; docName: string; dueCount: number }[];
+  topErrors: {
+    quizId: number;
+    question: string;
+    answer: string;
+    explanation?: string;
+    errorCount: number;
+    docId: number;
+    docName: string;
+  }[];
+  deckWeaknesses: {
+    docId: number;
+    docName: string;
+    totalQuestions: number;
+    correctCount: number;
+    accuracyRate: number;
+  }[];
+  docProgress: {
+    docId: number;
+    docName: string;
+    totalCards: number;
+    reviewedCards: number;
+    quizAccuracy: number;
+    quizTotal: number;
+  }[];
+  todayTimeline: {
+    time: string;
+    type: "review" | "quiz";
+    description: string;
+    docName: string;
+    docId: number;
+  }[];
+  weeklySummary: {
+    reviews: number;
+    quizzes: number;
+    accuracy: number;
+    activeDays: number;
+    topDocName: string;
+    topDocReviews: number;
+    prevReviews: number;
+    prevQuizzes: number;
+    prevAccuracy: number;
+  };
+}
+
+export async function getLearnerDashboard(): Promise<LearnerDashboardResponse> {
+  return request<LearnerDashboardResponse>("/stats/learner");
+}
+
 // ===== FlowNote 持续学习日志 =====
 
 export interface FlowNoteItem {

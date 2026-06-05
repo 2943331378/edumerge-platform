@@ -33,7 +33,7 @@ npm run build     # 生产构建
 - `chat/ChatDrawer.tsx` — 上下文感知 AI 对话抽屉（移动端底部半屏、桌面端右侧滑入）
 - `chat/ChatRoom.tsx` — 对话核心（文档级会话隔离、动态建议问题、双击重命名、反馈回路）
 - `chat/MessageBubble.tsx` — 消息气泡（Markdown渲染、来源追溯、保存为笔记、有帮助标记）
-- `StatsDashboard.tsx` — 数据资产看板（文档数、RAG 评测指标、合规治理）
+- `StatsDashboard.tsx` — 学习者个人中心看板（今日待办+进度环、今日学习概况、周度报告+趋势对比、学习节奏热力图+周/月目标、累计成就、成就徽章、薄弱知识点、文档掌握度、文档学习进度、今日时间线、目标预设、情境化行动卡）
 - `KnowledgeGraphPage.tsx` — 跨文档知识图谱（react-force-graph-2d 力导向图、概念节点+关系边）
 - `FlashcardView.tsx` — 闪卡组（AI生成→预览审核→逐条编辑/删除→翻转学习→SM-2自评→到期复习）含 AbortController 取消
 - `QuizView.tsx` — 测验组（AI生成→逐条编辑/删除→答题→错题回顾→历史得分→全局错题本→薄弱度热力图）含 AbortController 取消
@@ -41,7 +41,8 @@ npm run build     # 生产构建
 - `StudyNoteView.tsx` — AI 生成学习笔记，含 AbortController 取消
 - `FlowNoteView.tsx` — 持续学习日志（分类筛选/AI提取/手动添加/复习标记/导出）
 - `MindMapViewer.tsx` — markmap 思维导图渲染器（手动触发生成，暗黑模式 PNG 导出）
-- `learning-path.tsx` — 6 步进度导航（响应式，移动端紧凑布局）
+- `learning-path.tsx` — 6 步进度导航（响应式，所有步骤可自由点击跳转）
+- `app/dashboard/page.tsx` — 个人中心全屏页面（移动端使用，含返回导航和操作回调）
 - `hooks/useGlobalKeyboard.ts` — 全局键盘快捷键 Hook（1-6 步骤跳转、Ctrl+/ 对话、Ctrl+Shift+D 暗黑）
 
 ### 关键设计模式
@@ -56,12 +57,15 @@ npm run build     # 生产构建
 - **FlowNote 自动提取**：`AiRagService.saveExchange()` 每 5 轮对话自动触发 `FlowNoteService.extractFromChat()`。
 - **测验错题回顾**：`QuizView` 完成答题后筛选 `wrongQuizzes`，进入回顾模式逐题重做。
 - **闪卡预览审核**：`FlashcardView` 生成后先进入 preview 网格视图，用户可逐条编辑/删除后再开始学习。
-- **移动端适配**：ChatDrawer 移动端底部半屏面板（`max-md:h-[60vh] rounded-t-2xl`），侧边栏叠加层。
+- **移动端适配**：ChatDrawer 移动端底部半屏面板（`max-md:h-[60vh] rounded-t-2xl`），侧边栏叠加层。个人中心看板响应式：桌面端（≥768px）右侧滑入 340px 面板，移动端跳转 `/dashboard` 全屏页面。`openDashboard` 通过 `window.innerWidth` 判断，resize 监听自动关闭面板，CSS `hidden md:block` 双保险。
 - **JWT 认证**：`SecurityUtils.getCurrentUserId()` 从 SecurityContext 提取当前用户 ID。
 - **SM-2 间隔重复**：`FlashcardService.review()` 实现完整 SM-2 算法（EF' = max(1.3, EF + (0.1 - (5-q)*(0.08 + (5-q)*0.02)))）。前端翻转后显示 4 个自评按钮（忘了/模糊/记住/秒答），快捷键 1-4。`flashcard_review_logs` 表记录每次自评。到期复习通过 `GET /flashcards/due` 查询 `nextReviewAt <= now` 的 ACTIVE 卡片。
-- **全局键盘快捷键**：`useGlobalKeyboard` hook 注册全局快捷键（1-6 步骤跳转、Ctrl+/ 对话、Ctrl+Shift+D 暗黑模式）。FlashcardView 内部的卡片键盘（Space 翻转、←→ 切换、1-4 自评）通过 `numberKeysHandled` 参数避免冲突：step 4 时全局数字键被禁用。
+- **全局键盘快捷键**：`useGlobalKeyboard` hook 注册全局快捷键（1-6 步骤跳转、Ctrl+/ 对话、Ctrl+Shift+D 暗黑模式）。FlashcardView 内部的卡片键盘（Space 翻转、←→ 切换、1-4 自评）通过 `numberKeysHandledUpTo` 参数避免冲突：step 4 时仅禁用数字键 1-4，5-6 仍可跳转。`goStep`/`goNext`/`goPrev`/`toggleChat` 均用 `useCallback` 包裹避免事件监听器频繁重建。`LearningPath` 所有步骤均可自由点击跳转（无 `disabled` 限制）。
 - **全局错题本**：`GET /quizzes/error-book` 聚合所有 `quiz_attempts` 的 `answer_details`，统计每道题的错误次数。`GET /quizzes/weakness` 按 deck 统计正确率，前端用色标显示（绿≥80%/黄60-80%/红<60%）。两者均先批量收集 quizId 再查询，避免 N+1。
 - **暗黑模式 PNG 导出**：`MindMapViewer` 的 `handleExportPNG` 根据 `isDark` 状态选择背景色（深色 `#0f172a` / 浅色 `#ffffff`）。
+- **学习者个人中心看板**：`StatsController.getLearnerDashboard()` 返回 `LearnerDashboardResponse`，由 `StatsService.calculateLearnerDashboard()` 一次查询聚合 7 大板块数据。DTO 使用嵌套静态类（TodayTasks、LearningRhythm、Achievement、DocDueInfo、ErrorItem、DeckWeakness、DocProgress、TimelineEntry、WeeklySummary）。前端 `StatsDashboard.tsx` 包含：进度环（SVG）、30 天 GitHub 风格热力图、成就徽章系统（10 枚徽章，基于数据自动解锁）、周度报告（本周 vs 上周趋势对比）、目标管理（日/周/月目标 + 轻松/标准/挑战预设，localStorage 持久化）、情境化行动卡（有待复习/有错题时动态显示）。
+- **测验答题记录保存**：`QuizView.handleSubmit()` 在最后一题时立即调用 `saveQuizAttempt()` 写入 `quiz_attempts` 表（而非在 `goNext()` 中调用，因为最后一题不会触发 `goNext`）。`answer_details` 为 JSON 列，格式 `[{quizId, selectedAnswer, correct}]`。
+- **错题本状态持久化**：`ErrorBookView` 的 `mastered` 状态通过 localStorage 持久化（key: `edumerge_mastered_${docId}`），刷新页面后保留。
 
 ## 架构
 
@@ -120,6 +124,7 @@ controller/          → REST 端点（Result<T> 统一响应）— 14 个控制
 | GET | /stats | 全维度数据资产看板指标 |
 | GET | /stats/report | 数据素质自评报告 (Markdown) |
 | POST | /stats/eval | 接收 evaluate_rag.py 推送的 RAG 评测指标 |
+| GET | /stats/learner | 学习者个人中心看板（今日待办、学习节奏、累计成就、薄弱知识点、文档进度、时间线、周报） |
 | POST | /auth/register | 用户注册 |
 | POST | /auth/login | 用户登录，返回 JWT |
 | GET | /auth/profile | 获取当前用户信息 |

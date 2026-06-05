@@ -261,33 +261,29 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     );
     if (isCorrect) setScore((s) => s + 1);
     if (quiz) {
-      setAnswers((prev) => [...prev, { quizId: quiz.id, selectedAnswer: selected!, correct: !!isCorrect }]);
+      const newAnswer = { quizId: quiz.id, selectedAnswer: selected!, correct: !!isCorrect };
+      const newAnswers = [...answers, newAnswer];
+      setAnswers(newAnswers);
+      // 最后一题提交时立即保存答题记录
+      if (currentIdx >= quizzes.length - 1) {
+        const correctCount = newAnswers.filter((a) => a.correct).length;
+        saveQuizAttempt({
+          docId: docId!,
+          deckId: currentDeck!.id,
+          totalQuestions: quizzes.length,
+          correctCount,
+          scorePercent: Math.round((correctCount / quizzes.length) * 100),
+          answerDetails: JSON.stringify(newAnswers),
+        }).then(() => reloadDecks()).catch(() => {});
+      }
     }
   };
 
-  const saveCurrentAttempt = async () => {
-    if (!docId || !currentDeck || answers.length === 0) return;
-    const correctCount = answers.filter((a) => a.correct).length;
-    try {
-      await saveQuizAttempt({
-        docId,
-        deckId: currentDeck.id,
-        totalQuestions: quizzes.length,
-        correctCount,
-        scorePercent: Math.round((correctCount / quizzes.length) * 100),
-        answerDetails: JSON.stringify(answers),
-      });
-      await reloadDecks();
-    } catch { /* ignore save errors */ }
-  };
-
-  const goNext = async () => {
+  const goNext = () => {
     if (currentIdx < quizzes.length - 1) {
       setCurrentIdx((i) => i + 1);
       setSelected(null);
       setSubmitted(false);
-    } else {
-      await saveCurrentAttempt();
     }
   };
 
@@ -495,7 +491,21 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     );
     if (isCorrect) setReviewScore((s) => s + 1);
     if (quiz) {
-      setReviewAnswers((prev) => [...prev, { quizId: quiz.id, selectedAnswer: reviewSelected, correct: !!isCorrect }]);
+      const newAnswer = { quizId: quiz.id, selectedAnswer: reviewSelected, correct: !!isCorrect };
+      const newReviewAnswers = [...reviewAnswers, newAnswer];
+      setReviewAnswers(newReviewAnswers);
+      // 最后一题回顾完成时保存回顾记录
+      if (reviewIdx >= wrongQuizzes.length - 1 && docId && currentDeck) {
+        const correctCount = newReviewAnswers.filter((a) => a.correct).length;
+        saveQuizAttempt({
+          docId,
+          deckId: currentDeck.id,
+          totalQuestions: wrongQuizzes.length,
+          correctCount,
+          scorePercent: Math.round((correctCount / wrongQuizzes.length) * 100),
+          answerDetails: JSON.stringify(newReviewAnswers),
+        }).catch(() => {});
+      }
     }
   };
 

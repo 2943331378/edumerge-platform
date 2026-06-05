@@ -54,18 +54,15 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
       {steps.map((step, idx) => {
         const isCompleted = completedSteps.has(step.id);
         const isActive = currentStep === step.id;
-        const isClickable = isCompleted || isActive;
 
         return (
           <div key={step.id} className="flex items-center shrink-0">
             {/* Step circle + label */}
             <button
               type="button"
-              onClick={() => isClickable && onStepClick(step.id)}
-              disabled={!isClickable}
+              onClick={() => onStepClick(step.id)}
               className={cn(
-                "flex flex-col items-center gap-1 md:gap-1.5 group transition-all",
-                isClickable ? "cursor-pointer" : "cursor-default",
+                "flex flex-col items-center gap-1 md:gap-1.5 group transition-all cursor-pointer",
               )}
             >
               <div

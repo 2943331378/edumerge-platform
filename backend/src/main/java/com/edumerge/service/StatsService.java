@@ -1,6 +1,7 @@
 package com.edumerge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.edumerge.dto.LearnerDashboardResponse;
 import com.edumerge.dto.LearningStatsResponse;
 import com.edumerge.dto.StatsResponse;
 import com.edumerge.entity.*;
@@ -11,12 +12,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 /**
  * 数据资产统计服务 — 2026 大数据要素素质大赛
@@ -42,6 +47,7 @@ public class StatsService {
     private final ChatHistoryMapper chatHistoryMapper;
     private final FlashcardReviewLogMapper flashcardReviewLogMapper;
     private final QuizAttemptMapper quizAttemptMapper;
+    private final ObjectMapper objectMapper;
 
     /**
      * 评测指标内存存储 — 由 evaluate_rag.py 推送, 重启后清空
@@ -59,7 +65,8 @@ public class StatsService {
                         QuizMapper quizMapper,
                         ChatHistoryMapper chatHistoryMapper,
                         FlashcardReviewLogMapper flashcardReviewLogMapper,
-                        QuizAttemptMapper quizAttemptMapper) {
+                        QuizAttemptMapper quizAttemptMapper,
+                        ObjectMapper objectMapper) {
         this.documentMapper = documentMapper;
         this.documentChunkMapper = documentChunkMapper;
         this.cardDeckMapper = cardDeckMapper;
@@ -70,6 +77,7 @@ public class StatsService {
         this.chatHistoryMapper = chatHistoryMapper;
         this.flashcardReviewLogMapper = flashcardReviewLogMapper;
         this.quizAttemptMapper = quizAttemptMapper;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -428,6 +436,499 @@ public class StatsService {
                 .today(today)
                 .weekly(weekly)
                 .allTime(allTime)
+                .build();
+    }
+
+    /**
+     * 计算学习者个人中心看板数据
+     * 聚合学习者真正关心的指标：待办、节奏、成就
+     */
+    @Transactional(readOnly = true)
+    public LearnerDashboardResponse calculateLearnerDashboard() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime todayStart = LocalDateTime.of(LocalDate.now(), LocalTime.MIN);
+        LocalDateTime weekAgo = todayStart.minusDays(6);
+        DateTimeFormatter dayFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        // ===== 今日待办 =====
+        List<FlashcardReviewLog> todayReviews = flashcardReviewLogMapper.selectList(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId)
+                        .ge(FlashcardReviewLog::getCreatedAt, todayStart));
+        List<QuizAttempt> todayAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, todayStart));
+        long todayTotalQ = todayAttempts.stream()
+                .mapToLong(a -> a.getTotalQuestions() != null ? a.getTotalQuestions() : 0).sum();
+        long todayCorrect = todayAttempts.stream()
+                .mapToLong(a -> a.getCorrectCount() != null ? a.getCorrectCount() : 0).sum();
+
+        LearnerDashboardResponse.TodayTasks today = LearnerDashboardResponse.TodayTasks.builder()
+                .reviewedCards(todayReviews.size())
+                .quizAttempts(todayAttempts.size())
+                .quizAccuracy(todayTotalQ > 0 ? Math.round(todayCorrect * 1000.0 / todayTotalQ) / 10.0 : 0)
+                .correctCount(todayCorrect)
+                .totalAnswered(todayTotalQ)
+                .build();
+
+        // ===== 到期闪卡（按文档分组） =====
+        List<Flashcard> dueCards = flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getUserId, userId)
+                        .eq(Flashcard::getStatus, "ACTIVE")
+                        .eq(Flashcard::getDeleted, 0)
+                        .and(w -> w
+                                .le(Flashcard::getNextReviewAt, now)
+                                .or()
+                                .isNull(Flashcard::getNextReviewAt)));
+        Map<Long, Long> dueByDoc = dueCards.stream()
+                .filter(f -> f.getDocId() != null)
+                .collect(java.util.stream.Collectors.groupingBy(Flashcard::getDocId,
+                        java.util.stream.Collectors.counting()));
+
+        List<LearnerDashboardResponse.DocDueInfo> dueDocs = new ArrayList<>();
+        if (!dueByDoc.isEmpty()) {
+            List<Document> docs = documentMapper.selectBatchIds(dueByDoc.keySet());
+            Map<Long, String> docTitleMap = new HashMap<>();
+            for (Document doc : docs) {
+                docTitleMap.put(doc.getId(), doc.getTitle());
+            }
+            for (Map.Entry<Long, Long> entry : dueByDoc.entrySet()) {
+                dueDocs.add(LearnerDashboardResponse.DocDueInfo.builder()
+                        .docId(entry.getKey())
+                        .docName(docTitleMap.getOrDefault(entry.getKey(), "未知文档"))
+                        .dueCount(entry.getValue())
+                        .build());
+            }
+            dueDocs.sort((a, b) -> Long.compare(b.getDueCount(), a.getDueCount()));
+        }
+
+        // ===== 学习节奏：连续天数 + 7 天趋势 =====
+        List<FlashcardReviewLog> monthReviews = flashcardReviewLogMapper.selectList(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId)
+                        .ge(FlashcardReviewLog::getCreatedAt, todayStart.minusDays(29)));
+        List<QuizAttempt> monthAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, todayStart.minusDays(29)));
+
+        Set<String> activeDays = new HashSet<>();
+        for (FlashcardReviewLog r : monthReviews) {
+            if (r.getCreatedAt() != null)
+                activeDays.add(r.getCreatedAt().toLocalDate().format(dayFmt));
+        }
+        for (QuizAttempt a : monthAttempts) {
+            if (a.getCreatedAt() != null)
+                activeDays.add(a.getCreatedAt().toLocalDate().format(dayFmt));
+        }
+        int streak = 0;
+        for (int i = 0; i < 30; i++) {
+            String day = LocalDate.now().minusDays(i).format(dayFmt);
+            if (activeDays.contains(day)) streak++;
+            else break;
+        }
+
+        // 7 天趋势
+        List<FlashcardReviewLog> weekReviews = flashcardReviewLogMapper.selectList(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId)
+                        .ge(FlashcardReviewLog::getCreatedAt, weekAgo));
+        List<QuizAttempt> weekAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, weekAgo));
+
+        Map<String, Long> reviewByDay = new LinkedHashMap<>();
+        Map<String, Long> quizByDay = new LinkedHashMap<>();
+        for (int i = 6; i >= 0; i--) {
+            String day = LocalDate.now().minusDays(i).format(dayFmt);
+            reviewByDay.put(day, 0L);
+            quizByDay.put(day, 0L);
+        }
+        for (FlashcardReviewLog r : weekReviews) {
+            if (r.getCreatedAt() == null) continue;
+            String day = r.getCreatedAt().toLocalDate().format(dayFmt);
+            reviewByDay.merge(day, 1L, Long::sum);
+        }
+        for (QuizAttempt a : weekAttempts) {
+            if (a.getCreatedAt() == null) continue;
+            String day = a.getCreatedAt().toLocalDate().format(dayFmt);
+            quizByDay.merge(day, 1L, Long::sum);
+        }
+        List<LearnerDashboardResponse.DailyActivity> weekly = new ArrayList<>();
+        for (String day : reviewByDay.keySet()) {
+            weekly.add(LearnerDashboardResponse.DailyActivity.builder()
+                    .date(day.substring(5))
+                    .reviews(reviewByDay.getOrDefault(day, 0L))
+                    .quizzes(quizByDay.getOrDefault(day, 0L))
+                    .build());
+        }
+
+        // 30 天热力图数据
+        Map<String, Long> monthReviewByDay = new LinkedHashMap<>();
+        Map<String, Long> monthQuizByDay = new LinkedHashMap<>();
+        for (int i = 29; i >= 0; i--) {
+            String day = LocalDate.now().minusDays(i).format(dayFmt);
+            monthReviewByDay.put(day, 0L);
+            monthQuizByDay.put(day, 0L);
+        }
+        for (FlashcardReviewLog r : monthReviews) {
+            if (r.getCreatedAt() == null) continue;
+            String day = r.getCreatedAt().toLocalDate().format(dayFmt);
+            monthReviewByDay.merge(day, 1L, Long::sum);
+        }
+        for (QuizAttempt a : monthAttempts) {
+            if (a.getCreatedAt() == null) continue;
+            String day = a.getCreatedAt().toLocalDate().format(dayFmt);
+            monthQuizByDay.merge(day, 1L, Long::sum);
+        }
+        List<LearnerDashboardResponse.DailyActivity> monthly = new ArrayList<>();
+        for (String day : monthReviewByDay.keySet()) {
+            monthly.add(LearnerDashboardResponse.DailyActivity.builder()
+                    .date(day.substring(5))
+                    .reviews(monthReviewByDay.getOrDefault(day, 0L))
+                    .quizzes(monthQuizByDay.getOrDefault(day, 0L))
+                    .build());
+        }
+
+        LearnerDashboardResponse.LearningRhythm rhythm = LearnerDashboardResponse.LearningRhythm.builder()
+                .streakDays(streak)
+                .weekly(weekly)
+                .monthly(monthly)
+                .build();
+
+        // ===== 累计成就 =====
+        long totalReviews = flashcardReviewLogMapper.selectCount(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId));
+        List<QuizAttempt> allAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId));
+        long allTotalQ = allAttempts.stream()
+                .mapToLong(a -> a.getTotalQuestions() != null ? a.getTotalQuestions() : 0).sum();
+        long allCorrect = allAttempts.stream()
+                .mapToLong(a -> a.getCorrectCount() != null ? a.getCorrectCount() : 0).sum();
+
+        long totalDocs = documentMapper.selectCount(
+                new LambdaQueryWrapper<Document>()
+                        .eq(Document::getUserId, userId)
+                        .eq(Document::getDeleted, 0));
+        long totalFlashcards = flashcardMapper.selectCount(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getUserId, userId)
+                        .eq(Flashcard::getDeleted, 0));
+        long totalQuizQuestions = quizMapper.selectCount(
+                new LambdaQueryWrapper<Quiz>()
+                        .eq(Quiz::getUserId, userId));
+
+        LearnerDashboardResponse.Achievement achievement = LearnerDashboardResponse.Achievement.builder()
+                .totalReviews(totalReviews)
+                .totalQuizzes(allAttempts.size())
+                .avgAccuracy(allTotalQ > 0 ? Math.round(allCorrect * 1000.0 / allTotalQ) / 10.0 : 0)
+                .totalDocs(totalDocs)
+                .totalFlashcards(totalFlashcards)
+                .totalQuizQuestions(totalQuizQuestions)
+                .build();
+
+        // ===== 薄弱知识点：错题统计 + 按文档正确率 =====
+        Map<Long, int[]> errorCountMap = new LinkedHashMap<>();   // quizId → [errorCount]
+        Map<Long, long[]> docQuizMap = new LinkedHashMap<>();     // docId → [total, correct]
+        for (QuizAttempt a : allAttempts) {
+            if (a.getAnswerDetails() == null) continue;
+            try {
+                List<Map<String, Object>> details = objectMapper.readValue(
+                        a.getAnswerDetails(), new TypeReference<>() {});
+                for (Map<String, Object> d : details) {
+                    boolean correct = d.get("correct") instanceof Boolean b ? b
+                            : "true".equals(String.valueOf(d.get("correct")));
+                    long quizId = d.get("quizId") instanceof Number n ? n.longValue()
+                            : Long.parseLong(String.valueOf(d.get("quizId")));
+                    if (!correct) {
+                        errorCountMap.computeIfAbsent(quizId, k -> new int[]{0});
+                        errorCountMap.get(quizId)[0]++;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[学习者看板] 解析 answer_details 失败: attemptId={}", a.getId(), e);
+            }
+            if (a.getDocId() != null) {
+                docQuizMap.computeIfAbsent(a.getDocId(), k -> new long[]{0, 0});
+                long[] stats = docQuizMap.get(a.getDocId());
+                stats[0] += a.getTotalQuestions() != null ? a.getTotalQuestions() : 0;
+                stats[1] += a.getCorrectCount() != null ? a.getCorrectCount() : 0;
+            }
+        }
+
+        // Top 错题（最多错误的前 5 道）
+        List<Long> topErrorQuizIds = errorCountMap.entrySet().stream()
+                .sorted((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]))
+                .limit(5)
+                .map(Map.Entry::getKey)
+                .toList();
+        Map<Long, Quiz> quizMap = new HashMap<>();
+        if (!topErrorQuizIds.isEmpty()) {
+            List<Quiz> quizzes = quizMapper.selectBatchIds(topErrorQuizIds);
+            for (Quiz q : quizzes) quizMap.put(q.getId(), q);
+        }
+        // quizId → docId 映射（从 Quiz 的 deckId → CardDeck.docId）
+        Map<Long, Long> quizDocMap = new HashMap<>();
+        Set<Long> deckIds = quizMap.values().stream()
+                .map(Quiz::getDeckId).filter(Objects::nonNull).collect(Collectors.toSet());
+        if (!deckIds.isEmpty()) {
+            List<CardDeck> decks = cardDeckMapper.selectBatchIds(deckIds);
+            for (CardDeck deck : decks) {
+                for (Quiz q : quizMap.values()) {
+                    if (Objects.equals(q.getDeckId(), deck.getId())) {
+                        quizDocMap.put(q.getId(), deck.getDocId());
+                    }
+                }
+            }
+        }
+        // docId → docName
+        Set<Long> allDocIds = new HashSet<>(quizDocMap.values());
+        allDocIds.addAll(docQuizMap.keySet());
+        Map<Long, String> docNameMap = new HashMap<>();
+        if (!allDocIds.isEmpty()) {
+            List<Document> docs = documentMapper.selectBatchIds(allDocIds);
+            for (Document doc : docs) docNameMap.put(doc.getId(), doc.getTitle());
+        }
+
+        List<LearnerDashboardResponse.ErrorItem> topErrors = new ArrayList<>();
+        for (Long quizId : topErrorQuizIds) {
+            Quiz quiz = quizMap.get(quizId);
+            if (quiz == null) continue;
+            Long docId = quizDocMap.get(quizId);
+            topErrors.add(LearnerDashboardResponse.ErrorItem.builder()
+                    .quizId(quizId)
+                    .question(quiz.getQuestion())
+                    .answer(quiz.getAnswer())
+                    .explanation(quiz.getExplanation())
+                    .errorCount(errorCountMap.get(quizId)[0])
+                    .docId(docId != null ? docId : 0)
+                    .docName(docId != null ? docNameMap.getOrDefault(docId, "未知文档") : "未知文档")
+                    .build());
+        }
+
+        // 按文档统计正确率（从低到高）
+        List<LearnerDashboardResponse.DeckWeakness> deckWeaknesses = new ArrayList<>();
+        for (Map.Entry<Long, long[]> entry : docQuizMap.entrySet()) {
+            long[] stats = entry.getValue();
+            if (stats[0] == 0) continue;
+            double accuracy = Math.round(stats[1] * 1000.0 / stats[0]) / 10.0;
+            deckWeaknesses.add(LearnerDashboardResponse.DeckWeakness.builder()
+                    .docId(entry.getKey())
+                    .docName(docNameMap.getOrDefault(entry.getKey(), "未知文档"))
+                    .totalQuestions(stats[0])
+                    .correctCount(stats[1])
+                    .accuracyRate(accuracy)
+                    .build());
+        }
+        deckWeaknesses.sort(Comparator.comparingDouble(LearnerDashboardResponse.DeckWeakness::getAccuracyRate));
+
+        // ===== 文档学习进度 =====
+        List<Flashcard> userFlashcards = flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getUserId, userId)
+                        .eq(Flashcard::getDeleted, 0));
+        Map<Long, long[]> cardProgressMap = new LinkedHashMap<>(); // docId → [total, reviewed]
+        for (Flashcard f : userFlashcards) {
+            if (f.getDocId() == null) continue;
+            long[] stats = cardProgressMap.computeIfAbsent(f.getDocId(), k -> new long[]{0, 0});
+            stats[0]++;
+            if (f.getReviewCount() != null && f.getReviewCount() > 0) stats[1]++;
+        }
+        // 合并所有涉及的 docId
+        Set<Long> progressDocIds = new HashSet<>(cardProgressMap.keySet());
+        progressDocIds.addAll(docQuizMap.keySet());
+        for (Long id : progressDocIds) {
+            if (!docNameMap.containsKey(id)) {
+                Document d = documentMapper.selectById(id);
+                if (d != null) docNameMap.put(id, d.getTitle());
+            }
+        }
+        // quiz accuracy per doc
+        Map<Long, double[]> quizAccMap = new HashMap<>();
+        for (LearnerDashboardResponse.DeckWeakness dw : deckWeaknesses) {
+            quizAccMap.put(dw.getDocId(), new double[]{dw.getAccuracyRate(), dw.getTotalQuestions()});
+        }
+
+        List<LearnerDashboardResponse.DocProgress> docProgress = new ArrayList<>();
+        for (Long dId : progressDocIds) {
+            long[] cardStats = cardProgressMap.getOrDefault(dId, new long[]{0, 0});
+            double[] qStats = quizAccMap.getOrDefault(dId, new double[]{-1, 0});
+            docProgress.add(LearnerDashboardResponse.DocProgress.builder()
+                    .docId(dId)
+                    .docName(docNameMap.getOrDefault(dId, "未知文档"))
+                    .totalCards(cardStats[0])
+                    .reviewedCards(cardStats[1])
+                    .quizAccuracy(qStats[0])
+                    .quizTotal((long) qStats[1])
+                    .build());
+        }
+        // 优先展示有闪卡的文档，其次按复习进度排序
+        docProgress.sort((a, b) -> {
+            if (a.getTotalCards() == 0 && b.getTotalCards() > 0) return 1;
+            if (a.getTotalCards() > 0 && b.getTotalCards() == 0) return -1;
+            return Long.compare(b.getTotalCards(), a.getTotalCards());
+        });
+
+        // ===== 今日学习时间线 =====
+        DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
+        List<LearnerDashboardResponse.TimelineEntry> timeline = new ArrayList<>();
+
+        // 闪卡复习：按文档分组，取每组最早时间
+        if (!todayReviews.isEmpty()) {
+            Set<Long> reviewFlashcardIds = todayReviews.stream()
+                    .map(FlashcardReviewLog::getFlashcardId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            Map<Long, Flashcard> fcMap = new HashMap<>();
+            if (!reviewFlashcardIds.isEmpty()) {
+                List<Flashcard> fcs = flashcardMapper.selectBatchIds(reviewFlashcardIds);
+                for (Flashcard fc : fcs) fcMap.put(fc.getId(), fc);
+            }
+            // docId → [count, earliestTime]
+            Map<Long, Object[]> reviewByDoc = new LinkedHashMap<>();
+            for (FlashcardReviewLog r : todayReviews) {
+                if (r.getFlashcardId() == null || r.getCreatedAt() == null) continue;
+                Flashcard fc = fcMap.get(r.getFlashcardId());
+                Long dId = fc != null ? fc.getDocId() : null;
+                if (dId == null) continue;
+                Object[] arr = reviewByDoc.computeIfAbsent(dId, k -> new Object[]{0, r.getCreatedAt()});
+                arr[0] = ((int) arr[0]) + 1;
+                if (r.getCreatedAt().isBefore((LocalDateTime) arr[1])) arr[1] = r.getCreatedAt();
+            }
+            for (Map.Entry<Long, Object[]> entry : reviewByDoc.entrySet()) {
+                Object[] arr = entry.getValue();
+                String dName = docNameMap.getOrDefault(entry.getKey(), "未知文档");
+                timeline.add(LearnerDashboardResponse.TimelineEntry.builder()
+                        .time(((LocalDateTime) arr[1]).format(timeFmt))
+                        .type("review")
+                        .description(String.format("复习了 %d 张卡片", (int) arr[0]))
+                        .docName(dName)
+                        .docId(entry.getKey())
+                        .build());
+            }
+        }
+
+        // 测验：每次答题一条
+        Set<Long> todayAttemptDeckIds = todayAttempts.stream()
+                .map(QuizAttempt::getDeckId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, Long> attemptDeckDocMap = new HashMap<>();
+        if (!todayAttemptDeckIds.isEmpty()) {
+            List<CardDeck> decks = cardDeckMapper.selectBatchIds(todayAttemptDeckIds);
+            for (CardDeck deck : decks) attemptDeckDocMap.put(deck.getId(), deck.getDocId());
+        }
+        for (QuizAttempt a : todayAttempts) {
+            if (a.getCreatedAt() == null) continue;
+            Long dId = a.getDeckId() != null ? attemptDeckDocMap.get(a.getDeckId()) : null;
+            String dName = dId != null ? docNameMap.getOrDefault(dId, "未知文档") : "未知文档";
+            long total = a.getTotalQuestions() != null ? a.getTotalQuestions() : 0;
+            long correct = a.getCorrectCount() != null ? a.getCorrectCount() : 0;
+            timeline.add(LearnerDashboardResponse.TimelineEntry.builder()
+                    .time(a.getCreatedAt().format(timeFmt))
+                    .type("quiz")
+                    .description(String.format("完成测验 %d/%d 题答对", correct, total))
+                    .docName(dName)
+                    .docId(dId != null ? dId : 0)
+                    .build());
+        }
+
+        // 按时间排序（升序）
+        timeline.sort(Comparator.comparing(LearnerDashboardResponse.TimelineEntry::getTime));
+
+        // ===== 周度学习报告 =====
+        // 本周数据（已有 weekReviews / weekAttempts）
+        long weekReviewCount = weekReviews.size();
+        long weekQuizCount = weekAttempts.size();
+        long weekTotalQ = weekAttempts.stream()
+                .mapToLong(a -> a.getTotalQuestions() != null ? a.getTotalQuestions() : 0).sum();
+        long weekCorrect = weekAttempts.stream()
+                .mapToLong(a -> a.getCorrectCount() != null ? a.getCorrectCount() : 0).sum();
+        double weekAccuracy = weekTotalQ > 0 ? Math.round(weekCorrect * 1000.0 / weekTotalQ) / 10.0 : 0;
+        int weekActiveDays = 0;
+        for (String day : reviewByDay.keySet()) {
+            if (reviewByDay.getOrDefault(day, 0L) > 0 || quizByDay.getOrDefault(day, 0L) > 0) weekActiveDays++;
+        }
+
+        // 本周复习最多的文档
+        Map<Long, Long> weekReviewByDoc = new HashMap<>();
+        if (!weekReviews.isEmpty()) {
+            Set<Long> weekFcIds = weekReviews.stream()
+                    .map(FlashcardReviewLog::getFlashcardId).filter(Objects::nonNull).collect(Collectors.toSet());
+            Map<Long, Flashcard> weekFcMap = new HashMap<>();
+            if (!weekFcIds.isEmpty()) {
+                List<Flashcard> fcs = flashcardMapper.selectBatchIds(weekFcIds);
+                for (Flashcard fc : fcs) weekFcMap.put(fc.getId(), fc);
+            }
+            for (FlashcardReviewLog r : weekReviews) {
+                if (r.getFlashcardId() == null) continue;
+                Flashcard fc = weekFcMap.get(r.getFlashcardId());
+                if (fc != null && fc.getDocId() != null) {
+                    weekReviewByDoc.merge(fc.getDocId(), 1L, Long::sum);
+                }
+            }
+        }
+        String topDocName = "";
+        long topDocReviews = 0;
+        if (!weekReviewByDoc.isEmpty()) {
+            Map.Entry<Long, Long> topEntry = weekReviewByDoc.entrySet().stream()
+                    .max(Map.Entry.comparingByValue()).orElse(null);
+            if (topEntry != null) {
+                topDocName = docNameMap.getOrDefault(topEntry.getKey(), "未知文档");
+                topDocReviews = topEntry.getValue();
+            }
+        }
+
+        // 上周数据
+        LocalDateTime twoWeeksAgo = todayStart.minusDays(13);
+        LocalDateTime lastWeekEnd = todayStart.minusDays(6);
+        List<FlashcardReviewLog> prevWeekReviews = flashcardReviewLogMapper.selectList(
+                new LambdaQueryWrapper<FlashcardReviewLog>()
+                        .eq(FlashcardReviewLog::getUserId, userId)
+                        .ge(FlashcardReviewLog::getCreatedAt, twoWeeksAgo)
+                        .lt(FlashcardReviewLog::getCreatedAt, lastWeekEnd));
+        List<QuizAttempt> prevWeekAttempts = quizAttemptMapper.selectList(
+                new LambdaQueryWrapper<QuizAttempt>()
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, twoWeeksAgo)
+                        .lt(QuizAttempt::getCreatedAt, lastWeekEnd));
+        long prevTotalQ = prevWeekAttempts.stream()
+                .mapToLong(a -> a.getTotalQuestions() != null ? a.getTotalQuestions() : 0).sum();
+        long prevCorrect = prevWeekAttempts.stream()
+                .mapToLong(a -> a.getCorrectCount() != null ? a.getCorrectCount() : 0).sum();
+        double prevAccuracy = prevTotalQ > 0 ? Math.round(prevCorrect * 1000.0 / prevTotalQ) / 10.0 : 0;
+
+        LearnerDashboardResponse.WeeklySummary weeklySummary = LearnerDashboardResponse.WeeklySummary.builder()
+                .reviews(weekReviewCount)
+                .quizzes(weekQuizCount)
+                .accuracy(weekAccuracy)
+                .activeDays(weekActiveDays)
+                .topDocName(topDocName)
+                .topDocReviews(topDocReviews)
+                .prevReviews(prevWeekReviews.size())
+                .prevQuizzes(prevWeekAttempts.size())
+                .prevAccuracy(prevAccuracy)
+                .build();
+
+        log.info("[学习者看板] userId={}, 待复习={}, 连续{}天, 累计复习={}, 正确率={}%, 错题={}, 薄弱文档={}, 文档进度={}, 时间线={}, 周报={}次复习/{}次测验",
+                userId, dueCards.size(), streak, totalReviews, achievement.getAvgAccuracy(),
+                topErrors.size(), deckWeaknesses.size(), docProgress.size(), timeline.size(),
+                weekReviewCount, weekQuizCount);
+
+        return LearnerDashboardResponse.builder()
+                .today(today)
+                .rhythm(rhythm)
+                .achievement(achievement)
+                .dueDocs(dueDocs)
+                .topErrors(topErrors)
+                .deckWeaknesses(deckWeaknesses)
+                .docProgress(docProgress)
+                .todayTimeline(timeline)
+                .weeklySummary(weeklySummary)
                 .build();
     }
 }

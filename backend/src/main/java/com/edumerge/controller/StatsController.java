@@ -1,6 +1,7 @@
 package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.LearnerDashboardResponse;
 import com.edumerge.dto.LearningStatsResponse;
 import com.edumerge.dto.StatsResponse;
 import com.edumerge.service.StatsService;
@@ -62,6 +63,16 @@ public class StatsController {
     @GetMapping("/learning")
     public Result<LearningStatsResponse> learningStats() {
         LearningStatsResponse resp = statsService.calculateLearningStats();
+        return Result.success(resp);
+    }
+
+    /**
+     * GET /api/stats/learner — 学习者个人中心看板
+     * 聚合学习者真正关心的数据：待办任务、学习节奏、累计成就
+     */
+    @GetMapping("/learner")
+    public Result<LearnerDashboardResponse> learnerDashboard() {
+        LearnerDashboardResponse resp = statsService.calculateLearnerDashboard();
         return Result.success(resp);
     }
 

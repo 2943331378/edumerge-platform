@@ -24,17 +24,32 @@ interface Props {
   onContextChange?: (hint: string) => void;
 }
 
+const MASTERED_KEY = (docId: number) => `edumerge_mastered_${docId}`;
+
+function loadMastered(docId: number): Set<number> {
+  try {
+    const raw = localStorage.getItem(MASTERED_KEY(docId));
+    if (raw) return new Set(JSON.parse(raw));
+  } catch { /* ignore */ }
+  return new Set();
+}
+
+function saveMastered(docId: number, ids: Set<number>) {
+  try { localStorage.setItem(MASTERED_KEY(docId), JSON.stringify([...ids])); } catch { /* ignore */ }
+}
+
 export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   const [items, setItems] = useState<ErrorBookItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewIdx, setReviewIdx] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [mastered, setMastered] = useState<Set<number>>(new Set());
+  const [mastered, setMastered] = useState<Set<number>>(() => docId ? loadMastered(docId) : new Set());
 
   useEffect(() => {
     if (!docId) return;
     setLoading(true);
+    setMastered(loadMastered(docId));
     listErrorBook(docId)
       .then((data) => { setItems(data); setLoading(false); })
       .catch(() => { setLoading(false); });
@@ -60,7 +75,11 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   };
 
   const handleMaster = (quizId: number) => {
-    setMastered((prev) => new Set(prev).add(quizId));
+    setMastered((prev) => {
+      const next = new Set(prev).add(quizId);
+      if (docId) saveMastered(docId, next);
+      return next;
+    });
     if (reviewIdx >= visibleItems.length - 1) {
       setReviewIdx(Math.max(0, reviewIdx - 1));
     }

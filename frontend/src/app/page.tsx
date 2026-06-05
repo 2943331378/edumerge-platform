@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
@@ -139,6 +139,27 @@ export default function HomePage() {
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
   const [docSearch, setDocSearch] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 桌面端用侧边面板，移动端跳转全屏页面
+  const openDashboard = useCallback(() => {
+    if (window.innerWidth >= 768) {
+      setUserMenuOpen((v) => !v);
+    } else {
+      window.location.href = "/dashboard";
+    }
+  }, []);
+
+  // 窗口缩放到移动端时自动关闭侧边面板
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768 && userMenuOpen) {
+        setUserMenuOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [userMenuOpen]);
 
   // Onboarding tour — show on first login
   const [tourOpen, setTourOpen] = useState(false);
@@ -222,6 +243,29 @@ export default function HomePage() {
       window.location.href = "/login";
     }
   }, [auth.loading, auth.token]);
+
+  // 处理从看板页面带回的待执行操作
+  useEffect(() => {
+    const pending = sessionStorage.getItem("edumerge_pending_action");
+    if (!pending) return;
+    sessionStorage.removeItem("edumerge_pending_action");
+    try {
+      if (pending === "upload") {
+        fileInputRef.current?.click();
+      } else {
+        const action = JSON.parse(pending);
+        if (action.step) {
+          setCurrentStep(action.step);
+          if (action.docId) {
+            const s = sessions.find((x) => x.docId === action.docId);
+            if (s) setActiveSession(s);
+          }
+        } else if (action.knowledgeGraph) {
+          setShowKnowledgeGraph(true);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [sessions]);
 
   // 文档向量化异步处理中，自适应轮询（处理中 2s，空闲 10s）
   useEffect(() => {
@@ -316,23 +360,24 @@ export default function HomePage() {
     updateSessionCache({ completedSteps: next });
   }, [step1Ready, step2Ready]); // eslint-disable-line
 
-  const goStep = (s: number) => {
+  const goStep = useCallback((s: number) => {
     if (s >= 1 && s <= STEPS.length) setCurrentStep(s);
-  };
-  const goNext = () => {
-    if (currentStep < STEPS.length) setCurrentStep(currentStep + 1);
-  };
-  const goPrev = () => {
-    if (currentStep > 1) setCurrentStep(currentStep - 1);
-  };
+  }, []);
+  const goNext = useCallback(() => {
+    setCurrentStep((prev) => Math.min(prev + 1, STEPS.length));
+  }, []);
+  const goPrev = useCallback(() => {
+    setCurrentStep((prev) => Math.max(prev - 1, 1));
+  }, []);
 
   // 全局键盘快捷键: 1-6 跳转步骤, Ctrl+/ 对话, Ctrl+Shift+D 暗黑模式
-  // step 4(卡片) 时禁用全局数字键，避免与卡片自评快捷键(1-4)冲突
+  // step 4(卡片) 时禁用数字键 1-4（卡片自评用），5-6 仍可跳转
+  const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
   useGlobalKeyboard({
     onGoStep: goStep,
-    onToggleChat: () => setChatOpen((v) => !v),
+    onToggleChat: toggleChat,
     totalSteps: STEPS.length,
-    numberKeysHandled: currentStep === 4,
+    numberKeysHandledUpTo: currentStep === 4 ? 4 : 0,
   });
 
   const renderStep = () => {
@@ -630,7 +675,7 @@ export default function HomePage() {
               variant="ghost"
               size="icon"
               className={cn("h-8 w-8 rounded-lg", userMenuOpen && "bg-primary/10 text-primary")}
-              onClick={() => { setUserMenuOpen((v) => !v); }}
+              onClick={openDashboard}
               title="个人中心"
             >
               <BarChart3 className="h-4 w-4" />
@@ -658,7 +703,7 @@ export default function HomePage() {
             {/* User menu → 个人中心 */}
             <button
               type="button"
-              onClick={() => setUserMenuOpen((v) => !v)}
+              onClick={openDashboard}
               className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
               <User className="h-3.5 w-3.5" />
@@ -753,11 +798,11 @@ export default function HomePage() {
         contextHint={chatContext || null}
       />
 
-      {/* 个人中心面板 */}
+      {/* 个人中心面板 — 桌面端侧边面板（移动端通过 /dashboard 全屏页面） */}
       {userMenuOpen && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setUserMenuOpen(false)} />
-          <div className="fixed right-0 top-0 bottom-0 z-50 w-[340px] max-w-[85vw] bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="hidden md:block fixed inset-0 z-40 bg-black/30" onClick={() => setUserMenuOpen(false)} />
+          <div className="hidden md:flex fixed right-0 top-0 bottom-0 z-50 w-[340px] max-w-[85vw] bg-card border-l border-border shadow-2xl flex-col animate-in slide-in-from-right duration-200">
             {/* 用户信息 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -784,7 +829,22 @@ export default function HomePage() {
 
             {/* 个人看板 */}
             <div className="flex-1 overflow-y-auto">
-              <StatsDashboard />
+              <StatsDashboard onAction={(action) => {
+                setUserMenuOpen(false);
+                if (action === "upload") {
+                  fileInputRef.current?.click();
+                } else if (action === "flashcard") {
+                  setCurrentStep(4);
+                } else if (action === "quiz") {
+                  setCurrentStep(5);
+                } else if (action === "knowledge-graph") {
+                  setShowKnowledgeGraph(true);
+                } else if (typeof action === "object" && action.type === "flashcard-doc") {
+                  const s = sessions.find((x) => x.docId === action.docId);
+                  if (s) { setActiveSession(s); }
+                  setCurrentStep(4);
+                }
+              }} />
             </div>
 
             {/* 退出登录 */}
@@ -801,6 +861,19 @@ export default function HomePage() {
           </div>
         </>
       )}
+
+      {/* 隐藏文件输入 — 供看板快捷入口触发 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleUpload(f);
+          e.target.value = "";
+        }}
+        className="hidden"
+      />
 
       {/* Onboarding tour — first-time user guide */}
       <OnboardingTour open={tourOpen} onClose={() => setTourOpen(false)} />

@@ -10,8 +10,8 @@ interface GlobalKeyboardOptions {
   onToggleChat?: () => void;
   /** 总步骤数 */
   totalSteps?: number;
-  /** 当数字键 1-4 已被子组件接管时，跳过全局数字键处理 */
-  numberKeysHandled?: boolean;
+  /** 子组件接管的数字键上限（如卡片自评用 1-4，则传 4）；0 或不传表示不接管 */
+  numberKeysHandledUpTo?: number;
 }
 
 /**
@@ -28,7 +28,7 @@ export function useGlobalKeyboard({
   onGoStep,
   onToggleChat,
   totalSteps = 6,
-  numberKeysHandled = false,
+  numberKeysHandledUpTo = 0,
 }: GlobalKeyboardOptions) {
   const { setTheme, resolvedTheme } = useTheme();
 
@@ -60,16 +60,17 @@ export function useGlobalKeyboard({
       }
 
       // 1-6: 跳转到对应步骤 (无 Ctrl/Shift/Alt 修饰)
-      // 如果数字键已被子组件接管（如卡片自评），则跳过
-      if (!e.ctrlKey && !e.shiftKey && !e.metaKey && !e.altKey && !numberKeysHandled) {
+      if (!e.ctrlKey && !e.shiftKey && !e.metaKey && !e.altKey) {
         const num = parseInt(e.key, 10);
         if (num >= 1 && num <= totalSteps) {
+          // 跳过被子组件接管的数字键（如卡片自评 1-4）
+          if (num <= numberKeysHandledUpTo) return;
           e.preventDefault();
           onGoStep?.(num);
         }
       }
     },
-    [onGoStep, onToggleChat, setTheme, resolvedTheme, totalSteps, numberKeysHandled]
+    [onGoStep, onToggleChat, setTheme, resolvedTheme, totalSteps, numberKeysHandledUpTo]
   );
 
   useEffect(() => {
