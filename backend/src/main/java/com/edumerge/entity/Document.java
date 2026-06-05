@@ -32,6 +32,7 @@ public class Document {
     private String statusMessage;
     private Integer chunkCount;
     private Integer vectorCount;
+    private Integer pageCount;
 
     @TableLogic
     private Integer deleted;

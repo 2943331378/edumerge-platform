@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -72,17 +73,35 @@ public class SessionService {
         log.info("会话已删除: id={}", id);
     }
 
+    /** PROCESSING 超时阈值 — 超过此时间自动标记为 FAILED */
+    private static final int PROCESSING_TIMEOUT_MINUTES = 10;
+
     /**
      * 查询用户会话列表（含文档关联信息）
+     * 同时检查 PROCESSING 超时文档并自动标记为 FAILED
      *
-     * @return 每项含 id, docId, docUuid, title, status, fileName, docStatus, chunkCount, vectorCount, createdAt
+     * @return 每项含 id, docId, docUuid, title, status, fileName, docStatus, chunkCount, vectorCount, pageCount, createdAt
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public List<Map<String, Object>> listWithDocInfo(Long userId) {
         List<Session> sessions = listByUserId(userId);
         List<Map<String, Object>> result = new ArrayList<>();
         for (Session s : sessions) {
             Document doc = documentMapper.selectById(s.getDocId());
+
+            // PROCESSING 超时自动重置 — 消费者崩溃后文档不会永远卡住
+            if (doc != null && "PROCESSING".equals(doc.getStatus())
+                    && doc.getUpdatedAt() != null
+                    && doc.getUpdatedAt().isBefore(LocalDateTime.now().minusMinutes(PROCESSING_TIMEOUT_MINUTES))) {
+                Document update = new Document();
+                update.setId(doc.getId());
+                update.setStatus("FAILED");
+                update.setStatusMessage("处理超时（超过 " + PROCESSING_TIMEOUT_MINUTES + " 分钟），请重试");
+                documentMapper.updateById(update);
+                doc = documentMapper.selectById(doc.getId());
+                log.warn("文档 PROCESSING 超时, 已自动标记为 FAILED: docId={}", s.getDocId());
+            }
+
             Map<String, Object> item = new HashMap<>();
             item.put("id", s.getId());
             item.put("docId", s.getDocId());
@@ -90,9 +109,11 @@ public class SessionService {
             item.put("title", s.getTitle());
             item.put("status", s.getStatus());
             item.put("fileName", doc != null ? doc.getFileName() : null);
+            item.put("fileType", doc != null ? doc.getFileType() : null);
             item.put("docStatus", doc != null ? doc.getStatus() : null);
             item.put("chunkCount", doc != null ? doc.getChunkCount() : null);
             item.put("vectorCount", doc != null ? doc.getVectorCount() : null);
+            item.put("pageCount", doc != null ? doc.getPageCount() : null);
             item.put("createdAt", s.getCreatedAt());
             result.add(item);
         }

@@ -55,9 +55,11 @@ export interface SessionRecord {
   title: string;
   status: string;
   fileName: string | null;
+  fileType: string | null;
   docStatus: string | null;
   chunkCount: number | null;
   vectorCount: number | null;
+  pageCount: number | null;
   createdAt: string;
 }
 
@@ -96,6 +98,14 @@ export interface UploadResult {
 
 export async function deleteDocument(id: number): Promise<void> {
   return request<void>(`/documents/${id}`, { method: "DELETE" });
+}
+
+export async function retryDocument(id: number): Promise<void> {
+  return request<void>(`/documents/${id}/retry`, { method: "POST" });
+}
+
+export async function renameDocument(id: number, title: string): Promise<void> {
+  return request<void>(`/documents/${id}`, { method: "PUT", body: JSON.stringify({ title }) });
 }
 
 // ===== 文档大纲 (Document Outline) =====
@@ -143,17 +153,48 @@ export async function regenerateDocumentOutline(docId: number): Promise<Document
   });
 }
 
-export async function uploadDocument(file: File): Promise<UploadResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  const headers: Record<string, string> = {};
-  const token = typeof window !== "undefined" ? localStorage.getItem("edumerge_token") : null;
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}/documents/upload`, { method: "POST", headers, body: formData });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.code !== 0) throw new Error(json.message ?? "上传失败");
-  return json.data;
+export function uploadDocument(
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<UploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          if (json.code !== 0) reject(new Error(json.message ?? "上传失败"));
+          else resolve(json.data);
+        } catch {
+          reject(new Error("响应解析失败"));
+        }
+      } else {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          reject(new Error(json.message ?? `HTTP ${xhr.status}`));
+        } catch {
+          reject(new Error(`HTTP ${xhr.status}`));
+        }
+      }
+    });
+
+    xhr.addEventListener("error", () => reject(new Error("网络错误")));
+    xhr.addEventListener("abort", () => reject(new Error("上传已取消")));
+
+    xhr.open("POST", `${BASE}/documents/upload`);
+    const token = typeof window !== "undefined" ? localStorage.getItem("edumerge_token") : null;
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.send(formData);
+  });
 }
 
 // ===== 对话 =====

@@ -28,7 +28,7 @@ import {
   CheckCircle2, Clock,
 } from "lucide-react";
 import type { SessionRecord, MindMapRecord, StudyNoteRecord } from "@/lib/api";
-import { listSessions, uploadDocument, deleteDocument } from "@/lib/api";
+import { listSessions, uploadDocument, deleteDocument, retryDocument, renameDocument } from "@/lib/api";
 
 const STEPS: StepDef[] = [
   { id: 1, label: "文档大纲", icon: Upload },
@@ -292,6 +292,8 @@ export default function HomePage() {
             ? "processing"
             : "uploading",
     chunks: s.chunkCount ?? 0,
+    fileType: s.fileType,
+    pageCount: s.pageCount,
   }));
 
   const handleSelectSession = useCallback((sessionId: number) => {
@@ -323,15 +325,35 @@ export default function HomePage() {
     }
   }, [sessions, activeSession, loadSessions]);
 
+  const handleRetryDocument = useCallback(async (sessionId: number) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session?.docId) return;
+    try {
+      await retryDocument(session.docId);
+      toast.success("已重新提交处理");
+      await loadSessions();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "重试失败");
+    }
+  }, [sessions, loadSessions]);
+
+  const handleRenameDocument = useCallback(async (sessionId: number, newTitle: string) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session?.docId) return;
+    try {
+      await renameDocument(session.docId, newTitle);
+      await loadSessions();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "重命名失败");
+    }
+  }, [sessions, loadSessions]);
+
   const handleUpload = useCallback(async (file: File) => {
+    if (uploading) return; // 防止重复上传
     setUploading(true);
     setUploadProgress(0);
-    const timer = setInterval(() => {
-      setUploadProgress((p) => Math.min(p + 15, 80));
-    }, 300);
     try {
-      const result = await uploadDocument(file);
-      clearInterval(timer);
+      const result = await uploadDocument(file, (p) => setUploadProgress(p));
       setUploadProgress(100);
       await loadSessions();
       // 上传后自动选中新文档
@@ -344,11 +366,10 @@ export default function HomePage() {
       }
       toast.success(`${result.fileName} 上传成功，正在后台处理`);
     } catch (err) {
-      clearInterval(timer);
       toast.error(err instanceof Error ? err.message : "上传失败");
     }
     setUploading(false);
-  }, [loadSessions]);
+  }, [loadSessions, uploading]);
 
   const step1Ready = !!activeSession && activeSession.docStatus === "COMPLETED";
   const step2Ready = !!note;
@@ -456,10 +477,10 @@ export default function HomePage() {
               <span className="text-sm text-muted-foreground">
                 拖拽文件到此处，或<span className="text-primary font-medium">点击选择</span>
               </span>
-              <span className="text-[11px] text-muted-foreground/50">PDF · DOCX · PPTX · TXT</span>
+              <span className="text-[11px] text-muted-foreground/50">PDF · DOCX · PPTX · TXT · Markdown · HTML · Excel · CSV</span>
               <input
                 type="file"
-                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) handleUpload(f);
@@ -644,6 +665,8 @@ export default function HomePage() {
         onSelectSession={handleSelectSession}
         onUpload={handleUpload}
         onDeleteDocument={handleDeleteDocument}
+        onRetryDocument={handleRetryDocument}
+        onRenameDocument={handleRenameDocument}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
       />
@@ -866,7 +889,7 @@ export default function HomePage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleUpload(f);

@@ -73,6 +73,10 @@ public class DocumentListener {
     private String ocrLanguage;
     @Value("${app.document.ocr.render-dpi:200}")
     private int renderDpi;
+    @Value("${app.rag.chunk-size:1000}")
+    private int chunkSize;
+    @Value("${app.rag.chunk-overlap:100}")
+    private int chunkOverlap;
 
     private Tesseract tesseract;
 
@@ -116,19 +120,26 @@ public class DocumentListener {
 
             // 2. 提取文本
             long stepStart = System.currentTimeMillis();
-            String text = extractDocumentText(documentPath);
-            if (text.isBlank()) {
+            ExtractionResult result = extractDocumentText(documentPath);
+            if (result.text.isBlank()) {
                 log.warn("文档文本为空: documentId={}", documentId);
                 updateDocStatus(filePath, "FAILED", null, null, "无法提取文本(可能为加密、图片型文档或不支持的文件格式)");
                 return;
             }
-            log.info("文本提取完成: documentId={}, 长度={} 字符, 耗时={}ms", documentId, text.length(), System.currentTimeMillis() - stepStart);
+            String text = result.text;
+            log.info("文本提取完成: documentId={}, 长度={} 字符, 页数={}, 耗时={}ms",
+                    documentId, text.length(), result.pageCount, System.currentTimeMillis() - stepStart);
 
-            // 3. 使用递归切分器切块 (chunkSize=1000, overlap=100)
+            // 3. 切块 — PPT 按幻灯片边界切分，其他格式递归切分
             stepStart = System.currentTimeMillis();
-            DocumentSplitter splitter = DocumentSplitters.recursive(1000, 100);
-            Document langDoc = Document.from(text);
-            List<TextSegment> segments = splitter.split(langDoc);
+            String extension = getExtension(documentPath);
+            List<TextSegment> segments;
+            if (extension.equals("ppt") || extension.equals("pptx")) {
+                segments = splitBySlide(text);
+            } else {
+                DocumentSplitter splitter = DocumentSplitters.recursive(chunkSize, chunkOverlap);
+                segments = splitter.split(Document.from(text));
+            }
             log.info("文本切块完成: documentId={}, 块数={}, 耗时={}ms", documentId, segments.size(), System.currentTimeMillis() - stepStart);
 
             if (segments.isEmpty()) {
@@ -151,6 +162,10 @@ public class DocumentListener {
                             .build());
                 }
                 documentChunkMapper.insertBatch(chunkBatch);
+                // 保存文档页数/幻灯片数
+                if (result.pageCount > 0) {
+                    documentService.updatePageCount(doc.getId(), result.pageCount);
+                }
                 log.info("文档切块批量入库: docId={}, 块数={}, 耗时={}ms", doc.getId(), chunkBatch.size(), System.currentTimeMillis() - stepStart);
             }
 
@@ -178,10 +193,10 @@ public class DocumentListener {
                 }, documentTaskExecutor);
             }
 
-            // 5. 并发向量化 — 多线程分批调用 embedAll (DashScope text-embedding-v3 单次上限 10 条)
+            // 5. 并发向量化 — 多线程分批调用 embedAll (DashScope text-embedding-v4 单次上限 25 条)
             long embedStart = System.currentTimeMillis();
             int totalChunks = enrichedSegments.size();
-            int batchSize = 10;
+            int batchSize = 25;
             int batchCount = (totalChunks + batchSize - 1) / batchSize;
 
             // 按批次提交并发任务
@@ -232,10 +247,13 @@ public class DocumentListener {
         }
     }
 
+    /** 文本提取结果 — 文本内容 + 页数/幻灯片数/工作表数 */
+    private record ExtractionResult(String text, int pageCount) {}
+
     /**
      * 按文件扩展名分发文本提取逻辑
      */
-    private String extractDocumentText(Path documentPath) throws IOException {
+    private ExtractionResult extractDocumentText(Path documentPath) throws IOException {
         String extension = getExtension(documentPath);
         return switch (extension) {
             case "pdf" -> extractPdfText(documentPath);
@@ -244,6 +262,10 @@ public class DocumentListener {
             case "pptx" -> extractPptxText(documentPath);
             case "ppt" -> extractPptText(documentPath);
             case "txt" -> extractTxtText(documentPath);
+            case "md" -> extractTxtText(documentPath);
+            case "html", "htm" -> extractHtmlText(documentPath);
+            case "xlsx" -> extractXlsxText(documentPath);
+            case "csv" -> extractCsvText(documentPath);
             default -> throw new IOException("不支持的文件类型: " + extension);
         };
     }
@@ -257,32 +279,33 @@ public class DocumentListener {
     /**
      * 提取 DOCX 文本
      */
-    private String extractDocxText(Path docxPath) throws IOException {
+    private ExtractionResult extractDocxText(Path docxPath) throws IOException {
         try (InputStream input = Files.newInputStream(docxPath);
              XWPFDocument document = new XWPFDocument(input);
              XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
-            return extractor.getText();
+            return new ExtractionResult(extractor.getText(), 0);
         }
     }
 
     /**
      * 提取旧版 DOC 文本
      */
-    private String extractDocText(Path docPath) throws IOException {
+    private ExtractionResult extractDocText(Path docPath) throws IOException {
         try (InputStream input = Files.newInputStream(docPath);
              HWPFDocument document = new HWPFDocument(input);
              WordExtractor extractor = new WordExtractor(document)) {
-            return extractor.getText();
+            return new ExtractionResult(extractor.getText(), 0);
         }
     }
 
     /**
      * 提取 PPTX 文本
      */
-    private String extractPptxText(Path pptxPath) throws IOException {
+    private ExtractionResult extractPptxText(Path pptxPath) throws IOException {
         try (InputStream input = Files.newInputStream(pptxPath);
              XMLSlideShow slideShow = new XMLSlideShow(input)) {
             StringBuilder text = new StringBuilder();
+            int slideCount = slideShow.getSlides().size();
             int slideIndex = 1;
             for (XSLFSlide slide : slideShow.getSlides()) {
                 text.append("【幻灯片").append(slideIndex++).append("】\n");
@@ -294,17 +317,18 @@ public class DocumentListener {
                 }
                 text.append("\n");
             }
-            return text.toString();
+            return new ExtractionResult(text.toString(), slideCount);
         }
     }
 
     /**
      * 提取旧版 PPT 文本
      */
-    private String extractPptText(Path pptPath) throws IOException {
+    private ExtractionResult extractPptText(Path pptPath) throws IOException {
         try (InputStream input = Files.newInputStream(pptPath);
              HSLFSlideShow slideShow = new HSLFSlideShow(input)) {
             StringBuilder text = new StringBuilder();
+            int slideCount = slideShow.getSlides().size();
             int slideIndex = 1;
             for (HSLFSlide slide : slideShow.getSlides()) {
                 text.append("【幻灯片").append(slideIndex++).append("】\n");
@@ -316,18 +340,76 @@ public class DocumentListener {
                 }
                 text.append("\n");
             }
-            return text.toString();
+            return new ExtractionResult(text.toString(), slideCount);
         }
     }
 
     /**
-     * 提取 TXT 文本 — 优先 UTF-8, 失败时回退到 GB18030
+     * 提取 TXT/MD 文本 — 优先 UTF-8, 失败时回退到 GB18030
      */
-    private String extractTxtText(Path txtPath) throws IOException {
+    private ExtractionResult extractTxtText(Path txtPath) throws IOException {
+        String text;
         try {
-            return Files.readString(txtPath, StandardCharsets.UTF_8);
+            text = Files.readString(txtPath, StandardCharsets.UTF_8);
         } catch (MalformedInputException e) {
-            return Files.readString(txtPath, Charset.forName("GB18030"));
+            text = Files.readString(txtPath, Charset.forName("GB18030"));
+        }
+        return new ExtractionResult(text, 0);
+    }
+
+    /**
+     * 提取 HTML 文本 — Jsoup 解析后提取纯文本
+     */
+    private ExtractionResult extractHtmlText(Path htmlPath) throws IOException {
+        String html = Files.readString(htmlPath, StandardCharsets.UTF_8);
+        org.jsoup.nodes.Document doc = org.jsoup.Jsoup.parse(html);
+        return new ExtractionResult(doc.text(), 0);
+    }
+
+    /**
+     * 提取 XLSX 文本 — POI 逐 sheet 逐行提取，首行作为表头
+     */
+    private ExtractionResult extractXlsxText(Path xlsxPath) throws IOException {
+        try (InputStream input = Files.newInputStream(xlsxPath);
+             org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook(input)) {
+            StringBuilder text = new StringBuilder();
+            int sheetCount = workbook.getNumberOfSheets();
+            for (int i = 0; i < sheetCount; i++) {
+                var sheet = workbook.getSheetAt(i);
+                text.append("【").append(sheet.getSheetName()).append("】\n");
+                for (var row : sheet) {
+                    StringBuilder line = new StringBuilder();
+                    for (var cell : row) {
+                        if (cell == null) continue;
+                        if (line.length() > 0) line.append("\t");
+                        line.append(cell.toString());
+                    }
+                    if (!line.toString().isBlank()) {
+                        text.append(line).append("\n");
+                    }
+                }
+                text.append("\n");
+            }
+            return new ExtractionResult(text.toString(), sheetCount);
+        }
+    }
+
+    /**
+     * 提取 CSV 文本 — OpenCSV 逐行读取，逗号分隔拼成制表符分隔文本
+     */
+    private ExtractionResult extractCsvText(Path csvPath) throws IOException {
+        try (var reader = new com.opencsv.CSVReaderBuilder(
+                Files.newBufferedReader(csvPath, StandardCharsets.UTF_8)).build()) {
+            StringBuilder text = new StringBuilder();
+            String[] line;
+            int rowCount = 0;
+            while ((line = reader.readNext()) != null) {
+                text.append(String.join("\t", line)).append("\n");
+                rowCount++;
+            }
+            return new ExtractionResult(text.toString(), rowCount);
+        } catch (com.opencsv.exceptions.CsvException e) {
+            throw new IOException("CSV 解析失败: " + e.getMessage(), e);
         }
     }
 
@@ -335,6 +417,25 @@ public class DocumentListener {
         if (value != null && !value.isBlank()) {
             builder.append(value).append("\n");
         }
+    }
+
+    /**
+     * 按幻灯片边界切分 PPT 文本 — 每张幻灯片一个 chunk，超大幻灯片递归拆分
+     */
+    private List<TextSegment> splitBySlide(String text) {
+        String[] slides = text.split("(?=【幻灯片\\d+】)");
+        List<TextSegment> segments = new ArrayList<>();
+        DocumentSplitter fallback = DocumentSplitters.recursive(chunkSize, chunkOverlap);
+        for (String slide : slides) {
+            if (slide.isBlank()) continue;
+            if (slide.length() <= chunkSize) {
+                segments.add(TextSegment.from(slide.trim()));
+            } else {
+                // 超大幻灯片递归拆分
+                segments.addAll(fallback.split(Document.from(slide)));
+            }
+        }
+        return segments;
     }
 
     /**
@@ -357,7 +458,7 @@ public class DocumentListener {
     /**
      * 提取 PDF 全文 — 优先文字层, 扫描版自动 OCR 回退
      */
-    private String extractPdfText(Path pdfPath) throws IOException {
+    private ExtractionResult extractPdfText(Path pdfPath) throws IOException {
         try (PDDocument pdfDoc = Loader.loadPDF(pdfPath.toFile())) {
             int pageCount = pdfDoc.getNumberOfPages();
             log.info("PDF 加载成功: 页数={}, 文件={}", pageCount, pdfPath.getFileName());
@@ -379,17 +480,17 @@ public class DocumentListener {
             log.info("PDF 文字页统计: {}/{} 页含文字层, 总计 {} 字符", pagesWithText, pageCount, allText.length());
 
             if (!allText.isEmpty()) {
-                return allText.toString();
+                return new ExtractionResult(allText.toString(), pageCount);
             }
 
             // 文字层为空 → OCR 回退
             if (ocrEnabled) {
                 log.info("启用 OCR 回退: DPI={}, 语言={}, tessdata={}", renderDpi, ocrLanguage, tesseractDataPath);
-                return ocrPdfPages(pdfDoc, pageCount);
+                return new ExtractionResult(ocrPdfPages(pdfDoc, pageCount), pageCount);
             }
 
             log.warn("PDF 无文字层且 OCR 未启用 (app.document.ocr.enabled=false)");
-            return "";
+            return new ExtractionResult("", pageCount);
         }
     }
 

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { toast } from "sonner";
 import {
   Upload,
   FileText,
@@ -12,6 +13,8 @@ import {
   PanelLeft,
   X,
   Search,
+  RotateCw,
+  Pencil,
 } from "lucide-react";
 
 export interface UploadedDoc {
@@ -21,6 +24,8 @@ export interface UploadedDoc {
   size: number;
   status: "uploading" | "processing" | "done" | "error";
   chunks?: number;
+  fileType?: string | null;
+  pageCount?: number | null;
 }
 
 interface AppSidebarProps {
@@ -29,6 +34,8 @@ interface AppSidebarProps {
   onSelectSession: (sessionId: number) => void;
   onUpload: (file: File) => Promise<void>;
   onDeleteDocument: (sessionId: number) => void;
+  onRetryDocument?: (sessionId: number) => void;
+  onRenameDocument?: (sessionId: number, newTitle: string) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -39,12 +46,17 @@ export function AppSidebar({
   onSelectSession,
   onUpload,
   onDeleteDocument,
+  onRetryDocument,
+  onRenameDocument,
   collapsed,
   onToggleCollapse,
 }: AppSidebarProps) {
   const [dragging, setDragging] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   const filteredDocs = documents.filter((doc) =>
     searchQuery ? doc.name.toLowerCase().includes(searchQuery.toLowerCase()) : true,
@@ -53,9 +65,32 @@ export function AppSidebar({
   const handleFile = (file: File | null) => {
     if (!file) return;
     const extension = file.name.split(".").pop()?.toLowerCase();
-    if (extension && ["pdf", "doc", "docx", "ppt", "pptx", "txt"].includes(extension)) {
+    if (extension && ["pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "html", "htm", "xlsx", "csv"].includes(extension)) {
       onUpload(file);
+    } else {
+      toast.error(`暂不支持 .${extension ?? "?"} 格式，支持 PDF、DOCX、PPTX、TXT、Markdown、HTML、Excel、CSV`);
     }
+  };
+
+  const startRename = (doc: UploadedDoc) => {
+    setEditingId(doc.id);
+    // 去掉扩展名，只编辑标题部分
+    const ext = doc.name.lastIndexOf(".");
+    setEditValue(ext > 0 ? doc.name.substring(0, ext) : doc.name);
+    setTimeout(() => editInputRef.current?.select(), 0);
+  };
+
+  const commitRename = (doc: UploadedDoc) => {
+    const trimmed = editValue.trim();
+    if (!trimmed) { setEditingId(null); return; }
+    // 拼回完整文件名
+    const ext = doc.name.lastIndexOf(".");
+    const extension = ext > 0 ? doc.name.substring(ext) : "";
+    const newName = trimmed + extension;
+    if (newName !== doc.name && onRenameDocument) {
+      onRenameDocument(doc.sessionId, newName);
+    }
+    setEditingId(null);
   };
 
   return (
@@ -164,7 +199,7 @@ export function AppSidebar({
                 ref={fileRef}
                 type="file"
                 aria-label="上传学习资料"
-                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                 onChange={(e: ChangeEvent<HTMLInputElement>) => {
                   handleFile(e.target.files?.[0] ?? null);
                   if (fileRef.current) fileRef.current.value = "";
@@ -225,10 +260,69 @@ export function AppSidebar({
                         "h-3 w-3 shrink-0",
                         isActive
                           ? "text-primary/70"
-                          : "text-muted-foreground/50",
+                          : doc.fileType === "pdf"
+                            ? "text-red-400/70"
+                            : doc.fileType === "xlsx" || doc.fileType === "csv"
+                              ? "text-emerald-400/70"
+                              : doc.fileType === "pptx" || doc.fileType === "ppt"
+                                ? "text-orange-400/70"
+                                : doc.fileType === "md"
+                                  ? "text-sky-400/70"
+                                  : "text-muted-foreground/50",
                       )}
                     />
-                    <span className="flex-1 truncate">{doc.name}</span>
+                    <div className="flex-1 min-w-0">
+                      {editingId === doc.id ? (
+                        <input
+                          ref={editInputRef}
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={() => commitRename(doc)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitRename(doc);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full bg-background border border-primary/30 rounded px-1 py-0.5 text-xs outline-none"
+                        />
+                      ) : (
+                        <>
+                          <span className="block truncate">{doc.name}</span>
+                          {doc.status === "done" && doc.pageCount != null && doc.pageCount > 0 && (
+                            <span className="text-[10px] text-muted-foreground/40">
+                              {doc.pageCount}
+                              {doc.fileType === "pptx" || doc.fileType === "ppt" ? " 张幻灯片" : doc.fileType === "xlsx" ? " 个工作表" : doc.fileType === "csv" ? " 条记录" : " 页"}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {doc.status === "error" && onRetryDocument && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRetryDocument(doc.sessionId);
+                        }}
+                        className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+                        title="重新处理"
+                      >
+                        <RotateCw className="h-3 w-3" />
+                      </button>
+                    )}
+                    {onRenameDocument && editingId !== doc.id && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startRename(doc);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+                        title="重命名"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {

@@ -146,7 +146,7 @@ langchain4j:
     base-url: https://api.deepseek.com/v1
     model: deepseek-v4-pro
     # Embedding 模型单独配置 (DeepSeek 不支持 embeddings，需使用其他兼容 API)
-    embedding-model: text-embedding-v3
+    embedding-model: text-embedding-v4
     embedding-base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
     embedding-api-key: ${AI_API_KEY}
 

@@ -11,6 +11,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.util.stream.Collectors;
@@ -102,6 +103,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.OK)
                 .body(Result.error("系统异常: 空指针"));
+    }
+
+    /**
+     * 处理文件上传大小超限异常
+     * 当上传文件超过 spring.servlet.multipart.max-file-size 时触发
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<?>> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {
+        log.warn("文件上传超限: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(Result.fail("文件大小超过限制（最大 50MB），请压缩后重试"));
     }
 
     /**
