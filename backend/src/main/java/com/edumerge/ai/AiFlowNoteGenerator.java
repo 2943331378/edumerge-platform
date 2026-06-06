@@ -70,35 +70,34 @@ public class AiFlowNoteGenerator extends AiGeneratorBase {
 
     private String callLLM(String conversationText, String docContext) {
         String template = """
-                你是一个严谨的学习日志整理助手。基于用户的对话记录和相关文档内容，
-                提取以下四类结构化笔记：
+                你是一个严谨的学习日志整理助手。基于对话记录和文档内容，提取结构化笔记。
 
-                1. KEY_POINT (章节要点) — 对话涉及的核心知识点、关键概念
-                2. QUESTION (我的问题) — 用户提出的重要问题及回答要点
-                3. EXAMPLE (示例类比) — 对话中出现的有价值的例子、类比或应用场景
-                4. REVIEW (待复习) — 需要用户后续巩固复习的内容
+                # 要求
+                - 仅基于文档和对话内容，不编造信息
+                - 使用简体中文
+                - 如果对话中没有某类内容，可跳过该类
+                - 至少提取2条，最多8条
 
-                对于每条笔记，请提供：
-                - category: 分类标识 (KEY_POINT / QUESTION / EXAMPLE / REVIEW)
-                - title: 简洁的条目标题（不超过30字）
-                - content: Markdown 格式的正文，清晰有条理（不超过300字）
-                - sourceSegment: 相关文档原文片段（可选，如有则提供）
+                # 分类（四选一）
+                - KEY_POINT: 核心知识点、关键概念
+                - QUESTION: 用户提出的重要问题及回答要点
+                - EXAMPLE: 有价值的例子、类比或应用场景
+                - REVIEW: 需要后续巩固复习的内容
+
+                # 每条笔记字段
+                - category: 分类标识
+                - title: 条目标题（不超过30字）
+                - content: Markdown正文（不超过300字）
+                - sourceSegment: 相关文档原文片段（可选）
+
+                # 输出格式（仅输出JSON数组）
+                [{"category":"KEY_POINT","title":"...","content":"...","sourceSegment":"..."}]
 
                 【文档内容】
                 {DCONTEXT}
 
                 【对话记录】
                 {CHAT}
-
-                请输出 JSON 数组格式，不要包含其他文字。
-                示例输出:
-                [{"category":"KEY_POINT","title":"梯度下降的三种变体","content":"批量梯度下降(BGD)...\\n\\n随机梯度下降(SGD)...\\n\\n小批量梯度下降(MBGD)...","sourceSegment":"梯度下降是机器学习中最基础的优化算法..."}]
-
-                要求：
-                - 仅基于提供的文档和对话内容，不编造信息
-                - 使用简体中文
-                - 如果对话中没有某类内容，可以跳过该类
-                - 至少提取 2 条，最多 8 条
                 """;
 
         String prompt = template

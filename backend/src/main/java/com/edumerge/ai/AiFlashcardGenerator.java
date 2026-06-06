@@ -69,36 +69,21 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
 
     private String callLLM(String context, String existingHint, String sectionContext) {
         String template = """
-                你是一个严谨的 AI 学习导师。请分析提供的文档片段，提取5个核心知识点并转化为学习卡片。
+                你是一个严谨的 AI 学习导师。请分析文档片段，提取5个核心知识点并转化为学习卡片。
 
-                # 绝对禁止 (违反将导致严重质量问题)
-                1. **禁止元数据问题**: 严禁提问文档结构、章节归属、页码位置、模块划分等。
-                   反面示例(禁止):
-                   - "'并发处理'属于哪个章节？"
-                   - "该规范位于文档的第几部分？"
-                   - "这段内容出现在哪个标题下？"
-                   - "文档中第X条规则是什么？" (只问序号不问含义)
-                2. **禁止废话问题**: 严禁提问可以用"是/否"回答、或答案仅为一个术语名称的问题。
-                   反面示例(禁止):
-                   - "'XXX'是重要的概念吗？" — 答案仅是"是"
-                   - "文档是否提到了YYY？" — 可用"是/否"回答
+                {COMMON_RULES}
 
-                # 优先级要求
-                1. **文档为事实依据**: 每张卡片必须基于提供的文档上下文, 严禁编造文档外的知识。
-                2. **提取核心概念**: 聚焦"业务概念"、"技术原理"、"定义"或"规范规则"。
-                3. **中文输出**: question 和 answer 必须使用简体中文；如果文档是英文，请基于英文原文翻译、归纳和解释。
-                4. **术语保留**: 英文关键术语首次出现时保留英文原词，例如"自适应学习（adaptive learning）"。
-                   正面示例(应模仿):
-                   - "Java 中保证并发安全的三个核心原则是什么？"
-                   - "什么是CAP定理？它在分布式系统设计中如何应用？"
-                   - "RESTful API 设计规范中，资源的命名应遵循什么规则？"
-                5. **精准简洁**: question 清晰明确, answer 准确有信息量, 单条卡片不超过200字。
+                # 任务
+                提取5个核心知识点，转化为问答式学习卡片。
 
-                # 输出格式
-                {"deckTitle": "根据文档内容生成的简短标题(10字以内)",
-                 "cards": [{"question": "知识点问题1", "answer": "对应答案1"}]}
+                # 质量红线
+                - 禁止元数据问题（章节归属、页码等）— 必须问概念本身
+                - 禁止是/否型或答案仅为术语名的低价值问题
+                - 聚焦：业务概念、技术原理、定义、规范规则
+                - 单卡不超过200字
 
-                deckTitle 要求: 提炼文档核心主题, 如"Java并发编程核心概念"、"机器学习基础术语"、"分布式系统设计要点"。
+                # 输出格式（仅输出JSON）
+                {"deckTitle":"10字以内主题","cards":[{"question":"...","answer":"..."}]}
 
                 {SECTION_HINT}
                 # 文档上下文
@@ -109,6 +94,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                 ? "# 重点关注章节\n请重点围绕以下章节生成学习卡片：" + sectionContext.strip() + "\n"
                 : "";
         SystemMessage system = new SystemMessage(template
+                .replace("{COMMON_RULES}", buildCommonRules())
                 .replace("{CONTEXT}", context)
                 .replace("{EXISTING_HINT}", existingHint)
                 .replace("{SECTION_HINT}", sectionHint));

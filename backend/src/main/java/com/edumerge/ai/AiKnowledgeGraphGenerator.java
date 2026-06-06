@@ -221,42 +221,27 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
                 分析以下 {DOC_COUNT} 篇文档的片段，提取跨文档知识概念网络。
 
                 ## 第一步：提取核心概念
-                对于每个概念，提供以下JSON字段：
-                - "name": 概念名称（简洁准确，不超过20字）
-                - "definition": 概念定义（100-200字，严格基于文档内容）
-                - "importance": 重要程度（1-10整数），评分累计规则：
-                  * 在多篇文档中出现：每出现在一篇文档中 +2
-                  * 是某篇文档的核心主题 +2
-                  * 有详细定义和解释 +2
-                  * 与其他概念关联多 +1
-                  * 是基础/前置知识 +1
-                  上限为10
-                - "documents": 该概念出现的文档编号列表，如 [1,3,5]
+                - "name": 概念名称（不超过20字）
+                - "definition": 概念定义（100-200字，基于文档内容）
+                - "importance": 重要程度（1-10整数）
+                  * 高(8-10): 多篇文档出现、是核心主题
+                  * 中(5-7): 有详细定义和解释
+                  * 低(1-4): 辅助性概念
+                - "documents": 出现的文档编号列表，如 [1,3,5]
 
                 ## 第二步：识别概念关系
-                对于存在关联的概念对，提供：
-                - "source": 源概念名称（必须是第一步中已提取的）
-                - "target": 目标概念名称（必须是第一步中已提取的）
-                - "relationship": 关系类型，可选值：
-                  * "IS_A" — A是B的一种
-                  * "PART_OF" — A是B的组成部分
-                  * "RELATES_TO" — A与B密切相关
-                  * "PREREQUISITE" — A是理解B的前提
-                  * "CONTRADICTS" — A与B矛盾或观点不同
-                  * "APPLIES_TO" — A应用于B
+                - "source"/"target": 概念名称（必须是第一步已提取的）
+                - "relationship": IS_A(是一种) | PART_OF(组成部分) | RELATES_TO(密切相关) | PREREQUISITE(前置知识) | APPLIES_TO(应用于)
                 - "description": 关系描述（不超过100字）
-                - "strength": 关系强度（0.0-1.0浮点数）
+                - "strength": 关系强度 0.3(弱) | 0.5(中) | 0.8(强)
 
                 # 文档内容
                 {CONTEXT}
 
                 # 输出要求
-                - 仅输出纯JSON，不要包含代码块标记、解释或任何其他文字
-                - 格式: {"concepts":[...], "relationships":[...]}
-                - 至少提取5个概念，最多提取30个概念
-                - 每个概念至少引用1个文档编号
-                - 使用简体中文
-                - 严格基于提供的文档内容，不要编造信息""";
+                - 仅输出纯JSON: {"concepts":[...], "relationships":[...]}
+                - 至少5个概念，最多30个概念，每个至少引用1个文档编号
+                - 使用简体中文，严格基于文档内容""";
 
         String prompt = template
                 .replace("{DOC_COUNT}", String.valueOf(docCount))

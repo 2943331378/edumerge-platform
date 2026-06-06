@@ -165,19 +165,19 @@ public class AiOutlineGenerator extends AiGeneratorBase {
         String template = """
                 分析文档内容, 判断类型并提取章节大纲, 仅输出JSON。
 
-                类型: TEXTBOOK(教材) PAPER(论文) NOTE(笔记) SLIDE(课件) MANUAL(手册) OTHER(其他)
+                文档类型: TEXTBOOK(教材) | PAPER(论文) | NOTE(笔记) | SLIDE(课件) | MANUAL(手册) | OTHER(其他)
 
                 JSON格式示例:
                 {"docType":"TEXTBOOK","docTypeLabel":"教材","totalChunks":20,"sections":[{"id":"s1","title":"绪论","level":1,"startChunk":0,"endChunk":5,"children":[{"id":"s1-1","title":"研究背景","level":2,"startChunk":0,"endChunk":2,"children":[]},{"id":"s1-2","title":"研究意义","level":2,"startChunk":3,"endChunk":5,"children":[]}]}]}
 
                 规则:
-                - 最多3级(章→节→小节), ID: s1, s1-1, s1-1-1
-                - startChunk/endChunk闭区间, 范围在[0,{TOTAL_CHUNKS}-1]内
-                - 覆盖完整性: 所有章节的chunk范围必须覆盖[0,{TOTAL_CHUNKS}-1], 不得有遗漏
-                - 章节不重叠: 同级章节的chunk范围不得交叉
-                - 一级3-8个章, 每章2-6个子节
-                - 中文标题, 学术风格, 无标点结尾
-                - 无明显结构时按主题划分
+                1. 最多3级(章→节→小节), ID: s1, s1-1, s1-1-1
+                2. startChunk/endChunk闭区间, 范围在[0,{TOTAL_CHUNKS}-1]内
+                3. 覆盖完整性: 所有章节chunk范围必须覆盖[0,{TOTAL_CHUNKS}-1], 不得遗漏
+                4. 章节不重叠: 同级章节chunk范围不得交叉
+                5. 一级3-8个章, 每章2-6个子节
+                6. 中文标题, 学术风格, 无标点结尾
+                7. 无明显结构时按主题划分
 
                 文档内容:
                 {CONTEXT}

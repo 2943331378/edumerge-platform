@@ -49,33 +49,23 @@ public class AiNoteGenerator extends AiGeneratorBase {
 
     private String callLLM(String context, String requirements, String sectionContext) {
         String template = """
-                你是一个严谨的 AI 学习笔记助手。请基于提供的文档片段，生成一份适合学生复习的 Markdown 学习笔记。
+                你是一个严谨的 AI 学习笔记助手。请基于文档片段，生成一份适合学生复习的 Markdown 学习笔记。
 
-                # 核心要求
-                1. 必须以文档上下文为唯一事实依据，严禁编造文档外信息。
-                2. 必须使用简体中文输出；如果文档是英文，请基于英文原文翻译、归纳和解释。
-                3. 英文关键术语首次出现时保留英文原词，例如"形成性评价（formative assessment）"。
-                4. 内容要面向学习者，不要写成论文摘要或产品介绍。
-                5. 不要引用片段编号作为正文标题；可以在最后用"参考片段"列出使用过的片段。
+                {COMMON_RULES}
 
                 # 输出格式
-                仅输出 Markdown，必须包含以下一级标题:
+                仅输出 Markdown，必须包含以下标题:
                 # 中文学习笔记
-                ## 文档概述
-                ## 核心知识点
-                ## 关键概念解释
+                ## 文档概述（100-200字）
+                ## 核心知识点（5-8条项目符号，每条含简短解释）
+                ## 关键概念解释（4-6个概念，每个2-3句话）
                 ## 易混淆点与注意事项
-                ## 复习清单
-                ## 可自测问题
-                ## 参考片段
+                ## 复习清单（可勾选Markdown任务列表）
+                ## 可自测问题（5个问题，不附答案）
 
                 # 写作约束
-                - "文档概述"控制在 120-200 字。
-                - "核心知识点"使用 5-8 条项目符号，每条包含简短解释。
-                - "关键概念解释"选择 4-6 个最重要概念，每个概念用 2-3 句话说明。
-                - "复习清单"使用可勾选 Markdown 任务列表。
-                - "可自测问题"给出 5 个问题，不要直接附答案。
-                - "参考片段"列出 [片段N]，只列真实使用到的片段编号。
+                - 内容面向学习者，不要写成论文摘要或产品介绍
+                - 不要引用片段编号作为正文标题
 
                 {REQUIREMENTS}
                 # 文档上下文
@@ -91,6 +81,7 @@ public class AiNoteGenerator extends AiGeneratorBase {
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new java.util.ArrayList<>();
         messages.add(new SystemMessage(template
+                .replace("{COMMON_RULES}", buildCommonRules())
                 .replace("{REQUIREMENTS}", reqSection + sectionHint)
                 .replace("{CONTEXT}", context)));
         messages.add(new UserMessage("请基于以上文档内容生成一份结构化中文学习笔记。"));

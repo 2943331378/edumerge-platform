@@ -67,50 +67,25 @@ public class AiQuizGenerator extends AiGeneratorBase {
 
     private String callLLM(String context, String existingHint, String sectionContext) {
         String template = """
-                你是一个严谨的 AI 学习导师。请分析提供的文档片段，生成5道高质量测试题，包含选择题和填空题两种题型。
+                你是一个严谨的 AI 学习导师。请分析文档片段，生成5道高质量测试题。
 
-                # 题型分配 (必须严格遵守)
-                - **选择题 (SINGLE)**: 3道，每题4个选项，含3个有迷惑性的干扰项
-                - **填空题 (FILL_BLANK)**: 2道，题干中用"____"标记空白处，答案为简短精确的关键词或短语
+                {COMMON_RULES}
 
-                # 填空题设计要求
-                1. 空白处应是文档中的关键概念、术语、数值或核心短语，不能是虚词或连接词
-                2. 答案必须简短精确（2-8个字），不能是长句
-                3. 题干中只留一个"____"空白，确保唯一正确答案
-                4. 示例: "KMP算法中，next数组的值表示的是模式串前缀和后缀的____长度。" → 答案: "最长公共"
+                # 任务
+                生成5道测试题：3道选择题（4选项，含3个有迷惑性的干扰项）+ 2道填空题（____标记，答案2-8字）。
 
-                # 绝对禁止 (违反将导致严重质量问题)
-                1. **禁止元数据问题**: 严禁测试文档结构、章节归属、页码位置、模块划分等。
-                   反面示例(禁止):
-                   - "以下哪个选项属于文档的第3章？"
-                   - "关于XXX的规约位于文档的哪一部分？"
-                   - "文档中第几条规则描述了YYY？"
-                2. **禁止废话问题**: 严禁答案显而易见、或仅凭常识无需阅读文档即可回答的问题。
-                   反面示例(禁止):
-                   - "代码规范重要吗？" (答案显然是"重要")
-                   - "以下哪项是Java的关键字？" (常识, 无需文档)
+                # 质量红线
+                - 禁止元数据问题（章节归属、页码等）、禁止常识题
+                - 选择题干扰项须有迷惑性，来自文档语义
+                - 覆盖文档不同主题/概念层级
+                - 难度分布: 2-3题basic（定义/术语）+ 2-3题application（分析/应用）
 
-                # 优先级要求
-                1. **文档为事实依据**: 必须以提供的文档上下文为唯一出题来源, 严禁编造。
-                2. **多维覆盖**: 题目应覆盖文档的不同章节/主题/概念层级。
-                3. **干扰项设计**: 选择题的4个选项中需包含3个合理且有迷惑性的干扰项, 干扰项也应来自文档语义。
-                4. **中文输出**: 所有内容必须使用简体中文；如果文档是英文，请基于英文原文翻译、归纳和解释。
-                5. **术语保留**: 英文关键术语首次出现时保留英文原词，例如"学习分析（learning analytics）"。
-                6. **难度分级**:
-                   - **basic** (2-3题): 基本定义、术语、原理的准确理解
-                   - **application** (2-3题): 方法选择、流程判断、实践案例的分析应用
-
-                # JSON格式约束 (严格)
-                {"deckTitle": "根据文档内容生成的简短标题(10字以内)",
-                 "quizzes": [
-                   {"type":"SINGLE","question":"...","options":["A. ...","B. ...","C. ...","D. ..."],
-                    "correctAnswer":"A. ...","explanation":"...","difficulty":"basic"},
-                   {"type":"FILL_BLANK","question":"KMP算法中，next数组的值表示的是模式串前缀和后缀的____长度。",
-                    "correctAnswer":"最长公共","explanation":"...","difficulty":"basic"}
-                 ]}
-
-                选择题的 options 必须有4项；填空题的 options 必须为空数组[]。
-                deckTitle 要求: 提炼文档核心主题, 如"Java并发编程测试"、"机器学习基础测验"、"分布式系统设计题"。
+                # 输出格式（仅输出JSON）
+                {"deckTitle":"10字以内主题","quizzes":[
+                  {"type":"SINGLE","question":"...","options":["A. ...","B. ...","C. ...","D. ..."],"correctAnswer":"A. ...","explanation":"...","difficulty":"basic"},
+                  {"type":"FILL_BLANK","question":"...____...","correctAnswer":"关键词","explanation":"...","difficulty":"application"}
+                ]}
+                选择题options必须有4项；填空题options必须为空数组[]。
 
                 {SECTION_HINT}
                 # 文档上下文
@@ -121,6 +96,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 ? "# 重点关注章节\n请重点围绕以下章节生成测试题：" + sectionContext.strip() + "\n"
                 : "";
         SystemMessage system = new SystemMessage(template
+                .replace("{COMMON_RULES}", buildCommonRules())
                 .replace("{CONTEXT}", context)
                 .replace("{EXISTING_HINT}", existingHint)
                 .replace("{SECTION_HINT}", sectionHint));

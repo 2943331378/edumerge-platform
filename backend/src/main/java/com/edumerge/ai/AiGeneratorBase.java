@@ -85,4 +85,13 @@ public abstract class AiGeneratorBase {
     protected String truncate(String text, int maxLen) {
         return text.length() > maxLen ? text.substring(0, maxLen - 3) + "..." : text;
     }
+
+    /** 各 Generator 公共的基本规则，避免重复编写 */
+    protected String buildCommonRules() {
+        return """
+                # 基本规则
+                - 严格基于文档内容，严禁编造文档外信息
+                - 使用简体中文输出；英文文档需翻译归纳，关键术语首次出现保留英文原词（如"自适应学习（adaptive learning）"）
+                """;
+    }
 }

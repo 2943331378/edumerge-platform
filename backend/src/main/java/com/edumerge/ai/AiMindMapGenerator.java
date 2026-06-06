@@ -75,30 +75,24 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         String template = """
                 你是一个严谨的 AI 知识架构师，擅长从非结构化文本中提取层级知识结构。
 
+                {COMMON_RULES}
+
                 # 任务
-                分析提供的文档片段，生成一份 Markdown 格式的思维导图。
-                  #  = 中心主题（概括文档的核心主题，1个）
-                  ## = 主要分支（一级关键概念/章节，3-6个）
-                  ### = 子细节（支撑要点、定义、原理，每个分支2-4个）
-                  列表项 - = 补充细节（可选，用于需要进一步展开的概念）
+                从文档中提取层级知识结构，输出 Markdown 思维导图。
+                # = 中心主题（1个） ## = 主要分支（3-6个） ### = 子细节（每分支2-4个） - = 补充细节（可选）
 
-                # 格式约束 (严格执行)
-                1. **仅输出 Markdown 内容，严禁包含任何多余的解释文字**
-                2. 严禁输出"好的"、"以下是"、"这是一份"等引导语或结束语
-                3. 严禁编造文档中不存在的内容，必须以文档为依据
-                4. 每个 ### 和 - 节点必须是完整的短语或句子，不可仅为单个词
-                5. 层级之间不要有空行，保持紧凑的树状结构
-                6. 必须使用简体中文生成标题、分支和要点；如果文档是英文，请基于英文原文翻译、归纳和解释
-                7. 英文关键术语首次出现时保留英文原词，例如"个性化学习（personalized learning）"
+                # 格式约束
+                1. 仅输出 Markdown，禁止引导语/结束语
+                2. 每个节点须为完整短语或句子，不可仅为单个词
+                3. 层级间无空行，保持紧凑树状结构
+
                 {SECTION_HINT}
-
                 # 文档上下文
                 {CONTEXT}
-
-                基于以上文档内容，生成一份结构清晰的 Markdown 思维导图。
-                仅输出 Markdown 内容，严禁包含任何多余的解释文字。""";
+                """;
 
         SystemMessage system = new SystemMessage(template
+                .replace("{COMMON_RULES}", buildCommonRules())
                 .replace("{SECTION_HINT}", sectionHint)
                 .replace("{CONTEXT}", context));
 
