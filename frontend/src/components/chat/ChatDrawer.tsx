@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,34 @@ export function ChatDrawer({ open, onClose, docUuid, docId, activityType, contex
     return () => { document.body.style.overflow = ""; };
   }, [open]);
 
+  // Swipe-to-dismiss for mobile bottom sheet
+  const [dragOffset, setDragOffset] = useState(0);
+  const touchStartY = useRef<number | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+    setDragOffset(0);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (touchStartY.current === null) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    // Only allow dragging down (positive delta)
+    setDragOffset(Math.max(0, delta));
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (touchStartY.current === null) return;
+    touchStartY.current = null;
+    // If dragged more than 100px or 30% of panel height, close
+    const threshold = panelRef.current ? panelRef.current.offsetHeight * 0.3 : 100;
+    if (dragOffset > threshold) {
+      onClose();
+    }
+    setDragOffset(0);
+  }, [dragOffset, onClose]);
+
   return (
     <>
       {/* Backdrop */}
@@ -48,6 +76,7 @@ export function ChatDrawer({ open, onClose, docUuid, docId, activityType, contex
 
       {/* Drawer panel — mobile: bottom sheet, desktop: right slide-in */}
       <div
+        ref={panelRef}
         className={cn(
           "fixed z-50 flex flex-col transition-transform duration-300 ease-in-out",
           "bg-white dark:bg-slate-900 shadow-2xl",
@@ -58,9 +87,15 @@ export function ChatDrawer({ open, onClose, docUuid, docId, activityType, contex
           "max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:h-[60vh] max-md:rounded-t-2xl max-md:border-t max-md:border-border",
           open ? "max-md:translate-y-0" : "max-md:translate-y-full",
         )}
+        style={dragOffset > 0 ? { transform: `translateY(${dragOffset}px)`, transition: "none" } : undefined}
       >
-        {/* Mobile drag handle */}
-        <div className="md:hidden flex justify-center pt-2 pb-1 shrink-0">
+        {/* Mobile drag handle — swipe down to close */}
+        <div
+          className="md:hidden flex justify-center pt-2 pb-1 shrink-0 touch-none"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="w-10 h-1 rounded-full bg-muted-foreground/20" />
         </div>
 
