@@ -22,29 +22,13 @@ import org.springframework.retry.support.RetryTemplate;
 @Configuration
 public class RabbitMQConfig {
 
-    // ===== 文档处理队列 =====
-    /** 文档上传队列 */
-    public static final String DOCUMENT_UPLOAD_QUEUE = "edumerge.document.upload";
-    /** 文档处理交换机 */
-    public static final String DOCUMENT_EXCHANGE = "edumerge.document.exchange";
-    /** 文档处理 routing key */
-    public static final String DOCUMENT_ROUTING_KEY = "document.process";
-
-    // ===== 向量化队列 =====
+    // ===== 向量化队列 (唯一活跃队列) =====
     /** 向量化任务队列 */
     public static final String EMBEDDING_QUEUE = "edumerge.embedding.queue";
     /** 向量化交换机 */
     public static final String EMBEDDING_EXCHANGE = "edumerge.embedding.exchange";
     /** 向量化 routing key */
     public static final String EMBEDDING_ROUTING_KEY = "embedding.task";
-
-    // ===== 通知队列 =====
-    /** 用户通知队列 */
-    public static final String NOTIFICATION_QUEUE = "edumerge.notification.queue";
-    /** 通知交换机 */
-    public static final String NOTIFICATION_EXCHANGE = "edumerge.notification.exchange";
-    /** 通知 routing key */
-    public static final String NOTIFICATION_ROUTING_KEY = "notification.*";
 
     /**
      * 配置 JSON 消息转换器
@@ -74,25 +58,6 @@ public class RabbitMQConfig {
         return rabbitTemplate;
     }
 
-    // ===== 文档处理队列配置 =====
-    @Bean
-    public Queue documentUploadQueue() {
-        return new Queue(DOCUMENT_UPLOAD_QUEUE, true, false, false);
-    }
-
-    @Bean
-    public TopicExchange documentExchange() {
-        return new TopicExchange(DOCUMENT_EXCHANGE, true, false);
-    }
-
-    @Bean
-    public Binding documentBinding(Queue documentUploadQueue, TopicExchange documentExchange) {
-        return org.springframework.amqp.core.BindingBuilder
-                .bind(documentUploadQueue)
-                .to(documentExchange)
-                .with(DOCUMENT_ROUTING_KEY);
-    }
-
     // ===== 向量化队列配置 =====
     @Bean
     public Queue embeddingQueue() {
@@ -110,25 +75,6 @@ public class RabbitMQConfig {
                 .bind(embeddingQueue)
                 .to(embeddingExchange)
                 .with(EMBEDDING_ROUTING_KEY);
-    }
-
-    // ===== 通知队列配置 =====
-    @Bean
-    public Queue notificationQueue() {
-        return new Queue(NOTIFICATION_QUEUE, true, false, false);
-    }
-
-    @Bean
-    public TopicExchange notificationExchange() {
-        return new TopicExchange(NOTIFICATION_EXCHANGE, true, false);
-    }
-
-    @Bean
-    public Binding notificationBinding(Queue notificationQueue, TopicExchange notificationExchange) {
-        return org.springframework.amqp.core.BindingBuilder
-                .bind(notificationQueue)
-                .to(notificationExchange)
-                .with(NOTIFICATION_ROUTING_KEY);
     }
 
     /**
