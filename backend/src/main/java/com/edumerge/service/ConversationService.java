@@ -24,25 +24,41 @@ public class ConversationService {
         this.conversationMapper = conversationMapper;
     }
 
-    /** 确保会话存在 — 不存在则创建 (关联文档), 存在时更新 docId */
+    /** 确保会话存在 — 不存在则创建 (关联文档), 存在时更新 docId/docUuid */
     @Transactional
-    public Conversation ensure(String sessionId, Long userId, String title, Long docId) {
+    public Conversation ensure(String sessionId, Long userId, String title, Long docId, String docUuid) {
         Conversation existing = getBySessionId(sessionId);
         if (existing != null) {
-            // 回填 docId（兼容历史数据 docId 为 NULL 的情况）
+            boolean dirty = false;
             if (existing.getDocId() == null && docId != null) {
                 existing.setDocId(docId);
-                conversationMapper.updateById(existing);
+                dirty = true;
             }
+            if (existing.getDocUuid() == null && docUuid != null && !docUuid.isBlank()) {
+                existing.setDocUuid(docUuid);
+                dirty = true;
+            }
+            if (dirty) conversationMapper.updateById(existing);
             return existing;
         }
         Conversation c = Conversation.builder()
-                .sessionId(sessionId).userId(userId).docId(docId).title(title)
-                .deleted(0)
+                .sessionId(sessionId).userId(userId).docId(docId).docUuid(docUuid).title(title)
+                .exchangeCount(0).deleted(0)
                 .build();
         conversationMapper.insert(c);
-        log.info("对话会话已创建: sessionId={}, docId={}, title={}", sessionId, docId, title);
+        log.info("对话会话已创建: sessionId={}, docId={}, docUuid={}, title={}", sessionId, docId, docUuid, title);
         return c;
+    }
+
+    /** 自增对话轮数并返回最新值 (用于 FlowNote 自动提取判断) */
+    @Transactional
+    public int incrementExchangeCount(String sessionId) {
+        conversationMapper.update(null,
+                new LambdaUpdateWrapper<Conversation>()
+                        .eq(Conversation::getSessionId, sessionId)
+                        .setSql("exchange_count = exchange_count + 1"));
+        Conversation c = getBySessionId(sessionId);
+        return c != null && c.getExchangeCount() != null ? c.getExchangeCount() : 0;
     }
 
     /** 更新会话标题 (带归属校验) */

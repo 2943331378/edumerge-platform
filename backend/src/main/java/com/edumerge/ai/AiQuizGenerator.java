@@ -4,12 +4,11 @@ import com.edumerge.entity.Quiz;
 import com.edumerge.mapper.QuizMapper;
 import com.edumerge.service.CardDeckService;
 import com.fasterxml.jackson.core.type.TypeReference;
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +26,8 @@ import java.util.Map;
 public class AiQuizGenerator extends AiGeneratorBase {
 
     @Autowired
-    private ChatLanguageModel chatLanguageModel;
+    @org.springframework.beans.factory.annotation.Qualifier("contentChatModel")
+    private ChatModel chatLanguageModel;
 
     @Autowired
     private QuizMapper quizMapper;
@@ -36,17 +36,32 @@ public class AiQuizGenerator extends AiGeneratorBase {
     private CardDeckService cardDeckService;
 
     /** 根据文档内容自动生成测试题 (每次生成创建一个 Deck) */
-    public List<Quiz> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext) {
-        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 15,
-                "核心概念 定义 原理 方法 应用场景 实践案例 技术细节 架构设计 关键要点 总结归纳 key concepts definition principles methods use cases examples technical details architecture key points summary");
-        if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
-
-        String context = buildContext(matches);
+    public List<Quiz> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext, Integer startChunk, Integer endChunk) {
+        String context;
+        List<EmbeddingMatch<TextSegment>> matches;
+        if (startChunk != null && endChunk != null) {
+            context = buildContextFromRange(docId, startChunk, endChunk);
+            if (context.isEmpty()) {
+                log.warn("按 chunk 范围未获取到内容, 回退语义搜索: docId={}, range=[{},{}]", docId, startChunk, endChunk);
+                matches = retrieveTopChunks(docUuid, 15,
+                        "核心概念 定义 原理 方法 应用场景 实践案例 技术细节 关键要点 辨析 易错点 对比 条件边界 典型例题");
+                if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
+                context = buildContext(matches);
+            } else {
+                matches = List.of();
+            }
+        } else {
+            matches = retrieveTopChunks(docUuid, 15,
+                    "核心概念 定义 原理 方法 应用场景 实践案例 技术细节 关键要点 辨析 易错点 对比 条件边界 典型例题");
+            if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
+            context = buildContext(matches);
+        }
         log.info("提取上下文完成: docId={}, 块数={}", docId, matches.size());
 
         String existingHint = buildExistingHint(existingQuestions);
+        String subjectRules = buildSubjectRules(getSubjectType(docId));
 
-        String llmResponse = callLLM(context, existingHint, sectionContext);
+        String llmResponse = callLLM(context, existingHint, sectionContext, subjectRules);
         log.info("LLM 测试题生成响应: 长度={} 字符", llmResponse.length());
 
         String deckTitle = extractDeckTitle(llmResponse);
@@ -65,7 +80,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
         return sb.toString();
     }
 
-    private String callLLM(String context, String existingHint, String sectionContext) {
+    private String callLLM(String context, String existingHint, String sectionContext, String subjectRules) {
         String template = """
                 你是一个严谨的 AI 学习导师。请分析文档片段，生成5道高质量测试题。
 
@@ -76,9 +91,19 @@ public class AiQuizGenerator extends AiGeneratorBase {
 
                 # 质量红线
                 - 禁止元数据问题（章节归属、页码等）、禁止常识题
-                - 选择题干扰项须有迷惑性，来自文档语义
+                - 禁止"以下哪项是X的定义"这类仅考察记忆的低价值题
+                - 选择题干扰项须有迷惑性，来自文档语义，且每个干扰项都应有合理依据
                 - 覆盖文档不同主题/概念层级
-                - 难度分布: 2-3题basic（定义/术语）+ 2-3题application（分析/应用）
+
+                # 难度分布
+                - 2题basic：考察核心概念的准确理解（非死记硬背，需理解内涵）
+                - 3题application：必须是以下类型之一：
+                  · 场景分析：给定一个具体情境，判断应如何应用
+                  · 对比辨析：区分两个易混淆概念的适用条件
+                  · 因果推理：改变某个前提条件，结果如何变化
+                  · 错误诊断：给出一个常见错误用法，识别问题所在
+
+                {SUBJECT_RULES}
 
                 # 输出格式（仅输出JSON）
                 {"deckTitle":"10字以内主题","quizzes":[
@@ -97,6 +122,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 : "";
         SystemMessage system = new SystemMessage(template
                 .replace("{COMMON_RULES}", buildCommonRules())
+                .replace("{SUBJECT_RULES}", subjectRules)
                 .replace("{CONTEXT}", context)
                 .replace("{EXISTING_HINT}", existingHint)
                 .replace("{SECTION_HINT}", sectionHint));
@@ -104,8 +130,8 @@ public class AiQuizGenerator extends AiGeneratorBase {
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
         messages.add(new UserMessage("请基于以上文档内容，生成5道测试题（3道选择题 + 2道填空题），涵盖基础概念和综合应用两个维度。"));
-        Response<AiMessage> response = chatLanguageModel.generate(messages);
-        return response.content().text();
+        ChatResponse response = chatContent(chatLanguageModel, messages);
+        return response.aiMessage().text();
     }
 
     private List<Quiz> parseAndSave(String llmResponse, Long docId, Long userId,

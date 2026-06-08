@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download } from "lucide-react";
+import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download, Loader2 } from "lucide-react";
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
 import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards } from "@/lib/api";
 import { toast } from "sonner";
@@ -28,8 +28,13 @@ interface Props {
   embedded?: boolean;
   /** 大纲选中的章节上下文（含 ID 和标题） */
   sectionContext?: string;
+  /** 大纲选中章节的 chunk 范围 */
+  startChunk?: number;
+  endChunk?: number;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
+  generating?: boolean;
+  onGeneratingChange?: (v: boolean) => void;
 }
 
 /** 判断 deck 是否在 24h 内新建 */
@@ -37,7 +42,7 @@ function isNewDeck(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 24 * 60 * 60 * 1000;
 }
 
-export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, generateTrigger }: Props) {
+export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
   const [view, setView] = useState<"decks" | "preview" | "cards">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [cards, setCards] = useState<FlashcardItem[]>([]);
@@ -103,6 +108,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
       abortRef.current.abort();
       abortRef.current = null;
       setLoading(false);
+      onGeneratingChange?.(false);
       setMindMapGenerating(false);
       toast.info("已取消生成");
     }
@@ -231,12 +237,13 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
   /** 生成后进入预览模式 */
   const handleGenerate = async () => {
-    if (!sessionId) return;
+    if (!sessionId || generating) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
+    onGeneratingChange?.(true);
     try {
-      await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined);
+      await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined, startChunk, endChunk);
       const fresh = await listDecks(docId!, "FLASHCARD");
       setDecks(fresh);
       onGenerated?.();
@@ -253,15 +260,18 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     }
     abortRef.current = null;
     setLoading(false);
+    onGeneratingChange?.(false);
   };
 
   // 从大纲页面跳转过来时自动触发生成
-  const triggerRef = useRef(generateTrigger?.counter ?? 0);
-  useEffect(() => { triggerRef.current = generateTrigger?.counter ?? 0; }, [docId]);
+  const prevCounterRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "flashcard") {
-      triggerRef.current = generateTrigger.counter;
-      requestAnimationFrame(() => handleGenerate());
+    const counter = generateTrigger?.counter;
+    if (counter !== undefined && counter !== prevCounterRef.current && generateTrigger?.type === "flashcard") {
+      prevCounterRef.current = counter;
+      handleGenerate();
+    } else {
+      prevCounterRef.current = counter;
     }
   }, [generateTrigger?.counter]);
 
@@ -363,11 +373,14 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                 </p>
               </div>
               {loading ? (
-                <div className="flex items-center gap-2">
-                  <RotateCw className="h-4 w-4 animate-spin text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">AI 正在生成...</span>
+                <div className="flex flex-col items-center gap-4">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-medium text-foreground/80">AI 正在生成学习卡片...</p>
+                    <p className="text-xs text-muted-foreground/50">正在解析文档，提取核心知识点</p>
+                  </div>
                   <Button variant="outline" size="sm" className="rounded-xl h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
-                    <XCircle className="h-3.5 w-3.5 mr-1" />取消
+                    <XCircle className="h-3.5 w-3.5 mr-1" />取消生成
                   </Button>
                 </div>
               ) : (

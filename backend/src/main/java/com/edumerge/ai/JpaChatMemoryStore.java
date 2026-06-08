@@ -21,17 +21,19 @@ import java.util.List;
 public class JpaChatMemoryStore implements ChatMemoryStore {
 
     private final ChatHistoryMapper chatHistoryMapper;
+    private final int memoryWindow;
 
-    public JpaChatMemoryStore(ChatHistoryMapper chatHistoryMapper) {
+    public JpaChatMemoryStore(ChatHistoryMapper chatHistoryMapper, int memoryWindow) {
         this.chatHistoryMapper = chatHistoryMapper;
+        this.memoryWindow = memoryWindow;
     }
 
     @Override
     public List<ChatMessage> getMessages(Object memoryId) {
         String sessionId = memoryId.toString();
         // 只加载最近 N 条记录，避免长对话时全表扫描和内存浪费
-        // 1 条 ChatHistory = 2 条 ChatMessage (User + AI)，所以 limit=10 对应 maxMessages=20
-        int limit = 10;
+        // 1 条 ChatHistory = 2 条 ChatMessage (User + AI)
+        int limit = memoryWindow;
         List<ChatHistory> records = chatHistoryMapper.selectList(
                 new LambdaQueryWrapper<ChatHistory>()
                         .eq(ChatHistory::getSessionId, sessionId)

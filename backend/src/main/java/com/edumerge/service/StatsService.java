@@ -485,8 +485,8 @@ public class StatsService {
                                 .isNull(Flashcard::getNextReviewAt)));
         Map<Long, Long> dueByDoc = dueCards.stream()
                 .filter(f -> f.getDocId() != null)
-                .collect(java.util.stream.Collectors.groupingBy(Flashcard::getDocId,
-                        java.util.stream.Collectors.counting()));
+                .collect(Collectors.groupingBy(Flashcard::getDocId,
+                        Collectors.counting()));
 
         List<LearnerDashboardResponse.DocDueInfo> dueDocs = new ArrayList<>();
         if (!dueByDoc.isEmpty()) {

@@ -76,7 +76,7 @@ public class RagChatController {
 
     @PutMapping("/history/{id}/feedback")
     public Result<Void> feedback(@PathVariable Long id, @Valid @RequestBody FeedbackRequest req) {
-        chatHistoryService.markHelpful(id, req.getIsHelpful());
+        chatHistoryService.markHelpful(id, req.getIsHelpful(), req.getReason());
         return Result.success("感谢反馈", null);
     }
 }

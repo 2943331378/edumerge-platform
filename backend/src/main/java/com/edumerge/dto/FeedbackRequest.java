@@ -11,4 +11,7 @@ public class FeedbackRequest {
     @Min(value = 0, message = "isHelpful 最小为 0")
     @Max(value = 1, message = "isHelpful 最大为 1")
     private Integer isHelpful;
+
+    /** 反馈原因 (可选，用户自定义) */
+    private String reason;
 }

@@ -3,8 +3,8 @@ package com.edumerge.ai;
 import com.edumerge.entity.ChatHistory;
 import com.fasterxml.jackson.core.type.TypeReference;
 import dev.langchain4j.data.message.*;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 public class AiFlowNoteGenerator extends AiGeneratorBase {
 
     @Autowired
-    private ChatLanguageModel chatLanguageModel;
+    private ChatModel chatLanguageModel;
 
     @Data
     @AllArgsConstructor
@@ -109,7 +109,7 @@ public class AiFlowNoteGenerator extends AiGeneratorBase {
         messages.add(system);
         messages.add(new UserMessage("请基于以上对话记录和文档内容，提取结构化学习笔记。"));
 
-        Response<AiMessage> response = chatLanguageModel.generate(messages);
-        return response.content().text();
+        ChatResponse response = chatLanguageModel.chat(messages);
+        return response.aiMessage().text();
     }
 }

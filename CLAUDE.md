@@ -45,6 +45,11 @@ npm run build     # 生产构建
 - `app/dashboard/page.tsx` — 个人中心全屏页面（移动端使用，含返回导航和操作回调）
 - `hooks/useGlobalKeyboard.ts` — 全局键盘快捷键 Hook（1-6 步骤跳转、Ctrl+/ 对话、Ctrl+Shift+D 暗黑）
 
+### 代码规范
+
+- **禁止行内全限定名**：所有类必须在文件顶部 `import` 后使用短名。禁止 `new com.foo.Bar()`、`com.foo.Bar method()` 等行内全限定写法。唯一例外是 `package` 声明行。
+- **import 顺序**：`com.*` → `dev.*` → `io.*` → `lombok.*` → `org.*` → `java.*` → `javax.*`，各组之间空一行。
+
 ### 关键设计模式
 
 - **上下文感知对话**：`ChatDrawer` 根据 `currentStep` 显示对应活动标题（"关于「学习笔记」的对话"）；`contextHint` 从 Step 组件上报，注入 `buildSystemMessage()` 的 `{STEP_CONTEXT}` 占位符，让 AI 知道用户在看什么。
@@ -157,7 +162,7 @@ controller/          → REST 端点（Result<T> 统一响应）— 14 个控制
 用户提问 → EmbeddingModel.embed()（DashScope text-embedding-v3，OpenAI 兼容 API）
          → MilvusEmbeddingStore.search()（相似度阈值 + Top-K）
          → 构建反幻觉系统提示（"仅基于参考文献回答"）
-         → ChatLanguageModel.generate()（DeepSeek deepseek-chat，OpenAI 兼容 API）
+         → ChatModel.chat()（DeepSeek deepseek-chat，OpenAI 兼容 API）
          → 返回答案 + 来源引用
 ```
 
@@ -167,10 +172,17 @@ controller/          → REST 端点（Result<T> 统一响应）— 14 个控制
 POST /api/documents/upload → 保存文件 → EmbeddingProducer.sendEmbeddingTask()
   → RabbitMQ EMBEDDING_QUEUE → DocumentListener.handleEmbeddingTask()
       → Apache PDFBox 提取文本
+      → SubjectClassifier.classify() 学科分类（取前 2000 字，LLM 判断学科类型，存入 documents.subject_type）
       → DocumentSplitters.recursive(1000, 100) 切块
       → EmbeddingModel 逐块向量化
       → MilvusEmbeddingStore.addAll() 存入 Milvus（metadata: document_id, chunk_index）
 ```
+
+### 学科分类 (SubjectClassifier)
+
+文档上传处理时自动判断学科类型，持久化到 `documents.subject_type` 字段。生成闪卡/测验/笔记/思维导图时，各 Generator 通过 `getSubjectType(docId)` 读取学科类型，注入 `buildSubjectRules(subjectType)` 提供的针对性出题策略。
+
+学科类型：`ALGORITHM`（算法）、`MATH`（数学）、`PROGRAMMING`（程序设计）、`SCIENCE`（自然科学）、`THEORY`（计算机理论）、`MEDICAL`（医学）、`HUMANITIES`（人文社科）、`GENERAL`（通用兜底）。
 
 ### Milvus 集合结构
 
@@ -178,7 +190,7 @@ POST /api/documents/upload → 保存文件 → EmbeddingProducer.sendEmbeddingT
 
 ### 模型配置
 
-`MilvusVectorStoreConfig` 中：Chat → DeepSeek（`deepseek-chat`，api.deepseek.com/v1）。Embedding → DashScope（`text-embedding-v3`，dashscope.aliyuncs.com/compatible-mode/v1）。两者均使用 `OpenAiChatModel`/`OpenAiEmbeddingModel` builder 配合自定义 base URL。Embedding 的 API Key 和 Base URL 独立配置（DeepSeek 不支持 embedding）。
+`MilvusVectorStoreConfig` 中：Chat → DeepSeek（`deepseek-chat`，api.deepseek.com/v1）。Embedding → DashScope（`text-embedding-v3`，dashscope.aliyuncs.com/compatible-mode/v1）。内容生成 → Qwen（`qwen3.7-plus`，DashScope OpenAI 兼容 API，`maxTokens=4096`，`topP=0.85`）。两者均使用 `OpenAiChatModel`/`OpenAiEmbeddingModel` builder 配合自定义 base URL。Embedding 的 API Key 和 Base URL 独立配置（DeepSeek 不支持 embedding）。LangChain4j 版本 1.12.1。注意：DashScope 的 `enable_search` 是原生 SDK 参数，不支持 OpenAI 兼容端点。
 
 ## 已知陷阱
 

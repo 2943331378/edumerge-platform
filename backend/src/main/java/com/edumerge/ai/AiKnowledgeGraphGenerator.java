@@ -1,5 +1,6 @@
 package com.edumerge.ai;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edumerge.entity.ConceptDocument;
 import com.edumerge.entity.ConceptRelationship;
 import com.edumerge.entity.Document;
@@ -10,8 +11,8 @@ import com.edumerge.mapper.KnowledgeConceptMapper;
 import com.edumerge.service.DocumentService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import dev.langchain4j.data.message.*;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.data.segment.TextSegment;
 import lombok.AllArgsConstructor;
@@ -29,7 +30,7 @@ import java.util.stream.Collectors;
 public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
 
     @Autowired
-    private ChatLanguageModel chatLanguageModel;
+    private ChatModel chatLanguageModel;
 
     @Autowired
     private DocumentService documentService;
@@ -252,21 +253,21 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
         messages.add(system);
         messages.add(new UserMessage("请基于以上文档内容，提取跨文档知识概念网络。仅输出JSON。"));
 
-        Response<AiMessage> response = chatLanguageModel.generate(messages);
-        return response.content().text();
+        ChatResponse response = chatLanguageModel.chat(messages);
+        return response.aiMessage().text();
     }
 
     private void clearExisting(Long userId) {
         List<KnowledgeConcept> existing = conceptMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<KnowledgeConcept>()
+                new LambdaQueryWrapper<KnowledgeConcept>()
                         .eq(KnowledgeConcept::getUserId, userId));
         for (KnowledgeConcept kc : existing) {
             // 级联删除关联数据
             conceptDocMapper.delete(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ConceptDocument>()
+                    new LambdaQueryWrapper<ConceptDocument>()
                             .eq(ConceptDocument::getConceptId, kc.getId()));
             relationMapper.delete(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ConceptRelationship>()
+                    new LambdaQueryWrapper<ConceptRelationship>()
                             .eq(ConceptRelationship::getConceptIdA, kc.getId())
                             .or()
                             .eq(ConceptRelationship::getConceptIdB, kc.getId()));

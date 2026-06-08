@@ -5,16 +5,18 @@ import com.edumerge.entity.DocumentOutline;
 import com.edumerge.mapper.DocumentChunkMapper;
 import com.edumerge.service.DocumentOutlineService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -34,7 +36,7 @@ public class AiOutlineGenerator extends AiGeneratorBase {
 
     @Autowired
     @org.springframework.beans.factory.annotation.Qualifier("outlineChatModel")
-    private ChatLanguageModel chatLanguageModel;
+    private ChatModel chatLanguageModel;
 
     @Autowired
     private DocumentOutlineService outlineService;
@@ -72,19 +74,19 @@ public class AiOutlineGenerator extends AiGeneratorBase {
         log.info("开始生成文档大纲: docId={}, userId={}, totalChunks={}", docId, userId, totalChunks);
 
         try {
-        // 1. 从 MySQL 读取前 4 个 chunks (覆盖目录和正文开头)
-        //    再读最后 1 个 chunk (覆盖结尾/总结), 拼接为 LLM 上下文
+        // 1. 从 MySQL 读取前 6 个 chunks (覆盖目录和正文开头)
+        //    再读最后 2 个 chunks (覆盖结尾/总结), 拼接为 LLM 上下文
         List<DocumentChunk> frontChunks = documentChunkMapper.selectList(
                 new LambdaQueryWrapper<DocumentChunk>()
                         .eq(DocumentChunk::getDocumentId, docId)
                         .orderByAsc(DocumentChunk::getChunkIndex)
-                        .last("LIMIT 4"));
+                        .last("LIMIT 6"));
 
         List<DocumentChunk> tailChunks = documentChunkMapper.selectList(
                 new LambdaQueryWrapper<DocumentChunk>()
                         .eq(DocumentChunk::getDocumentId, docId)
                         .orderByDesc(DocumentChunk::getChunkIndex)
-                        .last("LIMIT 1"));
+                        .last("LIMIT 2"));
 
         if (frontChunks.isEmpty()) {
             log.warn("文档无切块, 跳过大纲生成: docId={}", docId);
@@ -98,7 +100,8 @@ public class AiOutlineGenerator extends AiGeneratorBase {
 
         // 3. 调用 LLM
         long llmStart = System.currentTimeMillis();
-        String llmResponse = callLLM(context, totalChunks);
+        String subjectType = getSubjectType(docId);
+        String llmResponse = callLLM(context, totalChunks, subjectType);
         if (llmResponse == null || llmResponse.isBlank()) {
             log.error("LLM 大纲生成返回空: docId={}, LLM耗时={}ms", docId, System.currentTimeMillis() - llmStart);
             return null;
@@ -159,42 +162,122 @@ public class AiOutlineGenerator extends AiGeneratorBase {
         return sb.toString();
     }
 
+    // ═══════ 学科结构指导 ═══════
+
+    private String buildOutlineSubjectHint(String subjectType) {
+        if (subjectType == null) subjectType = SubjectClassifier.GENERAL;
+        return switch (subjectType) {
+            case "ALGORITHM" -> """
+                    # 学科结构指导：算法设计与分析
+                    算法类文档的典型章节结构：
+                    - 按算法策略分章（分治、贪心、回溯、动态规划等），每章内按"问题描述→算法设计→正确性/复杂度分析→代码实现"展开
+                    - 基础概念（算法复杂度、STL 工具等）单独成章
+                    - 标题应体现具体算法名或问题名（如"快速排序"而非"排序算法"）
+                    """;
+            case "MATH" -> """
+                    # 学科结构指导：数学
+                    数学类文档的典型章节结构：
+                    - 按知识模块分章（极限、微分、积分、级数等），每章内按"定义→性质→定理→计算方法→应用"展开
+                    - 标题应体现具体概念或方法（如"洛必达法则"而非"求导方法"）
+                    """;
+            case "PROGRAMMING" -> """
+                    # 学科结构指导：程序设计
+                    编程类文档的典型章节结构：
+                    - 按语言特性分章（数据类型、控制流、面向对象、异常处理等）
+                    - 或按项目/功能模块分章
+                    - 标题应体现具体语法或设计模式（如"泛型与类型擦除"而非"高级特性"）
+                    """;
+            case "SCIENCE" -> """
+                    # 学科结构指导：自然科学
+                    理科类文档的典型章节结构：
+                    - 按知识体系递进（力学→热学→光学→电学等）
+                    - 每章内按"概念→定律/公式→推导→例题"展开
+                    - 标题应体现具体定律或现象（如"牛顿第二定律"而非"运动定律"）
+                    """;
+            case "THEORY" -> """
+                    # 学科结构指导：计算机理论
+                    计算机理论类文档的典型章节结构：
+                    - 按系统模块分章（进程管理、内存管理、文件系统等）
+                    - 或按协议/算法分层（物理层→数据链路层→网络层等）
+                    - 标题应体现具体机制或协议（如"页面置换算法"而非"内存管理"）
+                    """;
+            case "MEDICAL" -> """
+                    # 学科结构指导：医学
+                    医学类文档的典型章节结构：
+                    - 按器官系统或疾病分类分章
+                    - 每章内按"解剖→生理→病理→临床表现→诊断→治疗"展开
+                    - 标题应体现具体器官/疾病/药物（如"2 型糖尿病的发病机制"而非"代谢疾病"）
+                    """;
+            case "HUMANITIES" -> """
+                    # 学科结构指导：人文社科
+                    人文社科类文档的典型章节结构：
+                    - 按理论流派或历史阶段分章
+                    - 或按主题/案例分章
+                    - 标题应体现具体理论或事件（如"需求层次理论"而非"激励理论"）
+                    """;
+            default -> "";
+        };
+    }
+
     // ═══════ LLM 调用 ═══════
 
-    private String callLLM(String context, int totalChunks) {
+    private String callLLM(String context, int totalChunks, String subjectType) {
+        String subjectHint = buildOutlineSubjectHint(subjectType);
+
         String template = """
-                分析文档内容, 判断类型并提取章节大纲, 仅输出JSON。
+                你是一个专业的文档结构分析专家。分析文档内容，判断文档类型，提取精确的章节大纲。
 
-                文档类型: TEXTBOOK(教材) | PAPER(论文) | NOTE(笔记) | SLIDE(课件) | MANUAL(手册) | OTHER(其他)
+                # 文档类型（先判断，再生成大纲）
+                TEXTBOOK(教材) — 按"章→节→小节"组织，通常有明确的知识体系递进
+                PAPER(论文) — 按"引言→方法→实验→结论"等学术结构组织
+                NOTE(笔记) — 按主题聚类，结构可能较松散
+                SLIDE(课件) — 按幻灯片/讲次组织，每节内容较短
+                MANUAL(手册) — 按功能模块/操作步骤组织
+                OTHER(其他) — 以上都不匹配时使用
 
-                JSON格式示例:
-                {"docType":"TEXTBOOK","docTypeLabel":"教材","totalChunks":20,"sections":[{"id":"s1","title":"绪论","level":1,"startChunk":0,"endChunk":5,"children":[{"id":"s1-1","title":"研究背景","level":2,"startChunk":0,"endChunk":2,"children":[]},{"id":"s1-2","title":"研究意义","level":2,"startChunk":3,"endChunk":5,"children":[]}]}]}
+                # 标题质量要求（核心）
+                - 标题必须反映该节的具体内容，禁止使用"概述""绪论""简介""其他"等泛泛标题
+                - 好标题示例："快速排序的划分策略"、"TCP 三次握手过程"、"胰岛素的作用机制"
+                - 坏标题示例："第一章 概述"、"基本内容"、"补充说明"
+                - 标题长度 6-20 字，以关键词或核心概念开头
+                - 如果是课件(SLIDE)，标题应体现该幻灯片的核心知识点
 
-                规则:
-                1. 最多3级(章→节→小节), ID: s1, s1-1, s1-1-1
-                2. startChunk/endChunk闭区间, 范围在[0,{TOTAL_CHUNKS}-1]内
-                3. 覆盖完整性: 所有章节chunk范围必须覆盖[0,{TOTAL_CHUNKS}-1], 不得遗漏
-                4. 章节不重叠: 同级章节chunk范围不得交叉
-                5. 一级3-8个章, 每章2-6个子节
-                6. 中文标题, 学术风格, 无标点结尾
-                7. 无明显结构时按主题划分
+                # chunk 范围分配策略
+                你只能直接看到文档的前段和末尾内容，中间部分需要根据标题语义合理推断分配。
+                - 每个一级章节的 chunk 范围必须连续且不重叠
+                - 所有一级章节的范围之和必须完整覆盖 [0, {TOTAL_CHUNKS}-1]
+                - 子节的范围必须在父节范围之内
+                - 如果某章内容密集（如含代码/公式），分配更多 chunks；纯标题/过渡页分配较少
 
-                文档内容:
+                {SUBJECT_HINT}
+
+                # JSON 格式
+                {"docType":"类型标识","docTypeLabel":"中文标签","totalChunks":数量,"sections":[章节树]}
+
+                # 章节树结构
+                - 最多3级: 章(level=1) → 节(level=2) → 小节(level=3)
+                - ID规则: s1, s1-1, s1-1-1
+                - startChunk/endChunk 为闭区间, 范围 [0, {TOTAL_CHUNKS}-1]
+                - 一级章节数: 3-8 个, 每章子节数: 2-6 个
+                - 中文标题, 无标点结尾
+
+                # 文档内容
                 {CONTEXT}
                 """;
 
         String prompt = template
                 .replace("{TOTAL_CHUNKS}", String.valueOf(totalChunks))
+                .replace("{SUBJECT_HINT}", subjectHint)
                 .replace("{CONTEXT}", context);
 
         SystemMessage system = new SystemMessage(prompt);
-        List<dev.langchain4j.data.message.ChatMessage> messages = new java.util.ArrayList<>();
+        List<ChatMessage> messages = new ArrayList<>();
         messages.add(system);
         messages.add(new UserMessage("请分析以上文档内容, 判断文档类型并提取章节大纲。仅输出 JSON。"));
 
         try {
-            Response<AiMessage> response = chatLanguageModel.generate(messages);
-            return response.content().text();
+            ChatResponse response = chatLanguageModel.chat(messages);
+            return response.aiMessage().text();
         } catch (Exception e) {
             log.error("LLM 大纲生成调用失败: {}", e.getMessage(), e);
             return null;
@@ -208,7 +291,7 @@ public class AiOutlineGenerator extends AiGeneratorBase {
     @SuppressWarnings("unchecked")
     private String extractDocType(String json) {
         try {
-            java.util.Map<String, Object> map = objectMapper.readValue(json, java.util.Map.class);
+            Map<String, Object> map = objectMapper.readValue(json, Map.class);
             Object docTypeObj = map.get("docType");
             if (docTypeObj instanceof String type) {
                 String upper = type.toUpperCase();
@@ -221,7 +304,7 @@ public class AiOutlineGenerator extends AiGeneratorBase {
     }
 
     /** 文档类型中文标签映射 */
-    private static final java.util.Map<String, String> DOC_TYPE_LABELS = java.util.Map.of(
+    private static final Map<String, String> DOC_TYPE_LABELS = Map.of(
             "TEXTBOOK", "教材/教科书",
             "PAPER", "学术论文",
             "NOTE", "学习笔记",

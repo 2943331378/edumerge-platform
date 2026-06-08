@@ -40,6 +40,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * 基于 Milvus 的向量存储实现，桥接 LangChain4j EmbeddingStore 接口与 Milvus SDK
@@ -74,7 +75,7 @@ public class MilvusEmbeddingStore implements EmbeddingStore<TextSegment> {
     /**
      * Milvus 启动初期 RPC 通道可能未就绪，短暂重试避免向量化任务失败
      */
-    private <T> R<T> callMilvusWithRetry(String operation, java.util.function.Supplier<R<T>> call) {
+    private <T> R<T> callMilvusWithRetry(String operation, Supplier<R<T>> call) {
         int maxAttempts = 8;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             R<T> result = call.get();

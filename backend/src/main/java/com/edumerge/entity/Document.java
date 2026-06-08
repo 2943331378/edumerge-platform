@@ -33,6 +33,7 @@ public class Document {
     private Integer chunkCount;
     private Integer vectorCount;
     private Integer pageCount;
+    private String subjectType;
 
     @TableLogic
     private Integer deleted;

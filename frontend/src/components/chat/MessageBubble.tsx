@@ -74,16 +74,35 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
   const isUser = message.role === "user";
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [feedback, setFeedback] = useState<number | null>(null);
+  const [showReasonInput, setShowReasonInput] = useState(false);
+  const [reasonText, setReasonText] = useState("");
   const [saving, setSaving] = useState(false);
   const isLoading = message.loading === true && !message.content;
   const isError = message.error === true;
 
   const handleFeedback = async (isHelpful: number) => {
     if (feedback !== null || !message.chatHistoryId) return;
+    if (isHelpful === 0) {
+      // 负面反馈先展示原因输入
+      setShowReasonInput(true);
+      return;
+    }
     setFeedback(isHelpful);
     try {
       await markChatHelpful(message.chatHistoryId, isHelpful);
       toast.success("感谢反馈");
+    } catch {
+      setFeedback(null);
+    }
+  };
+
+  const submitNegativeFeedback = async () => {
+    if (!message.chatHistoryId) return;
+    setFeedback(0);
+    setShowReasonInput(false);
+    try {
+      await markChatHelpful(message.chatHistoryId, 0, reasonText.trim() || undefined);
+      toast.success("感谢反馈，我们会改进");
     } catch {
       setFeedback(null);
     }
@@ -240,6 +259,28 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                       <ThumbsDown className="h-3 w-3" />
                     </button>
                   </>
+                )}
+                {showReasonInput && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <input
+                      value={reasonText}
+                      onChange={(e) => setReasonText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") submitNegativeFeedback(); if (e.key === "Escape") setShowReasonInput(false); }}
+                      placeholder="告诉我们哪里不好..."
+                      autoFocus
+                      className="w-[180px] text-[10px] bg-background border border-border rounded px-1.5 py-0.5 outline-none focus:border-primary/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={submitNegativeFeedback}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    >提交</button>
+                    <button
+                      type="button"
+                      onClick={() => setShowReasonInput(false)}
+                      className="text-[10px] px-1 py-0.5 text-muted-foreground hover:text-foreground"
+                    >取消</button>
+                  </div>
                 )}
               </div>
             )}

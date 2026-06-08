@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, X } from "lucide-react";
+import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, X, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { StudyNoteRecord } from "@/lib/api";
@@ -19,8 +19,14 @@ interface Props {
   onContextChange?: (hint: string) => void;
   /** 大纲选中的章节 IDs，从 DocumentOutlineView 传入 */
   sectionContext?: string;
+  /** 大纲选中章节的 chunk 范围 */
+  startChunk?: number;
+  endChunk?: number;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
+  /** 生成中状态（持久化在 session cache，跨挂载不丢失） */
+  generating?: boolean;
+  onGeneratingChange?: (v: boolean) => void;
 }
 
 const markdownComponents: Components = {
@@ -50,14 +56,31 @@ const markdownComponents: Components = {
   blockquote: ({ children }) => (
     <blockquote className="my-4 border-l-2 border-primary/40 pl-4 text-sm text-muted-foreground">{children}</blockquote>
   ),
+  table: ({ children }) => (
+    <div className="my-4 overflow-x-auto rounded-lg border border-border/40">
+      <table className="w-full text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead className="bg-muted/50">{children}</thead>
+  ),
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => (
+    <tr className="border-b border-border/30 last:border-0">{children}</tr>
+  ),
+  th: ({ children }) => (
+    <th className="px-3 py-2 text-left text-xs font-semibold text-foreground/80 whitespace-nowrap">{children}</th>
+  ),
+  td: ({ children }) => (
+    <td className="px-3 py-2 text-sm text-foreground/75">{children}</td>
+  ),
 };
 
-export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onContextChange, sectionContext, generateTrigger }: Props) {
+export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onContextChange, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
   const [note, setNote] = useState<StudyNoteRecord | null>(null);
   const [history, setHistory] = useState<StudyNoteRecord[]>([]);
   const [activeVersionIdx, setActiveVersionIdx] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [requirements, setRequirements] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
@@ -112,10 +135,9 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     if (!docId || generating) return;
     const controller = new AbortController();
     abortRef.current = controller;
-    setGenerating(true);
+    onGeneratingChange?.(true);
     try {
-      await generateStudyNote(docId, requirements.trim() || undefined, controller.signal, sectionContext || undefined);
-      // reload history to include newly generated note
+      await generateStudyNote(docId, requirements.trim() || undefined, controller.signal, sectionContext || undefined, startChunk, endChunk);
       const list = await listNoteHistory(docId);
       loadHistory(list);
       onGenerated?.();
@@ -126,19 +148,18 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
       }
     }
     abortRef.current = null;
-    setGenerating(false);
+    onGeneratingChange?.(false);
   };
 
   // 从大纲页面跳转过来时自动触发生成
-  const triggerRef = useRef(generateTrigger?.counter ?? 0);
+  const prevCounterRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    // docId 变化时重置 ref，防止切换文档时旧 trigger 误触发
-    triggerRef.current = generateTrigger?.counter ?? 0;
-  }, [docId]);
-  useEffect(() => {
-    if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "note") {
-      triggerRef.current = generateTrigger.counter;
-      requestAnimationFrame(() => handleGenerate());
+    const counter = generateTrigger?.counter;
+    if (counter !== undefined && counter !== prevCounterRef.current && generateTrigger?.type === "note") {
+      prevCounterRef.current = counter;
+      handleGenerate();
+    } else {
+      prevCounterRef.current = counter;
     }
   }, [generateTrigger?.counter]);
 
@@ -146,7 +167,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
-      setGenerating(false);
+      onGeneratingChange?.(false);
       toast.info("已取消生成");
     }
   };
@@ -418,9 +439,16 @@ function EmptyState({
         />
       )}
       {onGenerate && generating && onCancelGeneration && (
-        <Button variant="outline" onClick={onCancelGeneration} className="h-10 rounded-xl gap-2 border-destructive/30 text-destructive hover:bg-destructive/10">
-          <RotateCw className="h-4 w-4 animate-spin" />取消生成
-        </Button>
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="text-center space-y-1">
+            <p className="text-sm font-medium text-foreground/80">AI 正在生成学习笔记...</p>
+            <p className="text-xs text-muted-foreground/50">正在提炼文档概述、核心知识点和复习问题</p>
+          </div>
+          <Button variant="outline" onClick={onCancelGeneration} className="h-10 rounded-xl gap-2 border-destructive/30 text-destructive hover:bg-destructive/10">
+            <XCircle className="h-4 w-4" />取消生成
+          </Button>
+        </div>
       )}
       {onGenerate && !generating && (
         <Button onClick={onGenerate} className="h-10 rounded-xl gap-2">

@@ -46,6 +46,19 @@ langchain4j:
     embedding-base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     embedding-api-key: ${AI_API_KEY}
 
+app:
+  ai:
+    vision:
+      base-url: ${VISION_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      model: ${VISION_MODEL:qwen-vl-max}
+      max-tokens: 4096
+      ocr-concurrency: ${VISION_OCR_CONCURRENCY:5}
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
 logging:
   level:
     root: warn

@@ -305,7 +305,7 @@ export default function LandingPage() {
               {[
                 { icon: Eye, title: "回答可溯源", desc: "基于 RAG 检索增强，每个回答都能追溯到原文出处" },
                 { icon: Shield, title: "文档安全", desc: "你的文档仅用于生成学习资料，不会被分享给第三方" },
-                { icon: Zap, title: "多格式支持", desc: "支持 PDF、Word、PPT、TXT 等主流文档格式" },
+                { icon: Zap, title: "多格式支持", desc: "支持 PDF、DOCX、PPTX、TXT、Markdown、HTML、Excel、CSV" },
               ].map((t) => (
                 <div key={t.title} className="flex flex-col items-center text-center gap-2">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">

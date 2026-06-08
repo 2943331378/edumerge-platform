@@ -33,7 +33,7 @@ public class ChatHistoryService {
         if (sessionId != null && !sessionId.isBlank()) {
             // 首次对话时自动创建 conversation 记录
             String title = query.length() > 40 ? query.substring(0, 40) + "..." : query;
-            conversationService.ensure(sessionId, userId, title, null);
+            conversationService.ensure(sessionId, userId, title, null, null);
         }
         ChatHistory history = ChatHistory.builder()
                 .userId(userId)
@@ -47,14 +47,17 @@ public class ChatHistoryService {
         return history;
     }
 
-    /** 标记反馈 */
+    /** 标记反馈 (含可选原因) */
     @Transactional
-    public void markHelpful(Long id, int isHelpful) {
+    public void markHelpful(Long id, int isHelpful, String reason) {
         ChatHistory record = chatHistoryMapper.selectById(id);
         if (record != null) {
             record.setIsHelpful(isHelpful);
+            if (reason != null && !reason.isBlank()) {
+                record.setFeedbackReason(reason.trim());
+            }
             chatHistoryMapper.updateById(record);
-            log.info("对话反馈已记录: id={}, isHelpful={}", id, isHelpful);
+            log.info("对话反馈已记录: id={}, isHelpful={}, reason={}", id, isHelpful, reason);
         }
     }
 

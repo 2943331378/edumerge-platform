@@ -130,7 +130,7 @@ public class QuizService {
      * @throws IllegalArgumentException 参数校验失败
      */
     @Transactional
-    public List<Quiz> generate(String docIdStr, String docUuid, String sessionIdStr, String sectionContext) {
+    public List<Quiz> generate(String docIdStr, String docUuid, String sessionIdStr, String sectionContext, Integer startChunk, Integer endChunk) {
         // sessionId 优先: 解析为 docId + docUuid
         if (sessionIdStr != null && !sessionIdStr.isBlank()) {
             try {
@@ -153,7 +153,7 @@ public class QuizService {
         List<String> existingQuestions = listByDocId(docId).stream()
                 .map(Quiz::getQuestion).toList();
 
-        List<Quiz> quizzes = aiQuizGenerator.generate(docId, userId, docUuid, existingQuestions, sectionContext);
+        List<Quiz> quizzes = aiQuizGenerator.generate(docId, userId, docUuid, existingQuestions, sectionContext, startChunk, endChunk);
         if (quizzes.isEmpty()) {
             throw new IllegalStateException("未检索到文档内容，生成失败");
         }

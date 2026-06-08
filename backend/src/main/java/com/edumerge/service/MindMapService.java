@@ -129,7 +129,7 @@ public class MindMapService {
      * @throws IllegalStateException    生成失败
      */
     @Transactional
-    public Map<String, Object> generate(Long docId, String sectionContext) {
+    public Map<String, Object> generate(Long docId, String sectionContext, Integer startChunk, Integer endChunk) {
         Document doc = documentService.getById(docId);
         if (doc == null) throw new IllegalArgumentException("文档不存在: " + docId);
         String docUuid = doc.getDocumentId();
@@ -141,7 +141,7 @@ public class MindMapService {
                 sectionContext != null ? sectionContext.substring(0, Math.min(100, sectionContext.length())) : "null");
 
         AiMindMapGenerator.MindMapResult genResult = aiMindMapGenerator.generate(
-                docId, docUuid, sectionContext);
+                docId, docUuid, sectionContext, startChunk, endChunk);
 
         if (!genResult.isSuccess()) {
             throw new IllegalStateException("思维导图生成失败: 未从文档中提取到足够的内容");
@@ -171,7 +171,7 @@ public class MindMapService {
                 return toMap(existing, decks.get(0));
             }
         }
-        return generate(docId, null);
+        return generate(docId, null, null, null);
     }
 
     /** 删除思维导图（同时清理 deck 和 mindmap 记录） */

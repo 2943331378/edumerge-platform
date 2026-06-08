@@ -1,5 +1,7 @@
 package com.edumerge.dto;
 
+import com.edumerge.entity.DocumentOutline;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -27,8 +29,8 @@ public class OutlineResponse {
      * @param entity 大纲实体
      * @param objectMapper Jackson ObjectMapper (用于解析 outlineJson)
      */
-    public static OutlineResponse from(com.edumerge.entity.DocumentOutline entity,
-                                        com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+    public static OutlineResponse from(DocumentOutline entity,
+                                        ObjectMapper objectMapper) {
         OutlineResponse resp = new OutlineResponse();
         resp.setId(entity.getId());
         resp.setDocId(entity.getDocId());

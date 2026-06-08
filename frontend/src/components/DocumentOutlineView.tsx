@@ -50,8 +50,8 @@ interface Props {
   docStatus: string | null;
   embedded?: boolean;
   onContextChange?: (hint: string) => void;
-  /** 当用户点击"生成xxx"时回调，传入选中的 section ids */
-  onGenerate?: (type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string) => void;
+  /** 当用户点击"生成xxx"时回调，传入选中的 section ids 和 chunk 范围 */
+  onGenerate?: (type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string, startChunk?: number, endChunk?: number) => void;
 }
 
 // ═══════ 选择状态枚举 ═══════
@@ -67,7 +67,8 @@ function getCheckState(
   totalLeafCount: { current: number },
   checkedLeafCount: { current: number },
 ): CheckState {
-  if (node.children.length === 0) {
+  const children = node.children ?? [];
+  if (children.length === 0) {
     totalLeafCount.current++;
     if (selected.has(node.id)) {
       checkedLeafCount.current++;
@@ -75,7 +76,7 @@ function getCheckState(
     }
     return "unchecked";
   }
-  const childStates = node.children.map((c) =>
+  const childStates = children.map((c) =>
     getCheckState(c, selected, totalLeafCount, checkedLeafCount)
   );
   const allChecked = childStates.every((s) => s === "checked");
@@ -87,7 +88,7 @@ function getCheckState(
 
 /** 收集节点及其所有后代的 id */
 function collectIds(node: OutlineSection): string[] {
-  return [node.id, ...node.children.flatMap(collectIds)];
+  return [node.id, ...(node.children ?? []).flatMap(collectIds)];
 }
 
 // ═══════ 主组件 ═══════
@@ -114,7 +115,7 @@ export function DocumentOutlineView({
       lines.push(`${"#".repeat(depth + 1)} ${s.title}`);
       lines.push(`> 切块范围: ${s.startChunk} - ${s.endChunk}`);
       lines.push("");
-      s.children.forEach((c) => renderSection(c, depth + 1));
+      (s.children ?? []).forEach((c) => renderSection(c, depth + 1));
     };
     outline.outline.sections.forEach((s) => renderSection(s, 1));
     const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
@@ -140,7 +141,7 @@ export function DocumentOutlineView({
         const allIds = data.outline.sections.flatMap(collectIds);
         setSelected(new Set(allIds));
         const expandable = data.outline.sections
-          .filter((s) => s.children.length > 0)
+          .filter((s) => (s.children ?? []).length > 0)
           .map((s) => s.id);
         setExpanded(new Set(expandable));
       })
@@ -157,7 +158,7 @@ export function DocumentOutlineView({
               const allIds = data.outline.sections.flatMap(collectIds);
               setSelected(new Set(allIds));
               const expandable = data.outline.sections
-                .filter((s) => s.children.length > 0)
+                .filter((s) => (s.children ?? []).length > 0)
                 .map((s) => s.id);
               setExpanded(new Set(expandable));
             })
@@ -179,7 +180,7 @@ export function DocumentOutlineView({
           const allIds = data.outline.sections.flatMap(collectIds);
           setSelected(new Set(allIds));
           const expandable = data.outline.sections
-            .filter((s) => s.children.length > 0)
+            .filter((s) => (s.children ?? []).length > 0)
             .map((s) => s.id);
           setExpanded(new Set(expandable));
         })
@@ -262,7 +263,7 @@ export function DocumentOutlineView({
       nodes.map((n) =>
         n.id === editingId
           ? { ...n, title: editTitle.trim() }
-          : { ...n, children: updateTitle(n.children) }
+          : { ...n, children: updateTitle(n.children ?? []) }
       );
     const updated = {
       ...outline,
@@ -305,10 +306,26 @@ export function DocumentOutlineView({
     const pairs: string[] = [];
     const walk = (s: OutlineSection) => {
       if (selected.has(s.id)) pairs.push(`${s.id} ${s.title}`);
-      s.children.forEach(walk);
+      (s.children ?? []).forEach(walk);
     };
     outline.outline.sections.forEach(walk);
     return pairs.join("; ");
+  }, [outline, selected]);
+
+  // 计算选中章节的 chunk 范围 [minStart, maxEnd]
+  const selectedChunkRange = useMemo(() => {
+    if (!outline) return undefined;
+    let minStart = Infinity, maxEnd = -Infinity;
+    const walk = (s: OutlineSection) => {
+      if (selected.has(s.id)) {
+        if (s.startChunk != null && s.startChunk < minStart) minStart = s.startChunk;
+        if (s.endChunk != null && s.endChunk > maxEnd) maxEnd = s.endChunk;
+      }
+      (s.children ?? []).forEach(walk);
+    };
+    outline.outline.sections.forEach(walk);
+    if (minStart === Infinity || maxEnd === -Infinity) return undefined;
+    return { start: minStart, end: maxEnd };
   }, [outline, selected]);
 
   // ═══════ Loading ═══════
@@ -463,7 +480,7 @@ export function DocumentOutlineView({
                   size="sm"
                   variant="outline"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("note", selectedSectionContext)}
+                  onClick={() => onGenerate?.("note", selectedSectionContext, selectedChunkRange?.start, selectedChunkRange?.end)}
                 >
                   <NotebookText className="h-3.5 w-3.5" />
                   笔记
@@ -472,7 +489,7 @@ export function DocumentOutlineView({
                   size="sm"
                   variant="outline"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("mindmap", selectedSectionContext)}
+                  onClick={() => onGenerate?.("mindmap", selectedSectionContext, selectedChunkRange?.start, selectedChunkRange?.end)}
                 >
                   <GitFork className="h-3.5 w-3.5" />
                   导图
@@ -481,7 +498,7 @@ export function DocumentOutlineView({
                   size="sm"
                   variant="outline"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("flashcard", selectedSectionContext)}
+                  onClick={() => onGenerate?.("flashcard", selectedSectionContext, selectedChunkRange?.start, selectedChunkRange?.end)}
                 >
                   <Layers className="h-3.5 w-3.5" />
                   卡片
@@ -489,7 +506,7 @@ export function DocumentOutlineView({
                 <Button
                   size="sm"
                   className="rounded-lg gap-1.5 h-8 text-xs"
-                  onClick={() => onGenerate?.("quiz", selectedSectionContext)}
+                  onClick={() => onGenerate?.("quiz", selectedSectionContext, selectedChunkRange?.start, selectedChunkRange?.end)}
                 >
                   <HelpCircle className="h-3.5 w-3.5" />
                   测验
@@ -536,7 +553,7 @@ function OutlineNode({
   onCancelEdit,
   animDelay,
 }: NodeProps) {
-  const hasChildren = node.children.length > 0;
+  const hasChildren = (node.children ?? []).length > 0;
   const isExpanded = expanded.has(node.id);
   const isEditing = editingId === node.id;
 
@@ -671,7 +688,7 @@ function OutlineNode({
       {/* 子节点（展开时显示） */}
       {hasChildren && isExpanded && (
         <div className="ml-2 border-l border-muted-foreground/10">
-          {node.children.map((child, i) => (
+          {(node.children ?? []).map((child, i) => (
             <OutlineNode
               key={child.id}
               node={child}

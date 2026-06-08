@@ -1,16 +1,17 @@
 package com.edumerge.ai;
 
-import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -18,24 +19,39 @@ import java.util.List;
 public class AiNoteGenerator extends AiGeneratorBase {
 
     @Autowired
-    private ChatLanguageModel chatLanguageModel;
+    @org.springframework.beans.factory.annotation.Qualifier("contentChatModel")
+    private ChatModel chatLanguageModel;
 
-    public StudyNoteResult generate(Long docId, String docUuid, String requirements, String sectionContext) {
+    public StudyNoteResult generate(Long docId, String docUuid, String requirements, String sectionContext, Integer startChunk, Integer endChunk) {
         long startTime = System.currentTimeMillis();
 
-        // top-K=15 平衡质量与速度（之前 25 太多，LLM 处理慢）
-        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 15,
-                "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 结论 复习重点 study notes summary chapter highlights key concepts main ideas methods principles conclusions review points");
-        if (matches.isEmpty()) {
-            log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
-            return StudyNoteResult.empty();
+        String context;
+        List<EmbeddingMatch<TextSegment>> matches;
+        if (startChunk != null && endChunk != null) {
+            context = buildContextFromRange(docId, startChunk, endChunk);
+            if (context.isEmpty()) {
+                log.warn("按 chunk 范围未获取到内容, 回退语义搜索: docId={}, range=[{},{}]", docId, startChunk, endChunk);
+                matches = retrieveTopChunks(docUuid, 15,
+                        "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 辨析 易错点 对比 应用场景");
+                if (matches.isEmpty()) { return StudyNoteResult.empty(); }
+                context = buildContext(matches);
+            } else {
+                matches = List.of();
+            }
+        } else {
+            matches = retrieveTopChunks(docUuid, 15,
+                    "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 辨析 易错点 对比 应用场景");
+            if (matches.isEmpty()) {
+                log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
+                return StudyNoteResult.empty();
+            }
+            context = buildContext(matches);
         }
-
-        String context = buildContext(matches);
+        String subjectRules = buildSubjectRules(getSubjectType(docId));
         log.info("笔记上下文构建完成: docId={}, 块数={}, 检索耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
 
         long llmStart = System.currentTimeMillis();
-        String content = cleanMarkdown(callLLM(context, requirements, sectionContext));
+        String content = cleanMarkdown(callLLM(context, requirements, sectionContext, subjectRules));
         log.info("LLM 笔记生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, content.length(), System.currentTimeMillis() - llmStart);
         if (content.isBlank()) {
             return StudyNoteResult.empty();
@@ -47,24 +63,28 @@ public class AiNoteGenerator extends AiGeneratorBase {
         return StudyNoteResult.success(title, content, sourceSummary, requirements);
     }
 
-    private String callLLM(String context, String requirements, String sectionContext) {
+    private String callLLM(String context, String requirements, String sectionContext, String subjectRules) {
         String template = """
-                你是一个严谨的 AI 学习笔记助手。请基于文档片段，生成一份适合学生复习的 Markdown 学习笔记。
+                你是一个严谨的 AI 学习笔记助手。请基于文档片段，生成一份适合学生备考复习的 Markdown 学习笔记。
 
                 {COMMON_RULES}
+
+                {SUBJECT_RULES}
 
                 # 输出格式
                 仅输出 Markdown，必须包含以下标题:
                 # 中文学习笔记
                 ## 文档概述（100-200字）
-                ## 核心知识点（5-8条项目符号，每条含简短解释）
-                ## 关键概念解释（4-6个概念，每个2-3句话）
-                ## 易混淆点与注意事项
-                ## 复习清单（可勾选Markdown任务列表）
-                ## 可自测问题（5个问题，不附答案）
+                ## 核心知识点（5-8条，每条含原理说明和适用条件，而非仅列定义）
+                ## 关键概念辨析（4-6组易混淆概念的对比分析，用表格或并列说明区别与联系）
+                ## 典型应用场景（每个知识点在什么条件下用、怎么用、举具体例子）
+                ## 易错点与注意事项（常见的错误理解、边界条件、特殊情况）
+                ## 复习清单（可勾选Markdown任务列表，按优先级排列）
+                ## 可自测问题（5个问题，考察理解深度而非记忆，不附答案）
 
                 # 写作约束
-                - 内容面向学习者，不要写成论文摘要或产品介绍
+                - 内容面向备考学生，重点是"理解"和"会用"，不是罗列知识点
+                - 每个知识点都要说明"为什么"和"什么时候用"，不要只说"是什么"
                 - 不要引用片段编号作为正文标题
 
                 {REQUIREMENTS}
@@ -79,14 +99,15 @@ public class AiNoteGenerator extends AiGeneratorBase {
                 ? "# 重点关注章节\n请重点围绕以下章节生成笔记，但保持整体结构完整：" + sectionContext.strip() + "\n\n"
                 : "";
 
-        List<dev.langchain4j.data.message.ChatMessage> messages = new java.util.ArrayList<>();
+        List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage(template
                 .replace("{COMMON_RULES}", buildCommonRules())
+                .replace("{SUBJECT_RULES}", subjectRules)
                 .replace("{REQUIREMENTS}", reqSection + sectionHint)
                 .replace("{CONTEXT}", context)));
         messages.add(new UserMessage("请基于以上文档内容生成一份结构化中文学习笔记。"));
-        Response<AiMessage> response = chatLanguageModel.generate(messages);
-        return response.content().text();
+        ChatResponse response = chatContent(chatLanguageModel, messages);
+        return response.aiMessage().text();
     }
 
     private String cleanMarkdown(String raw) {

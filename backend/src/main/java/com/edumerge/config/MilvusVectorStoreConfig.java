@@ -3,14 +3,12 @@ package com.edumerge.config;
 import com.edumerge.ai.JpaChatMemoryStore;
 import com.edumerge.mapper.ChatHistoryMapper;
 import com.edumerge.store.MilvusEmbeddingStore;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.Tokenizer;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
-import dev.langchain4j.model.openai.OpenAiTokenizer;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
@@ -27,7 +25,7 @@ import java.util.function.Function;
 
 /**
  * 向量存储及大模型配置类
- * 配置 EmbeddingModel、MilvusEmbeddingStore 和 ChatLanguageModel
+ * 配置 EmbeddingModel、MilvusEmbeddingStore 和 ChatModel
  */
 @Slf4j
 @Configuration
@@ -85,19 +83,11 @@ public class MilvusVectorStoreConfig {
     }
 
     /**
-     * Tokenizer — 使用 gpt-4 编码 (DeepSeek 兼容), 避免 jtokkit 因不识别 deepseek-chat 而报错
-     */
-    @Bean
-    public Tokenizer tokenizer() {
-        return new OpenAiTokenizer("gpt-4");
-    }
-
-    /**
      * 大语言聊天模型 (OpenAI 兼容 API)
      */
     @Bean
     @org.springframework.context.annotation.Primary
-    public ChatLanguageModel chatLanguageModel() {
+    public ChatModel chatLanguageModel() {
         log.info("初始化 OpenAI Chat 模型: {} (baseUrl={})", chatModelName, baseUrl);
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
@@ -105,7 +95,6 @@ public class MilvusVectorStoreConfig {
                 .modelName(chatModelName)
                 .temperature(0.1)
                 .timeout(Duration.ofSeconds(300))
-                .tokenizer(tokenizer())
                 .build();
     }
 
@@ -113,7 +102,7 @@ public class MilvusVectorStoreConfig {
      * 大纲生成专用快速模型 (deepseek-chat, 比 deepseek-v4-pro 快 5-10 倍)
      */
     @Bean("outlineChatModel")
-    public ChatLanguageModel outlineChatModel() {
+    public ChatModel outlineChatModel() {
         log.info("初始化大纲生成专用模型: deepseek-chat (baseUrl={})", baseUrl);
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
@@ -121,7 +110,44 @@ public class MilvusVectorStoreConfig {
                 .modelName("deepseek-chat")
                 .temperature(0.1)
                 .timeout(Duration.ofSeconds(120))
-                .tokenizer(tokenizer())
+                .build();
+    }
+
+    /**
+     * 内容生成专用高质量模型 (Qwen3.7-plus, 用于笔记/卡片/测验/思维导图)
+     * 复用 DashScope API Key (与 Embedding 相同)
+     */
+    @Bean("contentChatModel")
+    public ChatModel contentChatModel(
+            @Value("${app.ai.content.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String contentBaseUrl,
+            @Value("${app.ai.content.model:qwen3.7-plus}") String contentModel) {
+        log.info("初始化内容生成模型: {} (baseUrl={})", contentModel, contentBaseUrl);
+        return OpenAiChatModel.builder()
+                .baseUrl(contentBaseUrl)
+                .apiKey(embeddingApiKey)
+                .modelName(contentModel)
+                .temperature(0.3)
+                .maxTokens(4096)
+                .topP(0.85)
+                .timeout(Duration.ofSeconds(180))
+                .build();
+    }
+
+    /**
+     * Vision 模型 (用于图片/扫描版 PDF OCR, 复用 DashScope API Key)
+     */
+    @Bean("visionChatModel")
+    public ChatModel visionChatModel(
+            @Value("${app.ai.vision.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String visionBaseUrl,
+            @Value("#{systemEnvironment['DASHSCOPE_API_KEY'] ?: '${langchain4j.openai.embedding-api-key:}'}") String visionApiKey,
+            @Value("${app.ai.vision.model:qwen-vl-max}") String visionModel) {
+        log.info("初始化 Vision 模型: {} (baseUrl={})", visionModel, visionBaseUrl);
+        return OpenAiChatModel.builder()
+                .baseUrl(visionBaseUrl)
+                .apiKey(visionApiKey)
+                .modelName(visionModel)
+                .temperature(0.1)
+                .timeout(Duration.ofSeconds(120))
                 .build();
     }
 
@@ -129,7 +155,7 @@ public class MilvusVectorStoreConfig {
      * 流式聊天模型 (用于 SSE 逐字推送)
      */
     @Bean
-    public StreamingChatLanguageModel streamingChatLanguageModel() {
+    public StreamingChatModel streamingChatLanguageModel() {
         log.info("初始化 OpenAI Streaming Chat 模型: {} (baseUrl={})", chatModelName, baseUrl);
         return OpenAiStreamingChatModel.builder()
                 .baseUrl(baseUrl)
@@ -137,7 +163,6 @@ public class MilvusVectorStoreConfig {
                 .modelName(chatModelName)
                 .temperature(0.1)
                 .timeout(Duration.ofSeconds(300))
-                .tokenizer(tokenizer())
                 .build();
     }
 
@@ -160,18 +185,21 @@ public class MilvusVectorStoreConfig {
      * ChatMemoryStore — MySQL 持久化对话历史
      */
     @Bean
-    public ChatMemoryStore chatMemoryStore(ChatHistoryMapper chatHistoryMapper) {
-        return new JpaChatMemoryStore(chatHistoryMapper);
+    public ChatMemoryStore chatMemoryStore(ChatHistoryMapper chatHistoryMapper,
+                                            @Value("${app.chat.memory-window:10}") int memoryWindow) {
+        return new JpaChatMemoryStore(chatHistoryMapper, memoryWindow);
     }
 
     /**
-     * ChatMemoryProvider — 每个会话保留最近 20 条消息, 持久化到 MySQL
+     * ChatMemoryProvider — 每个会话保留最近 N 轮对话, 持久化到 MySQL
+     * maxMessages = memoryWindow * 2 (每轮 = User + AI 两条消息)
      */
     @Bean
-    public Function<String, ChatMemory> chatMemoryProvider(ChatMemoryStore chatMemoryStore) {
+    public Function<String, ChatMemory> chatMemoryProvider(ChatMemoryStore chatMemoryStore,
+                                                            @Value("${app.chat.memory-window:10}") int memoryWindow) {
         return (String memoryId) -> MessageWindowChatMemory.builder()
                 .id(memoryId)
-                .maxMessages(20)
+                .maxMessages(memoryWindow * 2)
                 .chatMemoryStore(chatMemoryStore)
                 .build();
     }

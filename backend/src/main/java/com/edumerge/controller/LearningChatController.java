@@ -3,10 +3,9 @@ package com.edumerge.controller;
 import com.edumerge.ai.AiRagService;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.SessionService;
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.StreamingResponseHandler;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -106,14 +105,14 @@ public class LearningChatController {
 
                 aiRagService.chatStream(message, finalDocId, finalSessionId,
                         finalDocId2, finalActivityType, finalContextHint,
-                        new StreamingResponseHandler<AiMessage>() {
+                        new StreamingChatResponseHandler() {
                             @Override
-                            public void onNext(String token) {
+                            public void onPartialResponse(String token) {
                                 if (!cancelled.get()) emit(emitter, cancelled, Map.of("token", token));
                             }
 
                             @Override
-                            public void onComplete(Response<AiMessage> aiResponse) {
+                            public void onCompleteResponse(ChatResponse aiResponse) {
                                 try {
                                     if (cancelled.get()) { sendDoneAndComplete(emitter, response, completed); return; }
                                     List<Map<String, Object>> sources = matches.stream()

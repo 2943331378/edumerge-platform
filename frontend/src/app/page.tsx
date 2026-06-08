@@ -130,7 +130,13 @@ export default function HomePage() {
       mindMap?: MindMapRecord | null;
       completedSteps?: Set<number>;
       sectionContext?: string;
+      startChunk?: number;
+      endChunk?: number;
       outlineGenerateTrigger?: { type: string; counter: number };
+      noteGenerating?: boolean;
+      mindMapGenerating?: boolean;
+      flashcardGenerating?: boolean;
+      quizGenerating?: boolean;
     }>
   >(new Map());
 
@@ -205,10 +211,12 @@ export default function HomePage() {
   };
 
   // 大纲底部工具栏 → 导航到目标步骤并传递选中章节
-  const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string) => {
+  const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string, startChunk?: number, endChunk?: number) => {
     const prev = activeCache?.outlineGenerateTrigger?.counter ?? 0;
     updateSessionCache({
       sectionContext,
+      startChunk,
+      endChunk,
       outlineGenerateTrigger: { type, counter: prev + 1 },
     });
     const targetStep = OUTLINE_STEP_MAP[type];
@@ -237,10 +245,9 @@ export default function HomePage() {
   }, [loadSessions]);
 
   // Auth guard: redirect to landing page if not authenticated
-  // 登出后 token 清除，跳转登录页（中间件处理首次访问）
   useEffect(() => {
     if (!auth.loading && !auth.token) {
-      window.location.href = "/login";
+      window.location.href = "/landing";
     }
   }, [auth.loading, auth.token]);
 
@@ -348,23 +355,27 @@ export default function HomePage() {
     }
   }, [sessions, loadSessions]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    if (uploading) return; // 防止重复上传
+  const handleUpload = useCallback(async (file: File | FileList) => {
+    if (uploading) return;
+    const files = file instanceof FileList ? Array.from(file) : [file];
+    if (files.length === 0) return;
     setUploading(true);
     setUploadProgress(0);
     try {
-      const result = await uploadDocument(file, (p) => setUploadProgress(p));
+      for (let i = 0; i < files.length; i++) {
+        const result = await uploadDocument(files[i], (p) => {
+          const base = (i / files.length) * 100;
+          setUploadProgress(Math.round(base + p / files.length));
+        });
+        toast.success(`${result.fileName} 上传成功，正在后台处理`);
+      }
       setUploadProgress(100);
       await loadSessions();
-      // 上传后自动选中新文档
       const list = await listSessions();
-      const newSession = list.find((s) => s.docId && String(s.docId) === result.documentId)
-        ?? list.find((s) => s.fileName === result.fileName);
-      if (newSession) {
-        setActiveSession(newSession);
+      if (list.length > 0) {
+        setActiveSession(list[0]);
         setCurrentStep(1);
       }
-      toast.success(`${result.fileName} 上传成功，正在后台处理`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "上传失败");
     }
@@ -469,21 +480,21 @@ export default function HomePage() {
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                const file = e.dataTransfer.files[0];
-                if (file) handleUpload(file);
+                if (e.dataTransfer.files.length > 0) handleUpload(e.dataTransfer.files);
               }}
             >
               <Upload className="h-6 w-6 text-muted-foreground/50" />
               <span className="text-sm text-muted-foreground">
                 拖拽文件到此处，或<span className="text-primary font-medium">点击选择</span>
               </span>
-              <span className="text-[11px] text-muted-foreground/50">PDF · DOCX · PPTX · TXT · Markdown · HTML · Excel · CSV</span>
+              <span className="text-[11px] text-muted-foreground/50">PDF · DOCX · PPTX · TXT · 图片 · Markdown · HTML · Excel · CSV</span>
               <input
                 type="file"
-                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                multiple
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,.jpg,.jpeg,.png,.bmp,.tiff,image/*,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUpload(f);
+                  const files = e.target.files;
+                  if (files && files.length > 0) handleUpload(files);
                   e.target.value = "";
                 }}
                 className="hidden"
@@ -583,7 +594,11 @@ export default function HomePage() {
             embedded
             onContextChange={setChatContext}
             sectionContext={activeCache?.sectionContext}
+            startChunk={activeCache?.startChunk}
+            endChunk={activeCache?.endChunk}
             generateTrigger={activeCache?.outlineGenerateTrigger}
+            generating={activeCache?.noteGenerating}
+            onGeneratingChange={(v) => updateSessionCache({ noteGenerating: v })}
             onGenerated={() => {
               import("@/lib/api").then(({ getStudyNote }) => {
                 if (docId) getStudyNote(docId).then((n) => updateSessionCache({ note: n }));
@@ -600,7 +615,11 @@ export default function HomePage() {
             embedded
             onContextChange={setChatContext}
             sectionContext={activeCache?.sectionContext}
+            startChunk={activeCache?.startChunk}
+            endChunk={activeCache?.endChunk}
             generateTrigger={activeCache?.outlineGenerateTrigger}
+            generating={activeCache?.mindMapGenerating}
+            onGeneratingChange={(v) => updateSessionCache({ mindMapGenerating: v })}
           />
         );
 
@@ -613,7 +632,11 @@ export default function HomePage() {
             embedded
             onContextChange={setChatContext}
             sectionContext={activeCache?.sectionContext}
+            startChunk={activeCache?.startChunk}
+            endChunk={activeCache?.endChunk}
             generateTrigger={activeCache?.outlineGenerateTrigger}
+            generating={activeCache?.flashcardGenerating}
+            onGeneratingChange={(v) => updateSessionCache({ flashcardGenerating: v })}
             onGenerated={() => updateSessionCache({ completedSteps: new Set([...completedSteps, 4]) })}
           />
         );
@@ -627,7 +650,11 @@ export default function HomePage() {
             embedded
             onContextChange={setChatContext}
             sectionContext={activeCache?.sectionContext}
+            startChunk={activeCache?.startChunk}
+            endChunk={activeCache?.endChunk}
             generateTrigger={activeCache?.outlineGenerateTrigger}
+            generating={activeCache?.quizGenerating}
+            onGeneratingChange={(v) => updateSessionCache({ quizGenerating: v })}
             onGenerated={() => updateSessionCache({ completedSteps: new Set([...completedSteps, 5]) })}
           />
         );
@@ -889,10 +916,11 @@ export default function HomePage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+        multiple
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,.jpg,.jpeg,.png,.bmp,.tiff,image/*,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) handleUpload(f);
+          const files = e.target.files;
+          if (files && files.length > 0) handleUpload(files);
           e.target.value = "";
         }}
         className="hidden"

@@ -7,10 +7,10 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get("edumerge_token")?.value;
 
-  // 未登录且访问受保护页面 → 跳转登录页
+  // 未登录且访问受保护页面 → 跳转介绍页
   if (!token && !PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
-    const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+    const landingUrl = new URL("/landing", request.url);
+    return NextResponse.redirect(landingUrl);
   }
 
   // 已登录访问登录/注册页 → 跳转首页

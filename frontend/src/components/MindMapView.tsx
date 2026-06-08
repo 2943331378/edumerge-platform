@@ -22,16 +22,20 @@ interface Props {
   onContextChange?: (hint: string) => void;
   /** 大纲选中的章节上下文（含 ID 和标题） */
   sectionContext?: string;
+  /** 大纲选中章节的 chunk 范围 */
+  startChunk?: number;
+  endChunk?: number;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
+  generating?: boolean;
+  onGeneratingChange?: (v: boolean) => void;
 }
 
-export function MindMapView({ docId, docStatus, embedded, onContextChange, sectionContext, generateTrigger }: Props) {
+export function MindMapView({ docId, docStatus, embedded, onContextChange, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
   const [view, setView] = useState<"list" | "viewer">("list");
   const [mindMaps, setMindMaps] = useState<MindMapRecord[]>([]);
   const [currentMap, setCurrentMap] = useState<MindMapRecord | null>(null);
   const [loading, setLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const isReady = docStatus === "COMPLETED";
@@ -50,9 +54,9 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
   // 生成思维导图
   const handleGenerate = useCallback(async () => {
     if (!docId || generating) return;
-    setGenerating(true);
+    onGeneratingChange?.(true);
     try {
-      const data = await generateMindMap(docId, sectionContext || undefined);
+      const data = await generateMindMap(docId, sectionContext || undefined, startChunk, endChunk);
       setCurrentMap(data);
       setView("viewer");
       await reloadList();
@@ -60,16 +64,18 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
     } catch {
       toast.error("思维导图生成失败");
     }
-    setGenerating(false);
-  }, [docId, generating, sectionContext, reloadList]);
+    onGeneratingChange?.(false);
+  }, [docId, generating, sectionContext, reloadList, onGeneratingChange]);
 
   // 从大纲跳转自动触发
-  const triggerRef = useRef(generateTrigger?.counter ?? 0);
-  useEffect(() => { triggerRef.current = generateTrigger?.counter ?? 0; }, [docId]);
+  const prevCounterRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "mindmap") {
-      triggerRef.current = generateTrigger.counter;
-      requestAnimationFrame(() => handleGenerate());
+    const counter = generateTrigger?.counter;
+    if (counter !== undefined && counter !== prevCounterRef.current && generateTrigger?.type === "mindmap") {
+      prevCounterRef.current = counter;
+      handleGenerate();
+    } else {
+      prevCounterRef.current = counter;
     }
   }, [generateTrigger?.counter]);
 
@@ -131,7 +137,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
         </h2>
         <div className="flex items-center gap-2">
           {generating ? (
-            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={() => { abortRef.current?.abort(); setGenerating(false); toast.info("已取消"); }}>
+            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={() => { abortRef.current?.abort(); onGeneratingChange?.(false); toast.info("已取消"); }}>
               <XCircle className="h-3.5 w-3.5" />
               取消生成
             </Button>

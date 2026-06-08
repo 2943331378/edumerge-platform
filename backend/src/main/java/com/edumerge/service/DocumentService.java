@@ -1,6 +1,7 @@
 package com.edumerge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edumerge.ai.AiOutlineGenerator;
 import com.edumerge.dto.OutlineResponse;
 import com.edumerge.entity.Document;
@@ -134,6 +135,15 @@ public class DocumentService {
     }
 
     @Transactional
+    public void updateSubjectType(Long id, String subjectType) {
+        Document doc = new Document();
+        doc.setId(id);
+        doc.setSubjectType(subjectType);
+        documentMapper.updateById(doc);
+        log.info("文档学科类型已更新: id={}, subjectType={}", id, subjectType);
+    }
+
+    @Transactional
     public void rename(Long id, String title) {
         Document doc = documentMapper.selectById(id);
         if (doc == null) throw new IllegalArgumentException("文档不存在: " + id);
@@ -143,7 +153,7 @@ public class DocumentService {
         documentMapper.updateById(update);
         // 同步更新关联会话标题
         sessionMapper.update(null,
-                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Session>()
+                new LambdaUpdateWrapper<Session>()
                         .eq(Session::getDocId, id)
                         .set(Session::getTitle, title));
         log.info("文档已重命名: id={}, newTitle={}", id, title);
@@ -276,7 +286,7 @@ public class DocumentService {
     public Map<String, Object> upload(String originalName, long fileSize, java.io.InputStream inputStream) {
         String extension = getSupportedExtension(originalName);
         if (extension == null) {
-            throw new IllegalArgumentException("仅支持 PDF、Word、PPT、TXT、Markdown、HTML、Excel、CSV 文件");
+            throw new IllegalArgumentException("仅支持 PDF、Word、PPT、TXT、Markdown、HTML、Excel、CSV、图片(JPG/PNG/BMP/TIFF) 文件");
         }
 
         // 文件大小二次校验（multipart 配置之外的兜底）
@@ -362,7 +372,8 @@ public class DocumentService {
         }
         String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
         return switch (extension) {
-            case "pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "html", "htm", "xlsx", "csv" -> extension;
+            case "pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "html", "htm", "xlsx", "csv",
+                 "jpg", "jpeg", "png", "bmp", "tiff" -> extension;
             default -> null;
         };
     }

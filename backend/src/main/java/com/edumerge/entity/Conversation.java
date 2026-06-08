@@ -26,7 +26,13 @@ public class Conversation {
     @TableField("doc_id")
     private Long docId;
 
+    @TableField("doc_uuid")
+    private String docUuid;
+
     private String title;
+
+    @TableField("exchange_count")
+    private Integer exchangeCount;
 
     @TableLogic
     private Integer deleted;

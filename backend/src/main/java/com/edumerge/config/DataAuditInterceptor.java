@@ -12,6 +12,8 @@ import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -156,7 +158,7 @@ public class DataAuditInterceptor implements ResponseBodyAdvice<Object> {
             }
             // 清空 sources (被屏蔽内容不应提供溯源)
             if (map.containsKey("sources")) {
-                map.put("sources", java.util.Collections.emptyList());
+                map.put("sources", Collections.emptyList());
             }
             // 替换 content 字段 (笔记/思维导图)
             if (map.containsKey("content")) {
@@ -189,8 +191,8 @@ public class DataAuditInterceptor implements ResponseBodyAdvice<Object> {
             }
         }
         // 列表类型 (卡片列表、测验列表): 拼接第一个元素检查
-        if (data instanceof java.util.List && !((java.util.List<?>) data).isEmpty()) {
-            return extractAnswerContent(((java.util.List<?>) data).get(0));
+        if (data instanceof List && !((List<?>) data).isEmpty()) {
+            return extractAnswerContent(((List<?>) data).get(0));
         }
         return null;
     }

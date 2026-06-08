@@ -33,8 +33,10 @@ public class QuizController {
 
     @PostMapping("/generate")
     public Result<List<QuizResponse>> generate(@RequestBody Map<String, String> body) {
+        Integer startChunk = body.get("startChunk") != null ? Integer.parseInt(body.get("startChunk")) : null;
+        Integer endChunk = body.get("endChunk") != null ? Integer.parseInt(body.get("endChunk")) : null;
         List<Quiz> quizzes = quizService.generate(
-                body.get("docId"), body.get("docUuid"), body.get("sessionId"), body.get("sectionContext"));
+                body.get("docId"), body.get("docUuid"), body.get("sessionId"), body.get("sectionContext"), startChunk, endChunk);
         return Result.success("测试题生成成功", DtoMapper.toQuizResponseList(quizzes));
     }
 

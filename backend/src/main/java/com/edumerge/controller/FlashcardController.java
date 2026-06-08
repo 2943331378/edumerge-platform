@@ -33,8 +33,10 @@ public class FlashcardController {
 
     @PostMapping("/generate")
     public Result<List<FlashcardResponse>> generate(@RequestBody Map<String, String> body) {
+        Integer startChunk = body.get("startChunk") != null ? Integer.parseInt(body.get("startChunk")) : null;
+        Integer endChunk = body.get("endChunk") != null ? Integer.parseInt(body.get("endChunk")) : null;
         List<Flashcard> cards = flashcardService.generate(
-                body.get("docId"), body.get("docUuid"), body.get("sessionId"), body.get("sectionContext"));
+                body.get("docId"), body.get("docUuid"), body.get("sessionId"), body.get("sectionContext"), startChunk, endChunk);
         return Result.success("学习卡片生成成功", DtoMapper.toFlashcardResponseList(cards));
     }
 

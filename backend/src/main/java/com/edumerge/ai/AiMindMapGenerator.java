@@ -1,11 +1,10 @@
 package com.edumerge.ai;
 
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +24,8 @@ import java.util.List;
 public class AiMindMapGenerator extends AiGeneratorBase {
 
     @Autowired
-    private ChatLanguageModel chatLanguageModel;
+    @org.springframework.beans.factory.annotation.Qualifier("contentChatModel")
+    private ChatModel chatLanguageModel;
 
     /**
      * 根据文档内容生成思维导图
@@ -33,24 +33,39 @@ public class AiMindMapGenerator extends AiGeneratorBase {
      * @param docUuid 文档 Milvus UUID (用于向量检索)
      * @return 生成结果 (含 title、content)
      */
-    public MindMapResult generate(Long docId, String docUuid, String sectionContext) {
+    public MindMapResult generate(Long docId, String docUuid, String sectionContext, Integer startChunk, Integer endChunk) {
         long startTime = System.currentTimeMillis();
 
-        // 步骤 1: 从 Milvus 检索文档核心内容 — top-K=12 平衡质量与速度
-        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 12,
-                "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容 定义 原理 方法 总结 document structure headings core topic key concepts hierarchy outline main content definition principles methods summary");
-        if (matches.isEmpty()) {
-            log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
-            return MindMapResult.empty();
+        String context;
+        int chunkCount;
+        if (startChunk != null && endChunk != null) {
+            context = buildContextFromRange(docId, startChunk, endChunk);
+            if (context.isEmpty()) {
+                log.warn("按 chunk 范围未获取到内容, 回退语义搜索: docId={}, range=[{},{}]", docId, startChunk, endChunk);
+                List<EmbeddingMatch<TextSegment>> fallback = retrieveTopChunks(docUuid, 12,
+                        "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容");
+                if (fallback.isEmpty()) { return MindMapResult.empty(); }
+                context = buildContextWithPages(fallback);
+                chunkCount = fallback.size();
+            } else {
+                chunkCount = endChunk - startChunk + 1;
+            }
+        } else {
+            List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 12,
+                    "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容");
+            if (matches.isEmpty()) {
+                log.warn("未检索到文档块: docId={}, docUuid={}", docId, docUuid);
+                return MindMapResult.empty();
+            }
+            context = buildContextWithPages(matches);
+            chunkCount = matches.size();
         }
-
-        // 步骤 2: 拼装上下文 — 标注来源信息实现数据溯源
-        String context = buildContextWithPages(matches);
-        log.info("思维导图上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
+        String subjectRules = buildSubjectRules(getSubjectType(docId));
+        log.info("思维导图上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, chunkCount, System.currentTimeMillis() - startTime);
 
         // 步骤 3: 调用 LLM 生成 Markdown 思维导图
         long llmStart = System.currentTimeMillis();
-        String markdown = callLLM(context, sectionContext);
+        String markdown = callLLM(context, sectionContext, subjectRules);
         log.info("LLM 思维导图生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, markdown.length(), System.currentTimeMillis() - llmStart);
 
         // 步骤 4: 清理验证 — 确保输出符合 Markdown 层级格式
@@ -67,7 +82,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
     }
 
     /** 调用大模型, 使用专用 Prompt 强制输出结构化 Markdown */
-    private String callLLM(String context, String sectionContext) {
+    private String callLLM(String context, String sectionContext, String subjectRules) {
         String sectionHint = (sectionContext != null && !sectionContext.isBlank())
                 ? "\n\n# 重点关注章节\n请重点围绕以下章节生成思维导图，但保持整体结构完整:\n" + sectionContext.strip() + "\n"
                 : "";
@@ -86,6 +101,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                 2. 每个节点须为完整短语或句子，不可仅为单个词
                 3. 层级间无空行，保持紧凑树状结构
 
+                {SUBJECT_RULES}
                 {SECTION_HINT}
                 # 文档上下文
                 {CONTEXT}
@@ -93,14 +109,15 @@ public class AiMindMapGenerator extends AiGeneratorBase {
 
         SystemMessage system = new SystemMessage(template
                 .replace("{COMMON_RULES}", buildCommonRules())
+                .replace("{SUBJECT_RULES}", subjectRules)
                 .replace("{SECTION_HINT}", sectionHint)
                 .replace("{CONTEXT}", context));
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
         messages.add(new UserMessage("请基于以上文档内容，生成一份结构清晰的 Markdown 思维导图。仅输出 Markdown 内容。"));
-        Response<AiMessage> response = chatLanguageModel.generate(messages);
-        return response.content().text();
+        ChatResponse response = chatContent(chatLanguageModel, messages);
+        return response.aiMessage().text();
     }
 
     /** 拼装上下文 — 标注片段来源以实现数据溯源 */

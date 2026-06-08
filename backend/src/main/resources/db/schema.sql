@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS documents (
     chunk_count INT COMMENT '分块数量',
     vector_count INT COMMENT '向量数量',
     page_count INT COMMENT '文档页数/幻灯片数/工作表数',
+    subject_type VARCHAR(20) DEFAULT 'GENERAL' COMMENT '学科类型: ALGORITHM/MATH/PROGRAMMING/SCIENCE/THEORY/MEDICAL/HUMANITIES/GENERAL',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS chat_history (
     confidence DECIMAL(5, 4) COMMENT '置信度',
     tokens_used INT COMMENT '使用的令牌数',
     is_helpful INT COMMENT '用户反馈：1=有用，0=无用，null=未反馈',
+    feedback_reason VARCHAR(500) COMMENT '反馈原因 (用户自定义)',
     activity_type VARCHAR(20) DEFAULT NULL COMMENT '活动上下文: notes/mindmap/flashcards/quiz/flownote',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -129,7 +131,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     session_id VARCHAR(64) NOT NULL UNIQUE COMMENT '前端对话UUID',
     user_id BIGINT NOT NULL COMMENT '用户ID',
     doc_id BIGINT COMMENT '关联文档ID',
+    doc_uuid VARCHAR(128) COMMENT 'Milvus 文档UUID (向量检索标识)',
     title VARCHAR(200) DEFAULT '新对话' COMMENT '对话标题',
+    exchange_count INT DEFAULT 0 COMMENT '累计对话轮数 (FlowNote 自动提取触发依据)',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -360,6 +364,10 @@ CREATE TABLE IF NOT EXISTS document_outlines (
     INDEX idx_do_doc_id (doc_id),
     INDEX idx_do_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档大纲表';
+
+-- ===== 增量变更：documents 表新增 subject_type 列 =====
+-- 已有数据库执行此语句安全（IF NOT EXISTS 不支持，用 IGNORE 跳过重复列错误）
+ALTER TABLE documents ADD COLUMN subject_type VARCHAR(20) DEFAULT 'GENERAL' COMMENT '学科类型: ALGORITHM/MATH/PROGRAMMING/SCIENCE/THEORY/MEDICAL/HUMANITIES/GENERAL';
 
 -- ===== 初始化示例数据 =====
 -- 默认管理员账号: admin / admin123

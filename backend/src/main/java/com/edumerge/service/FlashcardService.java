@@ -120,7 +120,7 @@ public class FlashcardService {
      * @throws IllegalArgumentException 参数校验失败
      */
     @Transactional
-    public List<Flashcard> generate(String docIdStr, String docUuid, String sessionIdStr, String sectionContext) {
+    public List<Flashcard> generate(String docIdStr, String docUuid, String sessionIdStr, String sectionContext, Integer startChunk, Integer endChunk) {
         // sessionId 优先: 解析为 docId + docUuid
         if (sessionIdStr != null && !sessionIdStr.isBlank()) {
             try {
@@ -143,7 +143,7 @@ public class FlashcardService {
         List<String> existingQuestions = listByDocId(docId).stream()
                 .map(Flashcard::getQuestion).toList();
 
-        List<Flashcard> cards = aiFlashcardGenerator.generate(docId, userId, docUuid, existingQuestions, sectionContext);
+        List<Flashcard> cards = aiFlashcardGenerator.generate(docId, userId, docUuid, existingQuestions, sectionContext, startChunk, endChunk);
         if (cards.isEmpty()) {
             throw new IllegalStateException("未检索到文档内容，生成失败");
         }

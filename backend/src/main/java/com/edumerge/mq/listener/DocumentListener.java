@@ -1,12 +1,16 @@
 package com.edumerge.mq.listener;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edumerge.ai.AiOutlineGenerator;
+import com.edumerge.ai.SubjectClassifier;
 import com.edumerge.config.RabbitMQConfig;
 import com.edumerge.entity.DocumentChunk;
 import com.edumerge.mapper.DocumentChunkMapper;
 import com.edumerge.mq.message.DocumentProcessMessage;
 import com.edumerge.service.DocumentService;
 import com.edumerge.store.MilvusEmbeddingStore;
+import com.opencsv.CSVReaderBuilder;
+import com.opencsv.exceptions.CsvException;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
@@ -16,8 +20,10 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import lombok.extern.slf4j.Slf4j;
-import net.sourceforge.tess4j.Tesseract;
-import net.sourceforge.tess4j.TesseractException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.http.*;
 import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
 import org.apache.poi.hslf.usermodel.HSLFTextShape;
@@ -48,8 +54,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 
 /**
  * 文档向量化消费者 — 监听向量化队列, 执行文档解析 → 文本切块 → 向量化 → 存入 Milvus 全流程
@@ -63,22 +72,26 @@ public class DocumentListener {
     private final DocumentService documentService;
     private final DocumentChunkMapper documentChunkMapper;
     private final AiOutlineGenerator outlineGenerator;
+    private final SubjectClassifier subjectClassifier;
     private final ExecutorService documentTaskExecutor;
 
-    @Value("${app.document.ocr.enabled:true}")
-    private boolean ocrEnabled;
-    @Value("${app.document.ocr.tesseract-data-path}")
-    private String tesseractDataPath;
-    @Value("${app.document.ocr.language:chi_sim+eng}")
-    private String ocrLanguage;
-    @Value("${app.document.ocr.render-dpi:200}")
-    private int renderDpi;
     @Value("${app.rag.chunk-size:1000}")
     private int chunkSize;
     @Value("${app.rag.chunk-overlap:100}")
     private int chunkOverlap;
+    @Value("${app.ai.vision.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}")
+    private String visionBaseUrl;
+    @Value("#{systemEnvironment['DASHSCOPE_API_KEY'] ?: '${langchain4j.openai.embedding-api-key:}'}")
+    private String visionApiKey;
+    @Value("${app.ai.vision.model:qwen-vl-max}")
+    private String visionModel;
+    @Value("${app.ai.vision.max-tokens:4096}")
+    private int visionMaxTokens;
+    @Value("${app.ai.vision.ocr-concurrency:10}")
+    private int visionOcrConcurrency;
 
-    private Tesseract tesseract;
+    private final RestTemplate restTemplate = new RestTemplate();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     public DocumentListener(EmbeddingModel embeddingModel,
@@ -86,12 +99,14 @@ public class DocumentListener {
                             DocumentService documentService,
                             DocumentChunkMapper documentChunkMapper,
                             AiOutlineGenerator outlineGenerator,
+                            SubjectClassifier subjectClassifier,
                             @org.springframework.beans.factory.annotation.Qualifier("documentTaskExecutor") ExecutorService documentTaskExecutor) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.documentService = documentService;
         this.documentChunkMapper = documentChunkMapper;
         this.outlineGenerator = outlineGenerator;
+        this.subjectClassifier = subjectClassifier;
         this.documentTaskExecutor = documentTaskExecutor;
     }
 
@@ -129,6 +144,18 @@ public class DocumentListener {
             String text = result.text;
             log.info("文本提取完成: documentId={}, 长度={} 字符, 页数={}, 耗时={}ms",
                     documentId, text.length(), result.pageCount, System.currentTimeMillis() - stepStart);
+
+            // 2.5 学科分类 — 取前 2000 字判断文档学科类型
+            com.edumerge.entity.Document docForClassify = documentService.getByFilePath(filePath);
+            if (docForClassify != null) {
+                try {
+                    String subjectType = subjectClassifier.classify(text);
+                    documentService.updateSubjectType(docForClassify.getId(), subjectType);
+                    log.info("学科分类完成: docId={}, subjectType={}", docForClassify.getId(), subjectType);
+                } catch (Exception e) {
+                    log.warn("学科分类失败(不影响主流程): {}", e.getMessage());
+                }
+            }
 
             // 3. 切块 — PPT 按幻灯片边界切分，其他格式递归切分
             stepStart = System.currentTimeMillis();
@@ -193,10 +220,10 @@ public class DocumentListener {
                 }, documentTaskExecutor);
             }
 
-            // 5. 并发向量化 — 多线程分批调用 embedAll (DashScope text-embedding-v4 单次上限 25 条)
+            // 5. 并发向量化 — 多线程分批调用 embedAll (DashScope text-embedding-v3 单次上限 10 条)
             long embedStart = System.currentTimeMillis();
             int totalChunks = enrichedSegments.size();
-            int batchSize = 25;
+            int batchSize = 10;
             int batchCount = (totalChunks + batchSize - 1) / batchSize;
 
             // 按批次提交并发任务
@@ -228,7 +255,7 @@ public class DocumentListener {
             // 6.5 批量更新 document_chunks 状态为 COMPLETED
             if (doc != null) {
                 documentChunkMapper.update(null,
-                        new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<DocumentChunk>()
+                        new LambdaUpdateWrapper<DocumentChunk>()
                                 .eq(DocumentChunk::getDocumentId, doc.getId())
                                 .set(DocumentChunk::getEmbeddingStatus, "COMPLETED"));
             }
@@ -266,6 +293,7 @@ public class DocumentListener {
             case "html", "htm" -> extractHtmlText(documentPath);
             case "xlsx" -> extractXlsxText(documentPath);
             case "csv" -> extractCsvText(documentPath);
+            case "jpg", "jpeg", "png", "bmp", "tiff" -> extractImageText(documentPath);
             default -> throw new IOException("不支持的文件类型: " + extension);
         };
     }
@@ -398,7 +426,7 @@ public class DocumentListener {
      * 提取 CSV 文本 — OpenCSV 逐行读取，逗号分隔拼成制表符分隔文本
      */
     private ExtractionResult extractCsvText(Path csvPath) throws IOException {
-        try (var reader = new com.opencsv.CSVReaderBuilder(
+        try (var reader = new CSVReaderBuilder(
                 Files.newBufferedReader(csvPath, StandardCharsets.UTF_8)).build()) {
             StringBuilder text = new StringBuilder();
             String[] line;
@@ -408,7 +436,7 @@ public class DocumentListener {
                 rowCount++;
             }
             return new ExtractionResult(text.toString(), rowCount);
-        } catch (com.opencsv.exceptions.CsvException e) {
+        } catch (CsvException e) {
             throw new IOException("CSV 解析失败: " + e.getMessage(), e);
         }
     }
@@ -456,7 +484,7 @@ public class DocumentListener {
     }
 
     /**
-     * 提取 PDF 全文 — 优先文字层, 扫描版自动 OCR 回退
+     * 提取 PDF 全文 — 优先文字层, 扫描版自动 Vision LLM 回退
      */
     private ExtractionResult extractPdfText(Path pdfPath) throws IOException {
         try (PDDocument pdfDoc = Loader.loadPDF(pdfPath.toFile())) {
@@ -483,81 +511,138 @@ public class DocumentListener {
                 return new ExtractionResult(allText.toString(), pageCount);
             }
 
-            // 文字层为空 → OCR 回退
-            if (ocrEnabled) {
-                log.info("启用 OCR 回退: DPI={}, 语言={}, tessdata={}", renderDpi, ocrLanguage, tesseractDataPath);
-                return new ExtractionResult(ocrPdfPages(pdfDoc, pageCount), pageCount);
+            // 文字层为空 → Vision LLM 并发逐页识别
+            log.info("PDF 无文字层, 启用 Vision OCR: model={}, pages={}, concurrency={}", visionModel, pageCount, visionOcrConcurrency);
+            PDFRenderer renderer = new PDFRenderer(pdfDoc);
+            long startTime = System.currentTimeMillis();
+            Semaphore semaphore = new Semaphore(visionOcrConcurrency);
+            String[] pageResults = new String[pageCount];
+            @SuppressWarnings("unchecked")
+            CompletableFuture<Void>[] futures = new CompletableFuture[pageCount];
+
+            for (int i = 0; i < pageCount; i++) {
+                final int pageIdx = i;
+                futures[i] = CompletableFuture.runAsync(() -> {
+                    try {
+                        semaphore.acquire();
+                        BufferedImage image = renderer.renderImageWithDPI(pageIdx, 150);
+                        try {
+                            if (isBlankPage(image)) {
+                                log.info("跳过空白页: 第{}页", pageIdx + 1);
+                                return;
+                            }
+                            String base64 = imageToBase64(image);
+                            pageResults[pageIdx] = callVisionApi(base64);
+                        } finally {
+                            image.flush();
+                        }
+                    } catch (Exception e) {
+                        log.warn("Vision OCR 第{}页失败: {}", pageIdx + 1, e.getMessage());
+                    } finally {
+                        semaphore.release();
+                    }
+                    if ((pageIdx + 1) % 10 == 0) {
+                        log.info("Vision OCR 进度: {}/{} 页 (已耗时 {}s)", pageIdx + 1, pageCount,
+                                (System.currentTimeMillis() - startTime) / 1000);
+                    }
+                }, documentTaskExecutor);
             }
-
-            log.warn("PDF 无文字层且 OCR 未启用 (app.document.ocr.enabled=false)");
-            return new ExtractionResult("", pageCount);
-        }
-    }
-
-    /**
-     * OCR 识别扫描版 PDF — PDFBox 渲染每页为图片, Tesseract 逐页识别
-     */
-    private String ocrPdfPages(PDDocument pdfDoc, int pageCount) {
-        initTesseract();
-        if (tesseract == null) {
-            log.error("Tesseract 初始化失败, OCR 不可用");
-            return "";
-        }
-
-        PDFRenderer renderer = new PDFRenderer(pdfDoc);
-        StringBuilder text = new StringBuilder();
-        int renderedPages = 0;
-        long startTime = System.currentTimeMillis();
-
-        for (int page = 0; page < pageCount; page++) {
-            BufferedImage image = null;
-            try {
-                image = renderer.renderImage(page, renderDpi / 72f);
-                String pageText = tesseract.doOCR(image);
-                if (pageText != null && !pageText.isBlank()) {
-                    renderedPages++;
-                    text.append(pageText).append("\n");
+            CompletableFuture.allOf(futures).join();
+            StringBuilder text = new StringBuilder();
+            int recognizedPages = 0;
+            for (int i = 0; i < pageCount; i++) {
+                if (pageResults[i] != null && !pageResults[i].isBlank()) {
+                    recognizedPages++;
+                    text.append(pageResults[i]).append("\n");
                 }
-            } catch (IOException e) {
-                log.warn("OCR 渲染第{}页失败: {}", page + 1, e.getMessage());
-            } catch (TesseractException e) {
-                log.warn("OCR 识别第{}页失败: {}", page + 1, e.getMessage());
-            } catch (Throwable t) {
-                log.error("OCR 第{}页 JNA 错误 (语言包缺失?): {}", page + 1, t.toString());
-                break; // 跳过后续页面, 语言包问题不会自愈
-            } finally {
-                if (image != null) image.flush();
             }
-            if ((page + 1) % 10 == 0) {
-                log.info("OCR 进度: {}/{} 页 (已耗时 {}s)", page + 1, pageCount,
-                        (System.currentTimeMillis() - startTime) / 1000);
-            }
+            long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+            log.info("Vision OCR 完成: {}/{} 页识别到文字, 总计 {} 字符, 耗时 {}s",
+                    recognizedPages, pageCount, text.length(), elapsed);
+            return new ExtractionResult(text.toString(), pageCount);
         }
-        long elapsed = (System.currentTimeMillis() - startTime) / 1000;
-        log.info("OCR 完成: {}/{} 页识别到文字, 总计 {} 字符, 耗时 {}s",
-                renderedPages, pageCount, text.length(), elapsed);
-        return text.toString();
     }
 
-    private void initTesseract() {
-        if (tesseract != null) return;
+    /** 提取图片文字 — Vision LLM 直接识别 */
+    private ExtractionResult extractImageText(Path imagePath) throws IOException {
+        log.info("图片 OCR 开始: {}", imagePath.getFileName());
+        byte[] imageBytes = Files.readAllBytes(imagePath);
+        String base64 = Base64.getEncoder().encodeToString(imageBytes);
+        String text = callVisionApi(base64);
+        log.info("图片 OCR 完成: {}, 提取 {} 字符", imagePath.getFileName(), text.length());
+        return new ExtractionResult(text, 1);
+    }
+
+    /** 调用 DashScope Vision API 提取图片文字 */
+    private String callVisionApi(String base64Image) {
         try {
-            // 校验语言包文件存在, 避免 doOCR 时 JNA 内存访问错误导致线程崩溃
-            for (String lang : ocrLanguage.split("\\+")) {
-                Path dataFile = Path.of(tesseractDataPath, lang + ".traineddata");
-                if (!Files.exists(dataFile)) {
-                    log.error("Tesseract 语言包缺失: {} (OCR 不可用)", dataFile);
-                    return;
+            String apiUrl = visionBaseUrl + "/chat/completions";
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "model", visionModel,
+                    "messages", List.of(Map.of(
+                            "role", "user",
+                            "content", List.of(
+                                    Map.of("type", "image_url",
+                                            "image_url", Map.of("url", "data:image/jpeg;base64," + base64Image)),
+                                    Map.of("type", "text",
+                                            "text", "请精确识别图片中的所有文字内容，包括手写文字、印刷文字、公式、图表文字。保持原文结构和段落划分。仅输出识别到的文字，不要添加任何解释或说明。")
+                            )
+                    )),
+                    "max_tokens", visionMaxTokens,
+                    "temperature", 0.1
+            ));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(visionApiKey);
+            HttpEntity<String> request = new HttpEntity<>(body, headers);
+
+            ResponseEntity<String> response = restTemplate.exchange(apiUrl, HttpMethod.POST, request, String.class);
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                JsonNode root = objectMapper.readTree(response.getBody());
+                JsonNode content = root.path("choices").path(0).path("message").path("content");
+                if (!content.isMissingNode()) {
+                    return content.asText("").trim();
                 }
             }
-            tesseract = new Tesseract();
-            tesseract.setDatapath(tesseractDataPath);
-            tesseract.setLanguage(ocrLanguage);
-            tesseract.setOcrEngineMode(1);
-            log.info("Tesseract 初始化成功: datapath={}, language={}", tesseractDataPath, ocrLanguage);
-        } catch (Throwable t) {
-            log.error("Tesseract 初始化失败 (OCR 不可用): {}", t.toString());
-            tesseract = null;
+            log.warn("Vision API 返回异常: status={}", response.getStatusCode());
+        } catch (Exception e) {
+            log.error("Vision API 调用失败: {}", e.getMessage());
         }
+        return "";
+    }
+
+    /** 检测空白页 — 采样像素，超过 98% 接近纯白则判定为空白 */
+    private boolean isBlankPage(BufferedImage image) {
+        int w = image.getWidth(), h = image.getHeight();
+        int step = Math.max(1, Math.min(w, h) / 50);
+        int total = 0, blank = 0;
+        for (int y = 0; y < h; y += step) {
+            for (int x = 0; x < w; x += step) {
+                int rgb = image.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+                if (r > 240 && g > 240 && b > 240) blank++;
+                total++;
+            }
+        }
+        return total > 0 && (blank * 100 / total) >= 98;
+    }
+
+    /** BufferedImage 转 Base64 (JPEG 80% 质量，比 PNG 小 5-8 倍) */
+    private String imageToBase64(BufferedImage image) throws IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        var writers = javax.imageio.ImageIO.getImageWritersByFormatName("jpg");
+        if (writers.hasNext()) {
+            var writer = writers.next();
+            var param = writer.getDefaultWriteParam();
+            param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+            param.setCompressionQuality(0.8f);
+            writer.setOutput(javax.imageio.ImageIO.createImageOutputStream(baos));
+            writer.write(null, new javax.imageio.IIOImage(image, null, null), param);
+            writer.dispose();
+        } else {
+            javax.imageio.ImageIO.write(image, "jpg", baos);
+        }
+        return Base64.getEncoder().encodeToString(baos.toByteArray());
     }
 }

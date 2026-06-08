@@ -4,12 +4,11 @@ import com.edumerge.entity.Flashcard;
 import com.edumerge.mapper.FlashcardMapper;
 import com.edumerge.service.CardDeckService;
 import com.fasterxml.jackson.core.type.TypeReference;
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +26,8 @@ import java.util.Map;
 public class AiFlashcardGenerator extends AiGeneratorBase {
 
     @Autowired
-    private ChatLanguageModel chatLanguageModel;
+    @org.springframework.beans.factory.annotation.Qualifier("contentChatModel")
+    private ChatModel chatLanguageModel;
 
     @Autowired
     private FlashcardMapper flashcardMapper;
@@ -36,18 +36,34 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
     private CardDeckService cardDeckService;
 
     /** 根据文档内容自动生成学习卡片 (每次生成创建一个 Deck) */
-    public List<Flashcard> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext) {
-        List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 10,
-                "核心知识点 关键概念 重要内容 定义 原理 方法 总结 key concepts important content definition principles methods summary");
-        if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
-
-        String context = buildContext(matches);
+    public List<Flashcard> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext, Integer startChunk, Integer endChunk) {
+        // 优先按大纲 chunk 范围直接取内容，否则语义搜索
+        String context;
+        List<EmbeddingMatch<TextSegment>> matches;
+        if (startChunk != null && endChunk != null) {
+            context = buildContextFromRange(docId, startChunk, endChunk);
+            if (context.isEmpty()) {
+                log.warn("按 chunk 范围未获取到内容, 回退语义搜索: docId={}, range=[{},{}]", docId, startChunk, endChunk);
+                matches = retrieveTopChunks(docUuid, 10,
+                        "核心知识点 关键概念 重要内容 定义 原理 方法 辨析 易错点 对比 应用场景 典型例题 条件边界 例外情况");
+                if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
+                context = buildContext(matches);
+            } else {
+                matches = List.of(); // 范围取内容时无 EmbeddingMatch
+            }
+        } else {
+            matches = retrieveTopChunks(docUuid, 10,
+                    "核心知识点 关键概念 重要内容 定义 原理 方法 辨析 易错点 对比 应用场景 典型例题 条件边界 例外情况");
+            if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
+            context = buildContext(matches);
+        }
         log.info("提取上下文完成: docId={}, 块数={}", docId, matches.size());
 
         // 拼装已有卡片问题列表，告知 LLM 避免重复
         String existingHint = buildExistingHint(existingQuestions);
+        String subjectRules = buildSubjectRules(getSubjectType(docId));
 
-        String llmResponse = callLLM(context, existingHint, sectionContext);
+        String llmResponse = callLLM(context, existingHint, sectionContext, subjectRules);
         log.info("LLM 卡片生成响应: 长度={} 字符", llmResponse.length());
 
         // 创建卡片组, 将本次生成的卡片绑定到该组
@@ -67,7 +83,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         return sb.toString();
     }
 
-    private String callLLM(String context, String existingHint, String sectionContext) {
+    private String callLLM(String context, String existingHint, String sectionContext, String subjectRules) {
         String template = """
                 你是一个严谨的 AI 学习导师。请分析文档片段，提取5个核心知识点并转化为学习卡片。
 
@@ -79,8 +95,10 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                 # 质量红线
                 - 禁止元数据问题（章节归属、页码等）— 必须问概念本身
                 - 禁止是/否型或答案仅为术语名的低价值问题
-                - 聚焦：业务概念、技术原理、定义、规范规则
+                - 禁止"X的定义是什么"、"X有哪些特点"这类仅考察记忆的浅层问题
                 - 单卡不超过200字
+
+                {SUBJECT_RULES}
 
                 # 输出格式（仅输出JSON）
                 {"deckTitle":"10字以内主题","cards":[{"question":"...","answer":"..."}]}
@@ -95,6 +113,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                 : "";
         SystemMessage system = new SystemMessage(template
                 .replace("{COMMON_RULES}", buildCommonRules())
+                .replace("{SUBJECT_RULES}", subjectRules)
                 .replace("{CONTEXT}", context)
                 .replace("{EXISTING_HINT}", existingHint)
                 .replace("{SECTION_HINT}", sectionHint));
@@ -102,8 +121,8 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
         messages.add(new UserMessage("请基于以上文档内容，生成5张学习卡片。"));
-        Response<AiMessage> response = chatLanguageModel.generate(messages);
-        return response.content().text();
+        ChatResponse response = chatContent(chatLanguageModel, messages);
+        return response.aiMessage().text();
     }
 
     private List<Flashcard> parseAndSave(String llmResponse, Long docId, Long userId,

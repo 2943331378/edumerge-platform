@@ -162,19 +162,39 @@ app:
     embedding-dimension: 1024
     chunk-size: 1000
     chunk-overlap: 100
+    # 检索增强: 查询改写 + 多查询 + 相关性过滤
+    query-rewrite:
+      enabled: true
+    multi-query:
+      enabled: true
+      count: 2          # 查询变体数 (含原始查询)
+    relevance-filter:
+      enabled: true
+      min-relevance: 0.4  # 最低相关性阈值 (0-1)
+
+  chat:
+    # 对话记忆窗口: 每个会话保留最近 N 轮对话 (1 轮 = 1 条 ChatHistory = 2 条 ChatMessage)
+    memory-window: 10
 
   document:
     # 上传文件存储目录 — 通过环境变量 APP_UPLOAD_DIR 覆盖
     upload-dir: ${APP_UPLOAD_DIR:./uploads}
-    allowed-types: pdf,doc,docx,txt,md
+    allowed-types: pdf,doc,docx,txt,md,jpg,jpeg,png,bmp,tiff
     max-upload-size: 50
     process-timeout: 300
-    ocr:
-      enabled: true
-      # Tesseract tessdata 目录 — 通过环境变量 TESSERACT_DATA_PATH 覆盖
-      tesseract-data-path: ${TESSERACT_DATA_PATH:C:/Program Files/Tesseract-OCR/tessdata}
-      language: chi_sim+eng
-      render-dpi: 300
+
+  # ===== AI Vision 配置 (图片/扫描版 PDF OCR) =====
+  ai:
+    vision:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      model: qwen-vl-max
+      max-tokens: 4096
+      ocr-concurrency: 10
+
+    # ===== AI 内容生成模型 (Qwen3.7-plus, 用于笔记/卡片/测验/思维导图) =====
+    content:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      model: qwen3.7-plus
 
 # ===== 服务器配置 =====
 server:

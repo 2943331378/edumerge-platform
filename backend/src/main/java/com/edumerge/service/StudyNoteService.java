@@ -119,7 +119,7 @@ public class StudyNoteService {
      * @throws IllegalStateException    生成失败
      */
     @Transactional
-    public Map<String, Object> generate(Long docId, String requirements, String sectionContext) {
+    public Map<String, Object> generate(Long docId, String requirements, String sectionContext, Integer startChunk, Integer endChunk) {
         Document doc = documentService.getById(docId);
         if (doc == null) {
             throw new IllegalArgumentException("文档不存在: " + docId);
@@ -135,7 +135,7 @@ public class StudyNoteService {
                 sectionContext != null ? sectionContext.substring(0, Math.min(100, sectionContext.length())) : "null");
 
         AiNoteGenerator.StudyNoteResult generated = aiNoteGenerator.generate(
-                docId, doc.getDocumentId(), requirements, sectionContext);
+                docId, doc.getDocumentId(), requirements, sectionContext, startChunk, endChunk);
 
         if (!generated.isSuccess()) {
             throw new IllegalStateException("学习笔记生成失败: 未从文档中提取到足够内容");

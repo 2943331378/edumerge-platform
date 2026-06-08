@@ -63,7 +63,9 @@ public class StudyNoteController {
             return Result.fail("docId 不能为空");
         }
         Long docId = Long.parseLong(docIdStr);
-        Map<String, Object> data = studyNoteService.generate(docId, body.get("requirements"), body.get("sectionContext"));
+        Integer startChunk = body.get("startChunk") != null ? Integer.parseInt(body.get("startChunk")) : null;
+        Integer endChunk = body.get("endChunk") != null ? Integer.parseInt(body.get("endChunk")) : null;
+        Map<String, Object> data = studyNoteService.generate(docId, body.get("requirements"), body.get("sectionContext"), startChunk, endChunk);
         return Result.success(data);
     }
 }

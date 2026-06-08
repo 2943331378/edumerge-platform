@@ -154,13 +154,17 @@ export async function regenerateDocumentOutline(docId: number): Promise<Document
 }
 
 export function uploadDocument(
-  file: File,
+  file: File | FileList,
   onProgress?: (percent: number) => void,
 ): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
-    formData.append("file", file);
+    if (file instanceof FileList) {
+      for (let i = 0; i < file.length; i++) formData.append("file", file[i]);
+    } else {
+      formData.append("file", file);
+    }
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable && onProgress) {
@@ -244,10 +248,10 @@ export interface ChatHistoryItem {
   createdAt: string;
 }
 
-export async function markChatHelpful(id: number, isHelpful: number): Promise<void> {
+export async function markChatHelpful(id: number, isHelpful: number, reason?: string): Promise<void> {
   return request<void>(`/rag/history/${id}/feedback`, {
     method: "PUT",
-    body: JSON.stringify({ isHelpful }),
+    body: JSON.stringify({ isHelpful, reason: reason || undefined }),
   });
 }
 
@@ -278,9 +282,11 @@ export async function getMindMapDetail(deckId: number): Promise<MindMapRecord> {
   return request<MindMapRecord>(`/mindmap/detail?deckId=${deckId}`);
 }
 
-export async function generateMindMap(docId: number, sectionContext?: string): Promise<MindMapRecord> {
+export async function generateMindMap(docId: number, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<MindMapRecord> {
   const params = new URLSearchParams({ docId: String(docId) });
   if (sectionContext) params.set("sectionContext", sectionContext);
+  if (startChunk != null) params.set("startChunk", String(startChunk));
+  if (endChunk != null) params.set("endChunk", String(endChunk));
   return request<MindMapRecord>(`/mindmap/generate?${params}`, { method: "POST" });
 }
 
@@ -309,10 +315,12 @@ export async function listNoteHistory(docId: number): Promise<StudyNoteRecord[]>
   return request<StudyNoteRecord[]>(`/notes/history?docId=${docId}`);
 }
 
-export async function generateStudyNote(docId: number, requirements?: string, signal?: AbortSignal, sectionContext?: string): Promise<StudyNoteRecord> {
+export async function generateStudyNote(docId: number, requirements?: string, signal?: AbortSignal, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<StudyNoteRecord> {
   const body: Record<string, string> = { docId: String(docId) };
   if (requirements) body.requirements = requirements;
   if (sectionContext) body.sectionContext = sectionContext;
+  if (startChunk != null) body.startChunk = String(startChunk);
+  if (endChunk != null) body.endChunk = String(endChunk);
   return request<StudyNoteRecord>("/notes/generate", {
     method: "POST",
     body: JSON.stringify(body),
@@ -367,12 +375,14 @@ export async function listFlashcardsByDeck(deckId: number): Promise<FlashcardIte
   return request<FlashcardItem[]>(`/flashcards?deckId=${deckId}`);
 }
 
-export async function generateFlashcards(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string): Promise<FlashcardItem[]> {
+export async function generateFlashcards(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<FlashcardItem[]> {
   const body: Record<string, string> = {};
   if (sessionId) body.sessionId = String(sessionId);
   if (docId && !sessionId) body.docId = String(docId);
   if (docUuid && !sessionId) body.docUuid = docUuid;
   if (sectionContext) body.sectionContext = sectionContext;
+  if (startChunk != null) body.startChunk = String(startChunk);
+  if (endChunk != null) body.endChunk = String(endChunk);
   return request<FlashcardItem[]>("/flashcards/generate", {
     method: "POST",
     body: JSON.stringify(body),
@@ -469,12 +479,14 @@ export async function listQuizAttempts(docId: number): Promise<QuizAttemptRecord
   return request<QuizAttemptRecord[]>(`/quizzes/attempts?docId=${docId}`);
 }
 
-export async function generateQuizzes(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string): Promise<QuizItem[]> {
+export async function generateQuizzes(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<QuizItem[]> {
   const body: Record<string, string> = {};
   if (sessionId) body.sessionId = String(sessionId);
   if (docId && !sessionId) body.docId = String(docId);
   if (docUuid && !sessionId) body.docUuid = docUuid;
   if (sectionContext) body.sectionContext = sectionContext;
+  if (startChunk != null) body.startChunk = String(startChunk);
+  if (endChunk != null) body.endChunk = String(endChunk);
   return request<QuizItem[]>("/quizzes/generate", {
     method: "POST",
     body: JSON.stringify(body),

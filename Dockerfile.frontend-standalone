@@ -1,0 +1,18 @@
+# ===== 轻量前端 Dockerfile — 仅打包本地构建产物 =====
+# 用法: npm run build 后执行
+#   docker build -f Dockerfile.frontend-standalone -t edumerge-frontend .
+
+FROM node:22-slim
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+COPY frontend/next.config.ts ./
+COPY frontend/public ./public
+COPY frontend/.next/standalone ./
+COPY frontend/.next/static ./.next/static
+
+EXPOSE 3000
+CMD ["node", "server.js"]

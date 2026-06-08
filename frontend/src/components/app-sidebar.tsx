@@ -32,7 +32,7 @@ interface AppSidebarProps {
   documents: UploadedDoc[];
   activeSessionId: number | null;
   onSelectSession: (sessionId: number) => void;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File | FileList) => Promise<void>;
   onDeleteDocument: (sessionId: number) => void;
   onRetryDocument?: (sessionId: number) => void;
   onRenameDocument?: (sessionId: number, newTitle: string) => void;
@@ -62,13 +62,17 @@ export function AppSidebar({
     searchQuery ? doc.name.toLowerCase().includes(searchQuery.toLowerCase()) : true,
   );
 
-  const handleFile = (file: File | null) => {
+  const handleFile = (file: File | FileList | null) => {
     if (!file) return;
+    if (file instanceof FileList) {
+      if (file.length > 0) onUpload(file);
+      return;
+    }
     const extension = file.name.split(".").pop()?.toLowerCase();
-    if (extension && ["pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "html", "htm", "xlsx", "csv"].includes(extension)) {
+    if (extension && ["pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "html", "htm", "xlsx", "csv", "jpg", "jpeg", "png", "bmp", "tiff"].includes(extension)) {
       onUpload(file);
     } else {
-      toast.error(`暂不支持 .${extension ?? "?"} 格式，支持 PDF、DOCX、PPTX、TXT、Markdown、HTML、Excel、CSV`);
+      toast.error(`暂不支持 .${extension ?? "?"} 格式，支持 PDF、DOCX、PPTX、TXT、图片等`);
     }
   };
 
@@ -199,14 +203,19 @@ export function AppSidebar({
                 ref={fileRef}
                 type="file"
                 aria-label="上传学习资料"
-                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                multiple
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,.jpg,.jpeg,.png,.bmp,.tiff,image/*,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                 onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                  handleFile(e.target.files?.[0] ?? null);
+                  const files = e.target.files;
+                  if (files && files.length > 0) handleFile(files.length === 1 ? files[0] : files);
                   if (fileRef.current) fileRef.current.value = "";
                 }}
                 className="hidden"
               />
             </div>
+            <p className="mt-1.5 text-center text-[9px] text-muted-foreground/40 leading-tight">
+              PDF / DOCX / PPTX / TXT / 图片 / Markdown / HTML / Excel / CSV
+            </p>
           </div>
 
           {/* Search */}

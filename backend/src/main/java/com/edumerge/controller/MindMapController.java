@@ -41,9 +41,11 @@ public class MindMapController {
 
     @PostMapping("/generate")
     public Result<Map<String, Object>> generateMindMap(@RequestParam Long docId,
-                                                       @RequestParam(required = false) String sectionContext) {
+                                                       @RequestParam(required = false) String sectionContext,
+                                                       @RequestParam(required = false) Integer startChunk,
+                                                       @RequestParam(required = false) Integer endChunk) {
         documentService.verifyOwnership(docId);
-        return Result.success(mindMapService.generate(docId, sectionContext));
+        return Result.success(mindMapService.generate(docId, sectionContext, startChunk, endChunk));
     }
 
     @DeleteMapping("/{deckId}")

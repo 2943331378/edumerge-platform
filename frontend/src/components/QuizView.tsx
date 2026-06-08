@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil, Download } from "lucide-react";
+import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { DeckRecord, QuizItem, QuizAttemptRecord, WeaknessItem } from "@/lib/api";
@@ -30,8 +30,13 @@ interface Props {
   embedded?: boolean;
   /** 大纲选中的章节上下文（含 ID 和标题） */
   sectionContext?: string;
+  /** 大纲选中章节的 chunk 范围 */
+  startChunk?: number;
+  endChunk?: number;
   /** 大纲触发生成信号，counter 变化时自动触发 */
   generateTrigger?: { type: string; counter: number };
+  generating?: boolean;
+  onGeneratingChange?: (v: boolean) => void;
 }
 
 function isNewDeck(createdAt: string): boolean {
@@ -45,7 +50,7 @@ function isAnswerMatch(input: string, answer: string): boolean {
   return normalize(input) === normalize(answer);
 }
 
-export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, generateTrigger }: Props) {
+export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
   const [view, setView] = useState<"decks" | "quiz">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
@@ -128,6 +133,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
       abortRef.current.abort();
       abortRef.current = null;
       setLoading(false);
+      onGeneratingChange?.(false);
       setMindMapGenerating(false);
       toast.info("已取消生成");
     }
@@ -209,12 +215,13 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
 
   /** 生成后自动加载列表并进入最新 Deck */
   const handleGenerate = async () => {
-    if (!sessionId) return;
+    if (!sessionId || generating) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
+    onGeneratingChange?.(true);
     try {
-      await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined);
+      await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined, startChunk, endChunk);
       const fresh = await listDecks(docId!, "QUIZ");
       setDecks(fresh);
       onGenerated?.();
@@ -229,15 +236,18 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     }
     abortRef.current = null;
     setLoading(false);
+    onGeneratingChange?.(false);
   };
 
   // 从大纲页面跳转过来时自动触发生成
-  const triggerRef = useRef(generateTrigger?.counter ?? 0);
-  useEffect(() => { triggerRef.current = generateTrigger?.counter ?? 0; }, [docId]);
+  const prevCounterRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (generateTrigger && generateTrigger.counter > triggerRef.current && generateTrigger.type === "quiz") {
-      triggerRef.current = generateTrigger.counter;
-      requestAnimationFrame(() => handleGenerate());
+    const counter = generateTrigger?.counter;
+    if (counter !== undefined && counter !== prevCounterRef.current && generateTrigger?.type === "quiz") {
+      prevCounterRef.current = counter;
+      handleGenerate();
+    } else {
+      prevCounterRef.current = counter;
     }
   }, [generateTrigger?.counter]);
 
@@ -362,11 +372,14 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                 </p>
               </div>
               {loading ? (
-                <div className="flex items-center gap-2">
-                  <RotateCw className="h-4 w-4 animate-spin text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">AI 正在生成...</span>
+                <div className="flex flex-col items-center gap-4">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-medium text-foreground/80">AI 正在生成测试题...</p>
+                    <p className="text-xs text-muted-foreground/50">正在解析文档，提取核心概念</p>
+                  </div>
                   <Button variant="outline" size="sm" className="rounded-xl h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
-                    <XCircle className="h-3.5 w-3.5 mr-1" />取消
+                    <XCircle className="h-3.5 w-3.5 mr-1" />取消生成
                   </Button>
                 </div>
               ) : (

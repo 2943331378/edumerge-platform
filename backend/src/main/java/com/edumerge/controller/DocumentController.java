@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -32,13 +33,24 @@ public class DocumentController {
     }
 
     @PostMapping("/upload")
-    public Result<Map<String, Object>> upload(@RequestParam("file") MultipartFile file) throws IOException {
-        if (file.isEmpty()) {
+    public Result<?> upload(@RequestParam("file") MultipartFile[] files) throws IOException {
+        if (files.length == 0) {
             return Result.fail("文件不能为空");
         }
-        Map<String, Object> data = documentService.upload(
-                file.getOriginalFilename(), file.getSize(), file.getInputStream());
-        return Result.success("上传成功，正在异步处理", data);
+        if (files.length == 1) {
+            MultipartFile file = files[0];
+            if (file.isEmpty()) return Result.fail("文件不能为空");
+            Map<String, Object> data = documentService.upload(
+                    file.getOriginalFilename(), file.getSize(), file.getInputStream());
+            return Result.success("上传成功，正在异步处理", data);
+        }
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (MultipartFile file : files) {
+            if (file.isEmpty()) continue;
+            results.add(documentService.upload(
+                    file.getOriginalFilename(), file.getSize(), file.getInputStream()));
+        }
+        return Result.success("上传成功，正在异步处理", results);
     }
 
     @GetMapping

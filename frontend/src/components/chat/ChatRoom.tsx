@@ -21,7 +21,6 @@ import { ChatInput } from "./ChatInput";
 import { chatStream, chatHistory, listConversations, deleteConversation, renameConversation } from "@/lib/api";
 import { ArrowDown, Plus, Trash2, MessageSquare, Sparkles } from "lucide-react";
 
-const CONVOS_KEY = "chat_conversations";
 const ACTIVE_KEY = "active_chat_id";
 
 interface Conversation {
@@ -42,18 +41,6 @@ interface ChatRoomProps {
   contextHint: string | null;
 }
 
-/** 读写 localStorage 中的会话列表 */
-function loadConversations(): Conversation[] {
-  try {
-    const raw = localStorage.getItem(CONVOS_KEY);
-    return raw ? (JSON.parse(raw) as Conversation[]) : [];
-  } catch { return []; }
-}
-
-function saveConversations(list: Conversation[]) {
-  localStorage.setItem(CONVOS_KEY, JSON.stringify(list));
-}
-
 export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoomProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -72,7 +59,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
 
-  // 初始化 + docId 变化时加载该文档的会话列表
+  // 初始化 + docId 变化时从后端加载该文档的会话列表
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -80,18 +67,16 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
         const remote = await listConversations(docId ?? undefined);
         if (cancelled) return;
         if (remote.length > 0) {
-          const remoteList: Conversation[] = remote.map((r) => ({
+          const list: Conversation[] = remote.map((r) => ({
             id: r.sessionId,
             title: r.title,
             createdAt: r.createdAt,
           }));
-          // 合并：保留本地存在但远程不存在的新建会话（用户创建但未发消息）
-          const localList = loadConversations();
-          const remoteIds = new Set(remoteList.map((r) => r.id));
-          const merged = [...remoteList, ...localList.filter((l) => !remoteIds.has(l.id))];
-          saveConversations(merged);
-          setConversations(merged);
-          setActiveId(merged[0].id);
+          setConversations(list);
+          // 恢复上次活跃会话，或选第一个
+          const saved = localStorage.getItem(ACTIVE_KEY);
+          const target = saved && list.some(c => c.id === saved) ? saved : list[0].id;
+          setActiveId(target);
           setMessages([]);
           return;
         }
@@ -132,45 +117,34 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     return () => { cancelled = true; };
   }, [activeId]);
 
-  const createConversation = (list?: Conversation[]) => {
-    const convs = list ?? loadConversations();
+  const handleNewConv = () => {
     const c: Conversation = {
       id: randomId(),
       title: "新对话",
       createdAt: new Date().toISOString(),
     };
-    convs.unshift(c);
-    saveConversations(convs);
-    return c.id;
-  };
-
-  const handleNewConv = () => {
-    const convs = loadConversations();
-    const id = createConversation(convs);
-    setConversations([...convs]);
-    setActiveId(id);
+    setConversations((prev) => [c, ...prev]);
+    setActiveId(c.id);
     setMessages([]);
   };
 
   const handleDeleteConv = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    // 同步删除后端
     deleteConversation(id).catch(() => {});
-    const convs = loadConversations().filter((c) => c.id !== id);
-    saveConversations(convs);
-    setConversations(convs);
-
-    if (id === activeId) {
-      if (convs.length > 0) {
-        setActiveId(convs[0].id);
-      } else {
-        const newId = randomId();
-        const c: Conversation = { id: newId, title: "新对话", createdAt: new Date().toISOString() };
-        saveConversations([c]);
-        setConversations([c]);
-        setActiveId(newId);
+    setConversations((prev) => {
+      const remaining = prev.filter((c) => c.id !== id);
+      if (id === activeId) {
+        if (remaining.length > 0) {
+          setActiveId(remaining[0].id);
+        } else {
+          const newId = randomId();
+          const c: Conversation = { id: newId, title: "新对话", createdAt: new Date().toISOString() };
+          setActiveId(newId);
+          return [c];
+        }
       }
-    }
+      return remaining;
+    });
   };
 
   const handleSelectConv = (id: string) => {
@@ -214,13 +188,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     if (!titledRef.current) {
       titledRef.current = true;
       const title = text.length > 40 ? text.slice(0, 40) + "..." : text;
-      const convs = loadConversations();
-      const idx = convs.findIndex((c) => c.id === activeId);
-      if (idx >= 0) {
-        convs[idx].title = title;
-        saveConversations(convs);
-        setConversations([...convs]);
-      }
+      setConversations((prev) => prev.map((c) => c.id === activeId ? { ...c, title } : c));
     }
 
     const userMsg: Message = { id: randomId(), role: "user", content: text };
@@ -339,7 +307,6 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
             try {
               await renameConversation(c.id, title);
               setConversations((prev) => prev.map((x) => x.id === c.id ? { ...x, title } : x));
-              saveConversations(loadConversations().map((x) => x.id === c.id ? { ...x, title } : x));
             } catch { toast.error("重命名失败"); }
             setRenamingId(null);
           };
