@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Highlight, themes } from "prism-react-renderer";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,7 @@ export interface MessageData {
   chatHistoryId?: number;
 }
 
-/** 代码块组件 — 带复制按钮 */
+/** 代码块组件 — 带语法高亮 + 复制按钮 */
 function CodeBlock({ code, language }: { code: string; language?: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -37,6 +38,9 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [code]);
+
+  // prism-react-renderer 需要纯语言名，去掉常见前缀
+  const lang = (language || "").replace(/^(language-|lang-)/, "") || "text";
 
   return (
     <div className="group relative my-2">
@@ -57,9 +61,19 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
           )}
         </Button>
       </div>
-      <pre className="overflow-x-auto rounded-b-xl bg-zinc-950 dark:bg-zinc-900 px-4 py-3 text-xs text-zinc-100">
-        <code>{code}</code>
-      </pre>
+      <Highlight theme={themes.nightOwl} code={code.replace(/\n$/, "")} language={lang}>
+        {({ tokens, getLineProps, getTokenProps }) => (
+          <pre className="overflow-x-auto rounded-b-xl bg-zinc-950 dark:bg-zinc-900 px-4 py-3 text-xs">
+            {tokens.map((line, i) => (
+              <div key={i} {...getLineProps({ line })}>
+                {line.map((token, key) => (
+                  <span key={key} {...getTokenProps({ token })} />
+                ))}
+              </div>
+            ))}
+          </pre>
+        )}
+      </Highlight>
     </div>
   );
 }
