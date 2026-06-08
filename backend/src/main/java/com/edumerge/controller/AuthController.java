@@ -38,15 +38,7 @@ public class AuthController {
 
         User user = userService.register(req.getUsername(), req.getEmail(),
                 req.getPassword(), req.getDisplayName());
-        String token = jwtUtils.generateToken(user.getId(), user.getUsername());
-
-        LoginResponse resp = LoginResponse.builder()
-                .token(token)
-                .tokenType("Bearer")
-                .expiresIn(86400000L)
-                .user(toResponse(user))
-                .build();
-        return Result.success("注册成功", resp);
+        return Result.success("注册成功", buildLoginResponse(user));
     }
 
     @PostMapping("/login")
@@ -55,16 +47,39 @@ public class AuthController {
         if (user == null) {
             return Result.fail(ResultCode.INVALID_CREDENTIALS.getCode(), "用户名或密码错误");
         }
+        log.info("用户登录成功: id={}, username={}", user.getId(), user.getUsername());
+        return Result.success("登录成功", buildLoginResponse(user));
+    }
 
-        String token = jwtUtils.generateToken(user.getId(), user.getUsername());
-        LoginResponse resp = LoginResponse.builder()
-                .token(token)
+    /** 刷新 access token — 用 refresh token 换取新的 access token */
+    @PostMapping("/refresh")
+    public Result<LoginResponse> refresh(@RequestBody java.util.Map<String, String> body) {
+        String refreshToken = body.get("refreshToken");
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return Result.fail(ResultCode.INVALID_CREDENTIALS.getCode(), "缺少 refreshToken");
+        }
+        if (!jwtUtils.validateToken(refreshToken) || !jwtUtils.isRefreshToken(refreshToken)) {
+            return Result.fail(ResultCode.INVALID_CREDENTIALS.getCode(), "refreshToken 无效或已过期");
+        }
+
+        Long userId = jwtUtils.getUserId(refreshToken);
+        User user = userService.getById(userId);
+        if (user == null) {
+            return Result.fail(ResultCode.USER_NOT_EXIST.getCode(), "用户不存在");
+        }
+
+        log.info("Token 刷新成功: userId={}", userId);
+        return Result.success("Token 刷新成功", buildLoginResponse(user));
+    }
+
+    private LoginResponse buildLoginResponse(User user) {
+        return LoginResponse.builder()
+                .token(jwtUtils.generateToken(user.getId(), user.getUsername()))
+                .refreshToken(jwtUtils.generateRefreshToken(user.getId(), user.getUsername()))
                 .tokenType("Bearer")
-                .expiresIn(86400000L)
+                .expiresIn(jwtUtils.getExpirationMs() / 1000)
                 .user(toResponse(user))
                 .build();
-        log.info("用户登录成功: id={}, username={}", user.getId(), user.getUsername());
-        return Result.success("登录成功", resp);
     }
 
     @GetMapping("/profile")

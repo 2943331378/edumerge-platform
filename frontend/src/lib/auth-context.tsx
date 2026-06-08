@@ -21,6 +21,7 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 const TOKEN_KEY = "edumerge_token";
+const REFRESH_KEY = "edumerge_refresh_token";
 const USER_KEY = "edumerge_user";
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
@@ -53,9 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  const saveAuth = (t: string, u: UserInfo) => {
+  const saveAuth = (t: string, u: UserInfo, rt?: string) => {
     localStorage.setItem(TOKEN_KEY, t);
     localStorage.setItem(USER_KEY, JSON.stringify(u));
+    if (rt) localStorage.setItem(REFRESH_KEY, rt);
     setCookie(TOKEN_KEY, t);
     setToken(t);
     setUser(u);
@@ -69,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     const json = await res.json();
     if (json.code !== 0) throw new Error(json.message ?? "登录失败");
-    saveAuth(json.data.token, json.data.user);
+    saveAuth(json.data.token, json.data.user, json.data.refreshToken);
   }, []);
 
   const register = useCallback(async (username: string, email: string, password: string, displayName: string) => {
@@ -80,11 +82,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     const json = await res.json();
     if (json.code !== 0) throw new Error(json.message ?? "注册失败");
-    saveAuth(json.data.token, json.data.user);
+    saveAuth(json.data.token, json.data.user, json.data.refreshToken);
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(USER_KEY);
     deleteCookie(TOKEN_KEY);
     setToken(null);

@@ -13,21 +13,73 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+/** 尝试用 refresh token 换取新的 access token，成功返回 true */
+let refreshPromise: Promise<boolean> | null = null;
+async function tryRefreshToken(): Promise<boolean> {
+  // 防止并发刷新：多个 401 同时触发时只发一次 refresh 请求
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      const rt = localStorage.getItem("edumerge_refresh_token");
+      if (!rt) return false;
+      const res = await fetch(`${BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: rt }),
+      });
+      const json = await res.json().catch(() => null);
+      if (json?.code !== 0 || !json?.data?.token) return false;
+      localStorage.setItem("edumerge_token", json.data.token);
+      if (json.data.refreshToken) localStorage.setItem("edumerge_refresh_token", json.data.refreshToken);
+      localStorage.setItem("edumerge_user", JSON.stringify(json.data.user));
+      document.cookie = `edumerge_token=${encodeURIComponent(json.data.token)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+function clearAuthAndRedirect() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("edumerge_token");
+  localStorage.removeItem("edumerge_refresh_token");
+  localStorage.removeItem("edumerge_user");
+  document.cookie = "edumerge_token=; path=/; max-age=0";
+  window.location.href = "/login";
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
     headers: getAuthHeaders(),
     ...options,
   });
+  if (res.status === 401) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      // 用新 token 重试原请求
+      const retryRes = await fetch(`${BASE}${url}`, {
+        headers: getAuthHeaders(),
+        ...options,
+      });
+      const retryJson = await retryRes.json().catch(() => null);
+      if (!retryRes.ok) {
+        clearAuthAndRedirect();
+        throw new Error(retryJson?.message ?? `HTTP ${retryRes.status}`);
+      }
+      if (retryJson?.code !== 0) throw new Error(retryJson?.message ?? "请求失败");
+      return retryJson.data as T;
+    }
+    clearAuthAndRedirect();
+    throw new Error("登录已过期，请重新登录");
+  }
   const json = await res.json().catch(() => null);
   if (!res.ok) {
-    if (res.status === 401) {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("edumerge_token");
-        localStorage.removeItem("edumerge_user");
-        document.cookie = "edumerge_token=; path=/; max-age=0";
-        window.location.href = "/login";
-      }
-    }
     const msg = json?.message ?? `HTTP ${res.status}`;
     throw new Error(msg);
   }
@@ -180,11 +232,9 @@ export function uploadDocument(
     });
 
     xhr.addEventListener("load", () => {
-      if (xhr.status === 401 && typeof window !== "undefined") {
-        localStorage.removeItem("edumerge_token");
-        localStorage.removeItem("edumerge_user");
-        document.cookie = "edumerge_token=; path=/; max-age=0";
-        window.location.href = "/login";
+      if (xhr.status === 401) {
+        // XHR 不方便做 refresh 重试，直接走清理流程
+        clearAuthAndRedirect();
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
@@ -238,11 +288,20 @@ export async function chatStream(message: string, documentId?: string, sessionId
     signal,
   });
   if (!res.ok) {
-    if (res.status === 401 && typeof window !== "undefined") {
-      localStorage.removeItem("edumerge_token");
-      localStorage.removeItem("edumerge_user");
-      document.cookie = "edumerge_token=; path=/; max-age=0";
-      window.location.href = "/login";
+    if (res.status === 401) {
+      const refreshed = await tryRefreshToken();
+      if (refreshed) {
+        const retryRes = await fetch(`${BASE}/chat/stream`, {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(body),
+          signal,
+        });
+        if (retryRes.ok) return retryRes.body!;
+        clearAuthAndRedirect();
+        throw new Error(`HTTP ${retryRes.status}`);
+      }
+      clearAuthAndRedirect();
     }
     throw new Error(`HTTP ${res.status}`);
   }
