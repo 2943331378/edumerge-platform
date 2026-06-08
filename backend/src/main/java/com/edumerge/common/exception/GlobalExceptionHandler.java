@@ -6,9 +6,11 @@ import com.edumerge.common.result.ResultCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -88,7 +90,7 @@ public class GlobalExceptionHandler {
 
         log.warn("参数验证异常: {}", errorMessage);
         return ResponseEntity
-                .status(HttpStatus.OK)
+                .status(HttpStatus.BAD_REQUEST)
                 .body(Result.fail(ResultCode.INVALID_PARAMETER.getCode(), errorMessage));
     }
 
@@ -102,8 +104,34 @@ public class GlobalExceptionHandler {
                 e.getName(), e.getRequiredType().getSimpleName());
         log.warn(errorMessage);
         return ResponseEntity
-                .status(HttpStatus.OK)
+                .status(HttpStatus.BAD_REQUEST)
                 .body(Result.fail(ResultCode.INVALID_PARAMETER.getCode(), errorMessage));
+    }
+
+    /**
+     * 处理请求体不可读异常 (HttpMessageNotReadableException)
+     * JSON 格式错误、枚举值不合法等
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Result<?>> handleHttpMessageNotReadableException(HttpMessageNotReadableException e) {
+        log.warn("请求体不可读: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(Result.fail(ResultCode.INVALID_REQUEST.getCode(), "请求体格式错误，请检查参数"));
+    }
+
+    /**
+     * 处理请求方法不支持异常 (HttpRequestMethodNotSupportedException)
+     * 如 GET 请求访问了仅支持 POST 的端点
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Result<?>> handleHttpRequestMethodNotSupportedException(HttpRequestMethodNotSupportedException e) {
+        String errorMessage = String.format("不支持的请求方法: %s，支持: %s",
+                e.getMethod(), e.getSupportedHttpMethods());
+        log.warn(errorMessage);
+        return ResponseEntity
+                .status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(Result.fail(405, errorMessage));
     }
 
     /**
@@ -127,8 +155,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<?>> handleIllegalArgumentException(IllegalArgumentException e) {
         log.warn("非法参数异常: {}", e.getMessage());
         return ResponseEntity
-                .status(HttpStatus.OK)
-                .body(Result.fail(ResultCode.INVALID_PARAMETER.getCode(), 
+                .status(HttpStatus.BAD_REQUEST)
+                .body(Result.fail(ResultCode.INVALID_PARAMETER.getCode(),
                         e.getMessage() != null ? e.getMessage() : "非法参数"));
     }
 
