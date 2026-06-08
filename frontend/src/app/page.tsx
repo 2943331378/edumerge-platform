@@ -17,6 +17,7 @@ import { KnowledgeGraphPage } from "@/components/KnowledgeGraphPage";
 import { DocumentOutlineView } from "@/components/DocumentOutlineView";
 import { StatsDashboard } from "@/components/StatsDashboard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { TodayTasksCard } from "@/components/TodayTasksCard";
 import { ShortcutsHelp, ShortcutsButton } from "@/components/ShortcutsHelp";
 import { OnboardingTour, isOnboardingDone } from "@/components/OnboardingTour";
 import { StepHint, isStepHintDismissed, dismissStepHint } from "@/components/StepHint";
@@ -661,6 +662,18 @@ export default function HomePage() {
             />
           )}
           <ErrorBoundary>
+          {/* Today's Tasks card — shown above step content */}
+          {!showKnowledgeGraph && (
+            <TodayTasksCard
+              activeSessionExists={sessions.length > 0}
+              onGoFlashcard={(docId) => {
+                const s = sessions.find((x) => x.docId === docId);
+                if (s) setActiveSession(s);
+                setCurrentStep(4);
+              }}
+              onGoQuiz={() => setCurrentStep(5)}
+            />
+          )}
           {showKnowledgeGraph ? (
             <KnowledgeGraphPage
               sessions={sessions}
