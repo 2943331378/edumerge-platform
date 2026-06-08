@@ -16,6 +16,7 @@ import { FlowNoteView } from "@/components/FlowNoteView";
 import { KnowledgeGraphPage } from "@/components/KnowledgeGraphPage";
 import { DocumentOutlineView } from "@/components/DocumentOutlineView";
 import { StatsDashboard } from "@/components/StatsDashboard";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OnboardingTour, isOnboardingDone } from "@/components/OnboardingTour";
 import { StepHint, isStepHintDismissed, dismissStepHint } from "@/components/StepHint";
 import { useAuth } from "@/lib/auth-context";
@@ -652,6 +653,7 @@ export default function HomePage() {
               onDismiss={dismissHint}
             />
           )}
+          <ErrorBoundary>
           {showKnowledgeGraph ? (
             <KnowledgeGraphPage
               sessions={sessions}
@@ -665,6 +667,7 @@ export default function HomePage() {
               }}
             />
           ) : renderStep()}
+          </ErrorBoundary>
           {/* Floating Ask AI button — visible in steps 2-6 */}
           {!showKnowledgeGraph && currentStep >= 2 && (
             <button
