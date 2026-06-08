@@ -25,6 +25,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
 
   // ═══ 折叠态 — 紧凑药丸 ═══
   if (collapsed) {
+    const completedCount = steps.filter((s) => completedSteps.has(s.id)).length;
     return (
       <div className="flex items-center justify-center px-3 py-2">
         <button
@@ -39,8 +40,24 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
           <span className="text-[11px] font-medium text-foreground/70 group-hover:text-foreground transition-colors">
             {currentStepDef?.label ?? ""}
           </span>
-          <span className="text-[10px] text-muted-foreground/40 tabular-nums">
-            {currentStep}/{steps.length}
+          {/* Progress dots */}
+          <span className="inline-flex items-center gap-0.5">
+            {steps.map((s) => (
+              <span
+                key={s.id}
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full transition-colors",
+                  completedSteps.has(s.id)
+                    ? "bg-lime-500"
+                    : s.id === currentStep
+                      ? "bg-primary"
+                      : "bg-muted-foreground/20",
+                )}
+              />
+            ))}
+          </span>
+          <span className="text-[10px] text-muted-foreground/50 tabular-nums">
+            {completedCount}/{steps.length}
           </span>
           <ChevronDown className="h-3 w-3 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors" />
         </button>
