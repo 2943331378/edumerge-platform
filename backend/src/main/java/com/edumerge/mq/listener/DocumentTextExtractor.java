@@ -16,6 +16,7 @@ import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFSlide;
 import org.apache.poi.xslf.usermodel.XSLFTextShape;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.pdfbox.Loader;
@@ -47,6 +48,11 @@ import java.util.concurrent.Semaphore;
 @Slf4j
 @Component
 public class DocumentTextExtractor {
+
+    static {
+        // 放宽 POI 的 Zip Bomb 检测阈值 — 教学 PPT 常含大量高清图片导致压缩比过低
+        ZipSecureFile.setMinInflateRatio(0.001);
+    }
 
     private final ChatModel visionChatModel;
     private final ExecutorService documentTaskExecutor;
