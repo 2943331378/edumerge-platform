@@ -18,9 +18,12 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     headers: getAuthHeaders(),
     ...options,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.code !== 0) throw new Error(json.message ?? "请求失败");
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = json?.message ?? `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  if (json?.code !== 0) throw new Error(json?.message ?? "请求失败");
   return json.data as T;
 }
 

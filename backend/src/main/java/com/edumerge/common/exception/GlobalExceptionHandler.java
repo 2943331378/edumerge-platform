@@ -102,7 +102,7 @@ public class GlobalExceptionHandler {
         String errorMessage = String.format("请求的资源不存在: %s %s", e.getHttpMethod(), e.getRequestURL());
         log.warn(errorMessage);
         return ResponseEntity
-                .status(HttpStatus.OK)
+                .status(HttpStatus.NOT_FOUND)
                 .body(Result.fail(ResultCode.NOT_FOUND.getCode(), errorMessage));
     }
 
@@ -127,7 +127,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<?>> handleNullPointerException(NullPointerException e) {
         log.error("空指针异常", e);
         return ResponseEntity
-                .status(HttpStatus.OK)
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Result.error("系统异常: 空指针"));
     }
 
@@ -139,7 +139,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<?>> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {
         log.warn("文件上传超限: {}", e.getMessage());
         return ResponseEntity
-                .status(HttpStatus.OK)
+                .status(HttpStatus.PAYLOAD_TOO_LARGE)
                 .body(Result.fail("文件大小超过限制（最大 50MB），请压缩后重试"));
     }
 
@@ -152,7 +152,7 @@ public class GlobalExceptionHandler {
         log.error("未知异常", e);
         String message = e.getMessage() != null ? e.getMessage() : "系统异常，请稍后重试";
         return ResponseEntity
-                .status(HttpStatus.OK)
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Result.error(message));
     }
 }
