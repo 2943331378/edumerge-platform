@@ -20,6 +20,14 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   const json = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("edumerge_token");
+        localStorage.removeItem("edumerge_user");
+        document.cookie = "edumerge_token=; path=/; max-age=0";
+        window.location.href = "/login";
+      }
+    }
     const msg = json?.message ?? `HTTP ${res.status}`;
     throw new Error(msg);
   }
@@ -172,6 +180,12 @@ export function uploadDocument(
     });
 
     xhr.addEventListener("load", () => {
+      if (xhr.status === 401 && typeof window !== "undefined") {
+        localStorage.removeItem("edumerge_token");
+        localStorage.removeItem("edumerge_user");
+        document.cookie = "edumerge_token=; path=/; max-age=0";
+        window.location.href = "/login";
+      }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const json = JSON.parse(xhr.responseText);
@@ -223,7 +237,15 @@ export async function chatStream(message: string, documentId?: string, sessionId
     body: JSON.stringify(body),
     signal,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 401 && typeof window !== "undefined") {
+      localStorage.removeItem("edumerge_token");
+      localStorage.removeItem("edumerge_user");
+      document.cookie = "edumerge_token=; path=/; max-age=0";
+      window.location.href = "/login";
+    }
+    throw new Error(`HTTP ${res.status}`);
+  }
   return res.body!;
 }
 
