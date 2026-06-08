@@ -23,7 +23,7 @@ import {
   BookOpen, FileText, Presentation, Wrench,
   ChevronRight, ChevronDown, Check, Minus, Pencil,
   RotateCw, Sparkles, Layers, GitFork, HelpCircle, NotebookText,
-  Loader2, RefreshCw, Download,
+  Loader2, RefreshCw, Download, MoreHorizontal,
 } from "lucide-react";
 
 // ═══════ 文档类型配置 ═══════
@@ -107,6 +107,7 @@ export function DocumentOutlineView({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const handleExportMarkdown = () => {
     if (!outline) return;
@@ -195,6 +196,19 @@ export function DocumentOutlineView({
       onContextChange?.(`用户在查看文档大纲（${outline.outline.docTypeLabel}，${outline.outline.sections.length} 章）`);
     }
   }, [outline, onContextChange]);
+
+  // 点击外部关闭快速生成菜单
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handler = (e: PointerEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-quick-gen-menu]")) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [openMenuId]);
 
   // 统计选中数
   const { totalLeaves, checkedLeaves } = useMemo(() => {
@@ -462,6 +476,9 @@ export function DocumentOutlineView({
               onEditTitleChange={setEditTitle}
               onCancelEdit={() => setEditingId(null)}
               animDelay={idx * 60}
+              onGenerate={onGenerate}
+              openMenuId={openMenuId}
+              onOpenMenuChange={setOpenMenuId}
             />
           ))}
         </div>
@@ -536,6 +553,11 @@ interface NodeProps {
   onEditTitleChange: (title: string) => void;
   onCancelEdit: () => void;
   animDelay: number;
+  /** 快速生成回调 */
+  onGenerate?: (type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string, startChunk?: number, endChunk?: number) => void;
+  /** 当前打开的快速生成菜单节点 ID */
+  openMenuId: string | null;
+  onOpenMenuChange: (id: string | null) => void;
 }
 
 function OutlineNode({
@@ -552,6 +574,9 @@ function OutlineNode({
   onEditTitleChange,
   onCancelEdit,
   animDelay,
+  onGenerate,
+  openMenuId,
+  onOpenMenuChange,
 }: NodeProps) {
   const hasChildren = (node.children ?? []).length > 0;
   const isExpanded = expanded.has(node.id);
@@ -584,13 +609,13 @@ function OutlineNode({
 
   return (
     <div
-      className="animate-fade-in-up"
+      className="relative animate-fade-in-up"
       style={{ animationDelay: `${animDelay}ms` }}
     >
-      {/* 节点行 */}
+      {/* 节点行 — 移动端增加纵向内边距以提升触摸体验 */}
       <div
         className={cn(
-          "group flex items-center gap-2 py-1.5 px-2 rounded-lg transition-all duration-200",
+          "group flex items-center gap-2 py-1.5 max-md:py-2.5 px-2 rounded-lg transition-all duration-200",
           "hover:bg-muted/40",
           depthPadding[depth] ?? "pl-12",
         )}
@@ -677,6 +702,70 @@ function OutlineNode({
           </button>
         )}
 
+        {/* 快速生成按钮 — 触摸设备常驻可见，桌面端 hover 显示 */}
+        {onGenerate && !isEditing && (
+          <div className="relative shrink-0" data-quick-gen-menu>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenMenuChange(openMenuId === node.id ? null : node.id);
+              }}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg transition-all",
+                "text-muted-foreground/40 hover:text-foreground hover:bg-muted",
+                /* 移动端/触摸设备常驻，桌面端 hover 显示 */
+                "max-md:opacity-60 md:opacity-0 md:group-hover:opacity-60 md:hover:!opacity-100",
+                openMenuId === node.id && "!opacity-100 bg-muted text-foreground",
+              )}
+              title="快速生成"
+              aria-haspopup="menu"
+              aria-expanded={openMenuId === node.id}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+
+            {/* 下拉菜单 */}
+            {openMenuId === node.id && (
+              <div
+                data-quick-gen-menu
+                role="menu"
+                className={cn(
+                  "absolute right-0 z-50 mt-1 min-w-[160px] rounded-xl border bg-popover p-1.5 shadow-lg",
+                  /* 深层级节点菜单向上展开，避免溢出视口 */
+                  depth >= 2 ? "bottom-full mb-1" : "top-full",
+                )}
+              >
+                <div className="px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground/50 truncate border-b mb-1">
+                  {node.title}
+                </div>
+                {[
+                  { type: "flashcard" as const, icon: Layers, label: "生成此章闪卡", color: "text-violet-500" },
+                  { type: "quiz" as const, icon: HelpCircle, label: "生成此章测验", color: "text-rose-500" },
+                  { type: "note" as const, icon: NotebookText, label: "生成此章笔记", color: "text-emerald-500" },
+                  { type: "mindmap" as const, icon: GitFork, label: "生成此章导图", color: "text-blue-500" },
+                ].map((item) => (
+                  <button
+                    key={item.type}
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const sectionContext = `${node.id} ${node.title}`;
+                      onGenerate(item.type, sectionContext, node.startChunk, node.endChunk);
+                      onOpenMenuChange(null);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-xs hover:bg-accent active:bg-accent/80 transition-colors text-left min-h-[44px]"
+                  >
+                    <item.icon className={cn("h-4 w-4 shrink-0", item.color)} />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* chunk 范围标签 */}
         {node.startChunk != null && node.endChunk != null && (
           <span className="text-[9px] text-muted-foreground/25 font-mono shrink-0">
@@ -704,6 +793,9 @@ function OutlineNode({
               onEditTitleChange={onEditTitleChange}
               onCancelEdit={onCancelEdit}
               animDelay={i * 40}
+              onGenerate={onGenerate}
+              openMenuId={openMenuId}
+              onOpenMenuChange={onOpenMenuChange}
             />
           ))}
         </div>
