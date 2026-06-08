@@ -8,6 +8,7 @@ import com.edumerge.security.SecurityUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +51,7 @@ public class LearnerDashboardService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "dashboard", key = "T(com.edumerge.security.SecurityUtils).getCurrentUserId()")
     public LearnerDashboardResponse calculate() {
         Long userId = SecurityUtils.getCurrentUserId();
         LocalDateTime now = LocalDateTime.now();

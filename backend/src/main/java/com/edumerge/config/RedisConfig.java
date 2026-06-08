@@ -1,16 +1,18 @@
 package com.edumerge.config;
 
-import io.lettuce.core.RedisClient;
-import io.milvus.client.MilvusServiceClient;
-import io.milvus.common.clientenum.ConsistencyLevelEnum;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -18,6 +20,7 @@ import java.util.concurrent.TimeUnit;
  * 配置 Redis 连接池、序列化策略
  */
 @Configuration
+@EnableCaching
 public class RedisConfig {
 
     /**
@@ -45,6 +48,30 @@ public class RedisConfig {
 
         template.afterPropertiesSet();
         return template;
+    }
+
+    /**
+     * Spring Cache 管理器 — 基于 Redis，JSON 序列化
+     * 默认 TTL 30 分钟，dashboard 缓存 5 分钟
+     */
+    @Bean
+    public CacheManager cacheManager(RedisConnectionFactory factory) {
+        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer();
+        StringRedisSerializer stringSerializer = new StringRedisSerializer();
+
+        RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(stringSerializer))
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jsonSerializer))
+                .entryTtl(Duration.ofMinutes(30))
+                .disableCachingNullValues();
+
+        // dashboard 缓存 TTL = 5 分钟（学习数据变化频繁）
+        RedisCacheConfiguration dashboardConfig = defaultConfig.entryTtl(Duration.ofMinutes(5));
+
+        return RedisCacheManager.builder(factory)
+                .cacheDefaults(defaultConfig)
+                .withCacheConfiguration("dashboard", dashboardConfig)
+                .build();
     }
 
     /**

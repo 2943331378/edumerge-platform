@@ -10,6 +10,7 @@ import com.edumerge.mapper.FlashcardReviewLogMapper;
 import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -161,6 +162,7 @@ public class FlashcardService {
      * @return 更新后的卡片
      */
     @Transactional
+    @CacheEvict(cacheNames = "dashboard", key = "#userId")
     public Flashcard review(Long cardId, int quality, Long userId) {
         Flashcard card = getById(cardId);
         if (card == null) throw new IllegalArgumentException("卡片不存在: " + cardId);

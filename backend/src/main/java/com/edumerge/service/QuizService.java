@@ -11,6 +11,7 @@ import com.edumerge.security.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -164,6 +165,7 @@ public class QuizService {
 
     /** 保存答题记录 */
     @Transactional
+    @CacheEvict(cacheNames = "dashboard", key = "T(com.edumerge.security.SecurityUtils).getCurrentUserId()")
     public QuizAttempt saveAttempt(QuizAttempt attempt) {
         attempt.setUserId(SecurityUtils.getCurrentUserId());
         quizAttemptMapper.insert(attempt);
