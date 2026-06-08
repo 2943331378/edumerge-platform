@@ -13,6 +13,7 @@ import com.edumerge.mapper.DocumentMapper;
 import com.edumerge.mapper.SessionMapper;
 import com.edumerge.mq.producer.EmbeddingProducer;
 import com.edumerge.security.SecurityUtils;
+import com.edumerge.common.util.FileMagicValidator;
 import com.edumerge.store.MilvusEmbeddingStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -283,7 +286,7 @@ public class DocumentService {
      * @throws IOException              文件保存失败
      */
     @Transactional
-    public Map<String, Object> upload(String originalName, long fileSize, java.io.InputStream inputStream) {
+    public Map<String, Object> upload(String originalName, long fileSize, InputStream inputStream) {
         String extension = getSupportedExtension(originalName);
         if (extension == null) {
             throw new IllegalArgumentException("仅支持 PDF、Word、PPT、TXT、Markdown、HTML、Excel、CSV、图片(JPG/PNG/BMP/TIFF) 文件");
@@ -292,6 +295,19 @@ public class DocumentService {
         // 文件大小二次校验（multipart 配置之外的兜底）
         if (fileSize > 50L * 1024 * 1024) {
             throw new IllegalArgumentException("文件大小超过限制（最大 50MB），请压缩后重试");
+        }
+
+        // 魔数字节校验 — 防止伪造扩展名上传可执行文件等危险类型
+        BufferedInputStream bufferedIn = new BufferedInputStream(inputStream, 8192);
+        bufferedIn.mark(8);
+        try {
+            FileMagicValidator.validate(bufferedIn, extension);
+            bufferedIn.reset();
+        } catch (IllegalArgumentException e) {
+            throw e; // 校验失败直接抛出
+        } catch (IOException e) {
+            log.warn("文件魔数校验读取失败: {}", e.getMessage());
+            throw new IllegalArgumentException("文件内容读取失败，请重新上传");
         }
 
         // 清洗文件名
@@ -335,7 +351,7 @@ public class DocumentService {
 
         Path filePath = uploadPath.resolve(uuid + "." + extension);
         try {
-            Files.copy(inputStream, filePath);
+            Files.copy(bufferedIn, filePath);
         } catch (IOException e) {
             throw new RuntimeException("文件保存失败: " + e.getMessage(), e);
         }
