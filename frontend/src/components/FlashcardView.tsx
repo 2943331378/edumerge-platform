@@ -18,6 +18,7 @@ import type { DeckRecord, FlashcardItem } from "@/lib/api";
 import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards, toggleFlashcardImportant } from "@/lib/api";
 import { toast } from "sonner";
 import { saveProgress, loadProgress, clearProgress, flashcardProgressKey } from "@/lib/progressStorage";
+import { printFlashcards } from "@/lib/printExport";
 
 interface Props {
   docId: number | null;
@@ -105,6 +106,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [selfAssessed, setSelfAssessed] = useState(false);
   const [shuffled, setShuffled] = useState(false);
   const [dueCount, setDueCount] = useState(0);
+  const [showExportSheet, setShowExportSheet] = useState(false);
   const [showImportantOnly, setShowImportantOnly] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -148,6 +150,26 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     a.click();
     URL.revokeObjectURL(url);
     toast.success("已导出 CSV");
+  };
+
+  const handleExportPDF = async (layout: "side-by-side" | "anki") => {
+    let exportCards = cards;
+    if (exportCards.length === 0 && decks.length > 0) {
+      for (const deck of decks) {
+        try {
+          const d = await listFlashcardsByDeck(deck.id);
+          if (d.length > 0) { exportCards = d; break; }
+        } catch { /* skip */ }
+      }
+    }
+    if (exportCards.length === 0) { toast.info("暂无卡片可导出"); return; }
+    const title = currentDeck?.title ?? "学习卡片";
+    printFlashcards(
+      title,
+      exportCards.map((c) => ({ question: c.question, answer: c.answer, explanation: c.explanation ?? undefined })),
+      layout,
+    );
+    setShowExportSheet(false);
   };
 
   // 组件卸载时清理定时器
@@ -438,7 +460,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               {showImportantOnly ? "显示全部" : "仅看重要"}
             </Button>
             {(cards.length > 0 || decks.length > 0) && (
-              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8" onClick={handleExportCSV}>
+              <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8" onClick={() => setShowExportSheet(true)}>
                 <Download className="h-3.5 w-3.5" />
                 导出
               </Button>
@@ -548,6 +570,58 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
             </div>
           )}
         </div>
+
+        {/* Export format bottom sheet */}
+        {showExportSheet && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowExportSheet(false)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div
+              className="relative w-full max-w-md rounded-t-2xl bg-background p-4 pb-8 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/20" />
+              <p className="text-sm font-medium text-foreground/80 mb-3">选择导出格式</p>
+              <div className="space-y-2">
+                <button
+                  onClick={() => { handleExportCSV(); setShowExportSheet(false); }}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+                >
+                  <Download className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="font-medium text-foreground/85">导出 CSV</p>
+                    <p className="text-[11px] text-muted-foreground/60">表格格式，可导入 Anki 等工具</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => handleExportPDF("side-by-side")}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+                >
+                  <Download className="h-4 w-4 text-primary shrink-0" />
+                  <div>
+                    <p className="font-medium text-foreground/85">PDF &mdash; 左右对照</p>
+                    <p className="text-[11px] text-muted-foreground/60">每张卡片左侧问题、右侧答案</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => handleExportPDF("anki")}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+                >
+                  <Download className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <div>
+                    <p className="font-medium text-foreground/85">PDF &mdash; Anki 风格</p>
+                    <p className="text-[11px] text-muted-foreground/60">所有问题在前，答案在后（分页打印）</p>
+                  </div>
+                </button>
+              </div>
+              <button
+                onClick={() => setShowExportSheet(false)}
+                className="mt-3 w-full rounded-xl border border-border/60 py-2.5 text-sm text-muted-foreground hover:bg-muted/40 transition-colors min-h-[44px]"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -868,6 +942,9 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
             {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             开启新任务
           </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg" onClick={() => setShowExportSheet(true)} title="导出">
+            <Download className="h-4 w-4" />
+          </Button>
         </div>
 
         {/* SM-2 自评按钮 — 翻转后显示 */}
@@ -896,6 +973,58 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           </div>
         )}
       </div>
+
+      {/* Export format bottom sheet (cards view) */}
+      {showExportSheet && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowExportSheet(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative w-full max-w-md rounded-t-2xl bg-background p-4 pb-8 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/20" />
+            <p className="text-sm font-medium text-foreground/80 mb-3">选择导出格式</p>
+            <div className="space-y-2">
+              <button
+                onClick={() => { handleExportCSV(); setShowExportSheet(false); }}
+                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+              >
+                <Download className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="font-medium text-foreground/85">导出 CSV</p>
+                  <p className="text-[11px] text-muted-foreground/60">表格格式，可导入 Anki 等工具</p>
+                </div>
+              </button>
+              <button
+                onClick={() => handleExportPDF("side-by-side")}
+                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+              >
+                <Download className="h-4 w-4 text-primary shrink-0" />
+                <div>
+                  <p className="font-medium text-foreground/85">PDF &mdash; 左右对照</p>
+                  <p className="text-[11px] text-muted-foreground/60">每张卡片左侧问题、右侧答案</p>
+                </div>
+              </button>
+              <button
+                onClick={() => handleExportPDF("anki")}
+                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+              >
+                <Download className="h-4 w-4 text-emerald-500 shrink-0" />
+                <div>
+                  <p className="font-medium text-foreground/85">PDF &mdash; Anki 风格</p>
+                  <p className="text-[11px] text-muted-foreground/60">所有问题在前，答案在后（分页打印）</p>
+                </div>
+              </button>
+            </div>
+            <button
+              onClick={() => setShowExportSheet(false)}
+              className="mt-3 w-full rounded-xl border border-border/60 py-2.5 text-sm text-muted-foreground hover:bg-muted/40 transition-colors min-h-[44px]"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

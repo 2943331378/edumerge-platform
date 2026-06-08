@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import type { StudyNoteRecord } from "@/lib/api";
 import { generateStudyNote, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { printNote } from "@/lib/printExport";
 
 interface Props {
   docId: number | null;
@@ -88,6 +89,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showExportSheet, setShowExportSheet] = useState(false);
 
   const isReady = docStatus === "COMPLETED";
   const generatedAt = note?.createdAt ? new Date(note.createdAt).toLocaleString("zh-CN") : "";
@@ -196,6 +198,12 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     URL.revokeObjectURL(url);
   };
 
+  const handleExportPDF = () => {
+    if (!note?.content) return;
+    printNote(note.title || "学习笔记", note.content);
+    setShowExportSheet(false);
+  };
+
   const handleStartEdit = () => {
     if (!note?.content) return;
     setEditContent(note.content);
@@ -265,7 +273,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                 <Clipboard className="h-3.5 w-3.5" />
                 复制
               </Button>
-              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleDownload}>
+              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={() => setShowExportSheet(true)}>
                 <Download className="h-3.5 w-3.5" />
                 导出
               </Button>
@@ -399,6 +407,58 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
           </div>
         )}
       </div>
+
+      {/* Export format bottom sheet */}
+      {showExportSheet && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowExportSheet(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative w-full max-w-md rounded-t-2xl bg-background p-4 pb-8 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/20" />
+            <p className="text-sm font-medium text-foreground/80 mb-3">选择导出格式</p>
+            <div className="space-y-2">
+              <button
+                onClick={() => { handleCopy(); setShowExportSheet(false); }}
+                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+              >
+                <Clipboard className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="font-medium text-foreground/85">复制 Markdown</p>
+                  <p className="text-[11px] text-muted-foreground/60">复制纯文本到剪贴板</p>
+                </div>
+              </button>
+              <button
+                onClick={() => { handleDownload(); setShowExportSheet(false); }}
+                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+              >
+                <Download className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="font-medium text-foreground/85">导出 Markdown 文件</p>
+                  <p className="text-[11px] text-muted-foreground/60">下载 .md 文件</p>
+                </div>
+              </button>
+              <button
+                onClick={handleExportPDF}
+                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
+              >
+                <Download className="h-4 w-4 text-primary shrink-0" />
+                <div>
+                  <p className="font-medium text-foreground/85">导出为 PDF</p>
+                  <p className="text-[11px] text-muted-foreground/60">通过浏览器打印保存为 PDF</p>
+                </div>
+              </button>
+            </div>
+            <button
+              onClick={() => setShowExportSheet(false)}
+              className="mt-3 w-full rounded-xl border border-border/60 py-2.5 text-sm text-muted-foreground hover:bg-muted/40 transition-colors min-h-[44px]"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
