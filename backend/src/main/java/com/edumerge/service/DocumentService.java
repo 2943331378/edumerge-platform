@@ -355,14 +355,34 @@ public class DocumentService {
         create(doc);
 
         Session session = sessionService.create(userId, doc.getId(), doc.getTitle());
-        boolean sent = embeddingProducer.sendEmbeddingTask(uuid, filePath.toString(), safeName, userId);
+
+        // 事务提交后再发送 MQ 消息，避免事务回滚时消费者处理不存在的文档
+        final String finalUuid = uuid;
+        final String finalPath = filePath.toString();
+        final String finalName = safeName;
+        final Long finalDocId = doc.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    boolean sent = embeddingProducer.sendEmbeddingTask(finalUuid, finalPath, finalName, userId);
+                    if (!sent) {
+                        updateStatus(finalDocId, "FAILED", null, null, "消息队列不可用，请稍后重试");
+                        log.error("上传消息发送失败, 已回滚状态为 FAILED: docId={}", finalDocId);
+                    }
+                } catch (Exception e) {
+                    log.error("afterCommit 发送 MQ 异常, 尝试回滚状态为 FAILED: docId={}", finalDocId, e);
+                    try { updateStatus(finalDocId, "FAILED", null, null, "发送异常: " + e.getMessage()); } catch (Exception ignored) {}
+                }
+            }
+        });
 
         return Map.of(
                 "documentId", uuid,
                 "sessionId", session.getId(),
                 "fileName", safeName,
                 "size", fileSize,
-                "status", sent ? "processing" : "pending"
+                "status", "processing"
         );
     }
 
