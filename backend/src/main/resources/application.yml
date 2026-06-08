@@ -184,6 +184,12 @@ app:
     max-upload-size: 50
     process-timeout: 300
 
+  # ===== 异步线程池配置 =====
+  async:
+    core-pool-size: 4
+    max-pool-size: 16
+    queue-capacity: 100
+
   # ===== AI Vision 配置 (图片/扫描版 PDF OCR) =====
   ai:
     vision:

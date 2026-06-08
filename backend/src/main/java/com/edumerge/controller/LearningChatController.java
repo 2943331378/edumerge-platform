@@ -9,6 +9,7 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -21,6 +22,7 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -35,13 +37,16 @@ public class LearningChatController {
     private final AiRagService aiRagService;
     private final SessionService sessionService;
     private final DocumentService documentService;
+    private final ExecutorService asyncExecutor;
 
     @Autowired
     public LearningChatController(AiRagService aiRagService, SessionService sessionService,
-                                  DocumentService documentService) {
+                                  DocumentService documentService,
+                                  @Qualifier("asyncExecutor") ExecutorService asyncExecutor) {
         this.aiRagService = aiRagService;
         this.sessionService = sessionService;
         this.documentService = documentService;
+        this.asyncExecutor = asyncExecutor;
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -90,8 +95,8 @@ public class LearningChatController {
         emitter.onError(throwable -> { cancelled.set(true); log.warn("SSE 连接错误: {}", throwable.getMessage()); });
         emitter.onCompletion(() -> { cancelled.set(true); log.debug("SSE 连接关闭，标记取消"); });
 
-        // 捕获主线程的 SecurityContext，传递给 ForkJoinPool 异步线程
-        // CompletableFuture.runAsync 使用 ForkJoinPool，不继承 ThreadLocal
+        // 捕获主线程的 SecurityContext，传递给异步线程
+        // CompletableFuture.runAsync 使用专用线程池，不继承 ThreadLocal
         SecurityContext securityContext = SecurityContextHolder.getContext();
 
         CompletableFuture.runAsync(() -> {
@@ -149,7 +154,7 @@ public class LearningChatController {
                 }
                 sendDoneAndComplete(emitter, response, completed);
             }
-        });
+        }, asyncExecutor);
 
         return emitter;
     }
