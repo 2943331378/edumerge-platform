@@ -17,6 +17,7 @@ import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
 import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards } from "@/lib/api";
 import { toast } from "sonner";
+import { saveProgress, loadProgress, clearProgress, flashcardProgressKey } from "@/lib/progressStorage";
 
 interface Props {
   docId: number | null;
@@ -215,6 +216,17 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentIdx, flipped, displayCards.length, onContextChange]);
 
+  // Persist flashcard position to localStorage on navigation
+  useEffect(() => {
+    if (view === "cards" && currentDeck) {
+      saveProgress(flashcardProgressKey(currentDeck.id), {
+        idx: currentIdx,
+        flipped,
+        count: displayCards.length,
+      });
+    }
+  }, [view, currentDeck, currentIdx, flipped, displayCards.length]);
+
   const reloadDecks = async () => {
     if (!docId) return;
     try { setDecks(await listDecks(docId, "FLASHCARD")); } catch { setDecks([]); }
@@ -254,10 +266,23 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     setCurrentDeck(deck);
     setLoading(true);
     try {
-      setCards(await listFlashcardsByDeck(deck.id));
-      setCurrentIdx(0);
-      setFlipped(false);
+      const loaded = await listFlashcardsByDeck(deck.id);
+      setCards(loaded);
       setShuffled(false);
+
+      // Restore saved position from localStorage
+      const key = flashcardProgressKey(deck.id);
+      const saved = loadProgress<{ idx: number; flipped: boolean; count: number }>(key);
+      if (saved && saved.count === loaded.length && saved.idx >= 0 && saved.idx < loaded.length) {
+        setCurrentIdx(saved.idx);
+        setFlipped(saved.flipped);
+      } else {
+        // Invalid or missing — clear stale entry and start fresh
+        if (saved) clearProgress(key);
+        setCurrentIdx(0);
+        setFlipped(false);
+      }
+
       setView("cards");
     } catch { toast.error("加载卡片失败"); }
     setLoading(false);

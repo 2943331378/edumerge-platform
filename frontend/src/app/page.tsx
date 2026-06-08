@@ -22,6 +22,7 @@ import { ShortcutsHelp, ShortcutsButton } from "@/components/ShortcutsHelp";
 import { OnboardingTour, isOnboardingDone } from "@/components/OnboardingTour";
 import { StepHint, isStepHintDismissed, dismissStepHint } from "@/components/StepHint";
 import { useAuth } from "@/lib/auth-context";
+import { cleanStaleEntries } from "@/lib/progressStorage";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import { useSessionState } from "@/hooks/useSessionState";
 import { useStepNavigation } from "@/hooks/useStepNavigation";
@@ -155,6 +156,9 @@ export default function HomePage() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [userMenuOpen]);
+
+  // Clean stale localStorage progress entries on mount
+  useEffect(() => { cleanStaleEntries(); }, []);
 
   // Onboarding tour — show on first login
   const [tourOpen, setTourOpen] = useState(false);

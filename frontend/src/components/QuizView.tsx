@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import type { DeckRecord, QuizItem, QuizAttemptRecord, WeaknessItem } from "@/lib/api";
 import { listDecks, listQuizzesByDeck, generateQuizzes as generateApi, deleteDeck, getMindMap, saveQuizAttempt, listQuizAttempts, updateQuiz, deleteQuiz, listWeakness } from "@/lib/api";
 import { ErrorBookView } from "@/components/ErrorBookView";
+import { saveProgress, loadProgress, clearProgress, quizProgressKey } from "@/lib/progressStorage";
 
 interface Props {
   docId: number | null;
@@ -184,6 +185,17 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, reviewMode, currentIdx, reviewIdx, selected, submitted, reviewSelected, reviewSubmitted, quizzes.length, wrongQuizzes.length, onContextChange]);
 
+  // Persist quiz progress to localStorage
+  useEffect(() => {
+    if (view === "quiz" && currentDeck && answers.length > 0) {
+      saveProgress(quizProgressKey(currentDeck.id), {
+        idx: currentIdx,
+        answers,
+        elapsed: elapsedSeconds,
+      });
+    }
+  }, [view, currentDeck, currentIdx, answers, elapsedSeconds]);
+
   const reloadDecks = async () => {
     if (!docId) return;
     try {
@@ -236,12 +248,51 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     setElapsedSeconds(0);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     try {
-      setQuizzes(await listQuizzesByDeck(deck.id));
-      setCurrentIdx(0);
-      setSelected(null);
-      setSubmitted(false);
-      setScore(0);
-      setAnswers([]);
+      const loaded = await listQuizzesByDeck(deck.id);
+      setQuizzes(loaded);
+
+      // Attempt to restore saved progress
+      const key = quizProgressKey(deck.id);
+      const saved = loadProgress<{ idx: number; answers: { quizId: number; selectedAnswer: string; correct: boolean }[]; elapsed: number }>(key);
+      let restored = false;
+      if (saved && saved.idx >= 0 && saved.idx < loaded.length && saved.answers.length <= loaded.length) {
+        // Verify all saved quizIds still exist in the loaded set
+        const loadedIds = new Set(loaded.map((q) => q.id));
+        const validAnswers = saved.answers.filter((a) => loadedIds.has(a.quizId));
+        if (validAnswers.length === saved.answers.length && saved.answers.length > 0) {
+          setCurrentIdx(saved.idx);
+          setAnswers(validAnswers);
+          setScore(validAnswers.filter((a) => a.correct).length);
+
+          // Restore current question state
+          if (validAnswers.length > saved.idx) {
+            const currentAnswer = validAnswers[saved.idx];
+            setSelected(currentAnswer.selectedAnswer);
+            setSubmitted(true);
+          } else {
+            setSelected(null);
+            setSubmitted(false);
+          }
+
+          // Restore elapsed time
+          if (saved.elapsed > 0) {
+            setElapsedSeconds(saved.elapsed);
+            setStartTime(new Date(Date.now() - saved.elapsed * 1000));
+          }
+
+          restored = true;
+          toast.info("已恢复上次学习进度");
+        }
+      }
+      if (!saved || !restored) {
+        if (saved) clearProgress(key);
+        setCurrentIdx(0);
+        setSelected(null);
+        setSubmitted(false);
+        setScore(0);
+        setAnswers([]);
+      }
+
       setView("quiz");
     } catch { toast.error("加载测试题失败"); }
     setLoading(false);
@@ -317,6 +368,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
       // 最后一题提交时停止计时并保存答题记录
       if (currentIdx >= quizzes.length - 1) {
         if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        // Clear saved progress — quiz is complete
+        if (currentDeck) clearProgress(quizProgressKey(currentDeck.id));
         const correctCount = newAnswers.filter((a) => a.correct).length;
         saveQuizAttempt({
           docId: docId!,
