@@ -302,10 +302,21 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
           )}
         </div>
 
-        {/* Detail panel */}
+        {/* Detail panel — desktop: side panel, mobile: bottom drawer */}
         {selectedNode && (
-          <div className="hidden md:flex w-[320px] shrink-0 border-l border-border flex-col bg-card/50">
+          <>
+            {/* Mobile backdrop */}
+            <div className="md:hidden fixed inset-0 z-40 bg-black/30" onClick={() => setSelectedNode(null)} />
+            <div className={cn(
+              "flex flex-col border-border bg-card/95 backdrop-blur",
+              "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:z-50 max-md:max-h-[70vh] max-md:rounded-t-2xl max-md:border-t max-md:shadow-2xl",
+              "md:w-[320px] md:shrink-0 md:border-l md:bg-card/50",
+            )}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
+              {/* Mobile drag indicator */}
+              <div className="md:hidden absolute left-1/2 -translate-x-1/2 top-1.5">
+                <div className="w-10 h-1 rounded-full bg-muted-foreground/20" />
+              </div>
               <h3 className="text-sm font-medium text-foreground truncate">{selectedNode.name}</h3>
               <button type="button" onClick={() => setSelectedNode(null)} className="p-1 rounded-md hover:bg-muted">
                 <X className="h-3.5 w-3.5 text-muted-foreground" />
@@ -416,7 +427,8 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                 </div>
               )}
             </ScrollArea>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>
