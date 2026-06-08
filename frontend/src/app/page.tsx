@@ -27,12 +27,13 @@ import { cleanStaleEntries } from "@/lib/progressStorage";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
 import { useSessionState } from "@/hooks/useSessionState";
 import { useStepNavigation } from "@/hooks/useStepNavigation";
-import { useUploadState } from "@/hooks/useUploadState";
+import { useUploadState, type UploadCompleteInfo } from "@/hooks/useUploadState";
+import { toast } from "sonner";
 import {
   Upload, NotebookText, GitFork, Layers, HelpCircle,
   MessageSquare, ChevronLeft, ChevronRight,
   FileText, Loader2, X, BarChart3, Menu, Search, LogOut, User, BookOpen, GitBranch,
-  CheckCircle2,
+  CheckCircle2, Folder,
 } from "lucide-react";
 
 const STEPS: StepDef[] = [
@@ -127,8 +128,6 @@ export default function HomePage() {
     handleSelectSession, handleDeleteDocument, handleRetryDocument, handleRenameDocument,
   } = useSessionState(() => setCurrentStep(1));
 
-  const { uploading, uploadProgress, handleUpload } = useUploadState(loadSessions, setActiveSession, setCurrentStep);
-
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -137,6 +136,11 @@ export default function HomePage() {
   const [docSearch, setDocSearch] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
+  const [folderSuggestion, setFolderSuggestion] = useState<{
+    fileName: string;
+    sessionId: number;
+  } | null>(null);
+  const folderSuggestionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load folders
@@ -151,6 +155,47 @@ export default function HomePage() {
     const t = setTimeout(loadFolders, 0);
     return () => clearTimeout(t);
   }, [loadFolders]);
+
+  // Folder suggestion after upload
+  const dismissFolderSuggestion = useCallback(() => {
+    if (folderSuggestionTimer.current) {
+      clearTimeout(folderSuggestionTimer.current);
+      folderSuggestionTimer.current = null;
+    }
+    setFolderSuggestion(null);
+  }, []);
+
+  const handleUploadComplete = useCallback((info: UploadCompleteInfo) => {
+    // Only show suggestion if there are existing folders
+    if (folders.length === 0) return;
+    // Clear any existing timer
+    if (folderSuggestionTimer.current) clearTimeout(folderSuggestionTimer.current);
+    setFolderSuggestion({ fileName: info.fileName, sessionId: info.sessionId });
+    folderSuggestionTimer.current = setTimeout(() => {
+      setFolderSuggestion(null);
+      folderSuggestionTimer.current = null;
+    }, 10000);
+  }, [folders]);
+
+  const handleSuggestionMove = useCallback(async (folderId: number | null) => {
+    if (!folderSuggestion) return;
+    if (folderId != null) {
+      const session = sessions.find((s) => s.id === folderSuggestion.sessionId);
+      if (session?.docId) {
+        try {
+          await moveDocumentToFolder(session.docId, folderId);
+          await loadSessions();
+          await loadFolders();
+          toast.success("已移入文件夹");
+        } catch {
+          toast.error("移动失败");
+        }
+      }
+    }
+    dismissFolderSuggestion();
+  }, [folderSuggestion, sessions, loadSessions, loadFolders, dismissFolderSuggestion]);
+
+  const { uploading, uploadProgress, handleUpload } = useUploadState(loadSessions, setActiveSession, setCurrentStep, handleUploadComplete);
 
   // Folder CRUD callbacks
   const handleCreateFolder = useCallback(async (name: string, color: string) => {
@@ -204,6 +249,13 @@ export default function HomePage() {
 
   // Clean stale localStorage progress entries on mount
   useEffect(() => { cleanStaleEntries(); }, []);
+
+  // Cleanup folder suggestion timer on unmount
+  useEffect(() => {
+    return () => {
+      if (folderSuggestionTimer.current) clearTimeout(folderSuggestionTimer.current);
+    };
+  }, []);
 
   // Onboarding tour — show on first login
   const [tourOpen, setTourOpen] = useState(false);
@@ -880,6 +932,65 @@ export default function HomePage() {
 
       {/* Keyboard shortcuts help overlay */}
       <ShortcutsHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+
+      {/* Folder suggestion toast after upload */}
+      {folderSuggestion && folders.length > 0 && (() => {
+        const fileNameLower = folderSuggestion.fileName.toLowerCase();
+        const suggestedFolder = folders.find((f) =>
+          fileNameLower.includes(f.name.toLowerCase()),
+        );
+        return (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-2rem)] max-w-md animate-in slide-in-from-bottom-4 duration-300">
+            <div className="rounded-xl border border-border bg-card shadow-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-foreground">
+                  上传成功！要归入文件夹吗？
+                </p>
+                <button
+                  type="button"
+                  onClick={dismissFolderSuggestion}
+                  className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {folders.map((f) => {
+                  const isSuggested = suggestedFolder?.id === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => handleSuggestionMove(f.id)}
+                      className={cn(
+                        "relative flex items-center gap-1.5 rounded-lg px-3 py-2.5 min-h-[44px] text-sm transition-all",
+                        isSuggested
+                          ? "bg-primary/15 text-primary font-medium ring-1 ring-primary/30"
+                          : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <Folder className="h-3.5 w-3.5 shrink-0" style={{ color: f.color }} />
+                      <span className="truncate">{f.name}</span>
+                      {isSuggested && (
+                        <span className="text-[10px] bg-primary/20 text-primary rounded px-1 py-0.5 font-medium">
+                          推荐
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => handleSuggestionMove(null)}
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 min-h-[44px] text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                >
+                  不归类
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

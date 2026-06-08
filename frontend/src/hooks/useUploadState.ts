@@ -3,10 +3,16 @@ import { toast } from "sonner";
 import type { SessionRecord } from "@/lib/api";
 import { uploadDocument, listSessions } from "@/lib/api";
 
+export interface UploadCompleteInfo {
+  fileName: string;
+  sessionId: number;
+}
+
 export function useUploadState(
   loadSessions: () => Promise<void>,
   setActiveSession: (s: SessionRecord | null) => void,
   setCurrentStep: (s: number) => void,
+  onUploadComplete?: (info: UploadCompleteInfo) => void,
 ) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -17,6 +23,7 @@ export function useUploadState(
     if (files.length === 0) return;
     setUploading(true);
     setUploadProgress(0);
+    let lastResult: { fileName: string; sessionId: number } | null = null;
     try {
       for (let i = 0; i < files.length; i++) {
         const result = await uploadDocument(files[i], (p) => {
@@ -24,6 +31,7 @@ export function useUploadState(
           setUploadProgress(Math.round(overall));
         });
         toast.success(`${result.fileName} 上传成功，正在后台处理`);
+        lastResult = { fileName: result.fileName, sessionId: result.sessionId };
       }
       setUploadProgress(100);
       await loadSessions();
@@ -32,11 +40,14 @@ export function useUploadState(
         setActiveSession(list[0]);
         setCurrentStep(1);
       }
+      if (lastResult && onUploadComplete) {
+        onUploadComplete(lastResult);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "上传失败");
     }
     setUploading(false);
-  }, [loadSessions, setActiveSession, setCurrentStep, uploading]);
+  }, [loadSessions, setActiveSession, setCurrentStep, uploading, onUploadComplete]);
 
   return { uploading, uploadProgress, handleUpload };
 }
