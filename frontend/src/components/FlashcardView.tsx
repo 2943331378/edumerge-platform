@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download, Loader2 } from "lucide-react";
+import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download, Loader2, Shuffle } from "lucide-react";
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
 import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards } from "@/lib/api";
 import { toast } from "sonner";
@@ -66,9 +66,24 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [editForm, setEditForm] = useState({ question: "", answer: "", explanation: "" });
   const [saving, setSaving] = useState(false);
   const [selfAssessed, setSelfAssessed] = useState(false);
+  const [shuffled, setShuffled] = useState(false);
   const [dueCount, setDueCount] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const autoNextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Fisher-Yates 洗牌算法 */
+  const shuffleArray = useCallback((arr: FlashcardItem[]) => {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  }, []);
+
+  /** 洗牌后的卡片数组（未洗牌时返回原始数组） */
+  const shuffledRef = useRef<FlashcardItem[]>([]);
+  const displayCards = shuffled ? shuffledRef.current : cards;
 
   const handleExportCSV = async () => {
     let exportCards = cards;
@@ -114,6 +129,18 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     }
   };
 
+  const toggleShuffle = () => {
+    if (!shuffled) {
+      shuffledRef.current = shuffleArray(cards);
+      setShuffled(true);
+    } else {
+      setShuffled(false);
+    }
+    setCurrentIdx(0);
+    setFlipped(false);
+    setSelfAssessed(false);
+  };
+
   // SM-2 自评处理
   const handleSelfAssess = async (quality: number) => {
     if (!card || selfAssessed) return;
@@ -123,7 +150,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
       const labels = ["", "已标记「忘了」", "已标记「模糊」", "已标记「记住」", "已标记「秒答」"];
       toast.success(labels[quality]);
       // 自动跳到下一张
-      if (currentIdx < cards.length - 1) {
+      if (currentIdx < displayCards.length - 1) {
         autoNextTimerRef.current = setTimeout(() => goTo(currentIdx + 1), 300);
       }
     } catch {
@@ -178,15 +205,15 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
   // Report current card context to parent for chat context injection
   useEffect(() => {
-    if (view === "cards" && cards[currentIdx]) {
-      const card = cards[currentIdx];
+    if (view === "cards" && displayCards[currentIdx]) {
+      const card = displayCards[currentIdx];
       const side = flipped ? "答案" : "问题";
-      onContextChange?.(`用户在复习闪卡第${currentIdx + 1}/${cards.length}张（${side}面）: "${card.question}"`);
+      onContextChange?.(`用户在复习闪卡第${currentIdx + 1}/${displayCards.length}张（${side}面）: "${card.question}"`);
     } else if (view === "decks") {
       onContextChange?.("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, currentIdx, flipped, cards.length, onContextChange]);
+  }, [view, currentIdx, flipped, displayCards.length, onContextChange]);
 
   const reloadDecks = async () => {
     if (!docId) return;
@@ -230,6 +257,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
       setCards(await listFlashcardsByDeck(deck.id));
       setCurrentIdx(0);
       setFlipped(false);
+      setShuffled(false);
       setView("cards");
     } catch { toast.error("加载卡片失败"); }
     setLoading(false);
@@ -287,7 +315,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const goTo = (i: number) => {
     setFlipped(false);
     setSelfAssessed(false);
-    setCurrentIdx(Math.max(0, Math.min(i, cards.length - 1)));
+    setCurrentIdx(Math.max(0, Math.min(i, displayCards.length - 1)));
   };
 
   // ═══════════════ Deck 列表视图 ═══════════════
@@ -546,7 +574,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   }
 
   // ═══════════════ 卡片详情视图 (翻转学习) ═══════════════
-  const card = cards[currentIdx];
+  const card = displayCards[currentIdx];
   return (
     <div className="flex flex-col h-full">
       {/* 面包屑导航 — 可折叠 */}
@@ -558,6 +586,14 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           </Button>
           <span className="text-[11px] text-muted-foreground/40">/</span>
           <span className="text-[11px] text-muted-foreground truncate max-w-[200px]">{currentDeck?.title ?? ""}</span>
+          <button
+            type="button"
+            onClick={toggleShuffle}
+            className={`flex h-6 w-6 items-center justify-center rounded-md transition-all ${shuffled ? "text-primary bg-primary/10" : "text-muted-foreground/40 hover:text-foreground hover:bg-muted"}`}
+            title={shuffled ? "关闭随机顺序" : "随机顺序"}
+          >
+            <Shuffle className="h-3.5 w-3.5" />
+          </button>
           <div className="flex-1" />
           <button
             type="button"
@@ -586,6 +622,10 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
             <span className="text-[11px] text-muted-foreground/60 group-hover:text-foreground/80 truncate max-w-[180px] transition-colors">
               {currentDeck?.title ?? ""}
             </span>
+            <Shuffle
+              className={`h-3 w-3 cursor-pointer transition-colors ${shuffled ? "text-primary" : "text-muted-foreground/30 group-hover:text-muted-foreground/60"}`}
+              onClick={(e) => { e.stopPropagation(); toggleShuffle(); }}
+            />
             <ChevronRight className="h-3 w-3 -rotate-90 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors" />
           </button>
         </div>
@@ -593,7 +633,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
       {/* 翻转卡片 — 大尺寸展示 */}
       <div className="flex-1 flex flex-col items-center justify-center gap-3 sm:gap-6 px-3 sm:px-8 overflow-y-auto py-3 sm:py-4">
-        <p className="text-[10px] sm:text-xs text-muted-foreground/40 tracking-wider">{currentIdx + 1} / {cards.length}</p>
+        <p className="text-[10px] sm:text-xs text-muted-foreground/40 tracking-wider">{currentIdx + 1} / {displayCards.length}</p>
 
         {/* 容器: 宽大 + 渐变边框光晕 + 动画 */}
         <div
@@ -666,8 +706,17 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg" disabled={currentIdx === 0} onClick={() => goTo(currentIdx - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg" disabled={currentIdx >= cards.length - 1} onClick={() => goTo(currentIdx + 1)}>
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg" disabled={currentIdx >= displayCards.length - 1} onClick={() => goTo(currentIdx + 1)}>
             <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={shuffled ? "default" : "outline"}
+            size="icon"
+            className={`h-8 w-8 rounded-lg ${shuffled ? "bg-primary/90 hover:bg-primary" : ""}`}
+            onClick={toggleShuffle}
+            title={shuffled ? "关闭随机顺序" : "随机顺序（洗牌）"}
+          >
+            <Shuffle className="h-4 w-4" />
           </Button>
           <Button variant="ghost" size="sm" className="rounded-lg text-xs gap-1.5 h-8" onClick={handleGenerate} disabled={loading}>
             {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
