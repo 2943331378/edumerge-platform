@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 /** crypto.randomUUID polyfill for non-secure contexts (http://) */
 function randomId(): string {
@@ -47,6 +47,14 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+
+  // Windowed rendering — only render last N messages to keep DOM light
+  const MAX_RENDERED = 100;
+  const [visibleCount, setVisibleCount] = useState(MAX_RENDERED);
+  const visibleMessages = useMemo(() => {
+    if (messages.length <= visibleCount) return messages;
+    return messages.slice(messages.length - visibleCount);
+  }, [messages, visibleCount]);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string>("");
@@ -157,6 +165,11 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
   const scrollToBottom = (smooth = true) => {
     bottomRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
   };
+
+  // Keep visibleCount in sync when messages change (e.g., history load, conversation switch)
+  useEffect(() => {
+    setVisibleCount((prev) => Math.max(prev, Math.min(messages.length, MAX_RENDERED)));
+  }, [messages.length]);
 
   const handleScroll = useCallback(() => {
     const el = listRef.current;
@@ -384,7 +397,19 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
             <EmptyState activityType={activityType} docId={docId} contextHint={contextHint} onSelectQuestion={(q) => { if (!loading) doSend(q); }} />
           ) : (
             <div className="mx-auto max-w-3xl">
-              {messages.map((m) => (
+              {messages.length > MAX_RENDERED && (
+                <div className="text-center py-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs text-muted-foreground"
+                    onClick={() => setVisibleCount((c) => Math.min(c + 50, messages.length))}
+                  >
+                    加载更早的消息 ({messages.length - visibleCount} 条)
+                  </Button>
+                </div>
+              )}
+              {visibleMessages.map((m) => (
                 <MessageBubble key={m.id} message={m} onRetry={handleRetry} docId={docId} />
               ))}
               <div ref={bottomRef} className="h-1" />
