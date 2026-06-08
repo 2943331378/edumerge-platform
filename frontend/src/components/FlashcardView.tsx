@@ -43,6 +43,42 @@ function isNewDeck(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 24 * 60 * 60 * 1000;
 }
 
+/**
+ * 分层答案: 提取核心答案（首句）与详细解释
+ * - 短答案 (≤100 字纯文本): 不分层, 全部显示
+ * - 长答案: 按句号/换行/100字截断, 分为核心答案 + 详情
+ */
+function splitAnswer(answer: string): { core: string; detail: string; isShort: boolean } {
+  // 去除 markdown 标记后计算纯文本长度
+  const plain = answer.replace(/[#*_`~\[\]()]/g, "").replace(/\n+/g, " ").trim();
+  if (plain.length <= 100) {
+    return { core: answer, detail: "", isShort: true };
+  }
+
+  // 1) 按第一个句末标点 (后跟空白/换行) 切分
+  const sentMatch = answer.match(/^([\s\S]+?[.!?。！？])[\s\n]/);
+  if (sentMatch && sentMatch[1].length >= 10 && sentMatch[1].length <= 300) {
+    return { core: sentMatch[1], detail: answer.slice(sentMatch[1].length).replace(/^\s+/, ""), isShort: false };
+  }
+
+  // 2) 按第一个换行切分
+  const nlIdx = answer.indexOf("\n");
+  if (nlIdx >= 10 && nlIdx <= 200) {
+    return { core: answer.slice(0, nlIdx), detail: answer.slice(nlIdx + 1), isShort: false };
+  }
+
+  // 3) 按约 100 纯文本字符截断, 对齐词边界
+  let plainCount = 0;
+  let pos = answer.length;
+  for (let i = 0; i < answer.length; i++) {
+    if (!/[#*_`~\[\]()]/.test(answer[i])) plainCount++;
+    if (plainCount >= 100) { pos = i + 1; break; }
+  }
+  const nearSpace = answer.lastIndexOf(" ", pos);
+  if (nearSpace > pos * 0.6) pos = nearSpace;
+  return { core: answer.slice(0, pos), detail: answer.slice(pos).trimStart(), isShort: false };
+}
+
 export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
   const [view, setView] = useState<"decks" | "preview" | "cards">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
@@ -70,6 +106,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [shuffled, setShuffled] = useState(false);
   const [dueCount, setDueCount] = useState(0);
   const [showImportantOnly, setShowImportantOnly] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const autoNextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -141,6 +178,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     setCurrentIdx(0);
     setFlipped(false);
     setSelfAssessed(false);
+    setExpanded(false);
   };
 
   // SM-2 自评处理
@@ -215,6 +253,11 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     window.addEventListener("keydown", handleCardKeyboard);
     return () => window.removeEventListener("keydown", handleCardKeyboard);
   }, [handleCardKeyboard]);
+
+  // 翻回正面时收起详情展开状态
+  useEffect(() => {
+    if (!flipped) setExpanded(false);
+  }, [flipped]);
 
   // Report current card context to parent for chat context injection
   useEffect(() => {
@@ -352,6 +395,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const goTo = (i: number) => {
     setFlipped(false);
     setSelfAssessed(false);
+    setExpanded(false);
     setCurrentIdx(Math.max(0, Math.min(i, displayCards.length - 1)));
   };
 
@@ -628,6 +672,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
   // ═══════════════ 卡片详情视图 (翻转学习) ═══════════════
   const card = displayCards[currentIdx];
+  const answerSplit = card ? splitAnswer(card.answer) : null;
   return (
     <div className="flex flex-col h-full">
       {/* 面包屑导航 — 可折叠 */}
@@ -733,7 +778,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-emerald-50/60 to-transparent dark:from-emerald-950/20 dark:to-transparent pointer-events-none" />
 
               <CardContent className="relative flex flex-col h-full min-h-[260px] sm:min-h-[450px] overflow-y-auto">
-                {/* 答案区域 — 左对齐，更自然的阅读体验 */}
+                {/* 答案区域 — 分层显示: 核心答案 + 可展开详情 */}
                 <div className="flex-1 flex flex-col justify-center px-4 sm:px-14 py-4 sm:py-14">
                   {/* 标签 */}
                   <div className="flex items-center gap-2 mb-2 sm:mb-5">
@@ -743,14 +788,50 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                     </span>
                   </div>
 
-                  {/* 核心答案 — 大字醒目 */}
+                  {/* Layer 1: 核心答案 — 大字醒目, 始终可见 */}
                   <p className="text-base sm:text-2xl leading-relaxed text-foreground/90 font-semibold tracking-tight max-w-xl">
-                    {card?.answer}
+                    {answerSplit?.isShort ? card?.answer : answerSplit?.core}
                   </p>
 
-                  {/* 解析区 — 独立卡片式设计 */}
-                  {card?.explanation && (
-                    <div className="mt-3 sm:mt-8 rounded-xl bg-muted/30 dark:bg-muted/10 border border-border/20 p-3 sm:p-5">
+                  {/* Layer 2: 可展开详情 — 仅长答案显示 */}
+                  {answerSplit && !answerSplit.isShort && answerSplit.detail && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+                        className="flex items-center gap-2 mt-4 sm:mt-5 w-full max-w-xl rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/20 px-4 h-11 text-sm font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/30 active:scale-[0.98] transition-all"
+                      >
+                        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-300 ${expanded ? "rotate-180" : ""}`} />
+                        {expanded ? "收起详细解释" : "查看详细解释"}
+                      </button>
+
+                      <div
+                        className="overflow-hidden transition-all duration-300 ease-in-out max-w-xl"
+                        style={{ maxHeight: expanded ? "600px" : "0px", opacity: expanded ? 1 : 0 }}
+                      >
+                        <p className="mt-3 text-sm sm:text-base font-normal text-foreground/70 leading-relaxed whitespace-pre-wrap">
+                          {answerSplit.detail}
+                        </p>
+
+                        {/* 解析区 — 独立卡片式设计 */}
+                        {card?.explanation && (
+                          <div className="mt-3 sm:mt-4 rounded-xl bg-muted/30 dark:bg-muted/10 border border-border/20 p-3 sm:p-5">
+                            <div className="flex items-center gap-2 mb-2.5">
+                              <div className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 dark:bg-amber-900/30">
+                                <span className="text-[10px]">💡</span>
+                              </div>
+                              <span className="text-[10px] sm:text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">解析</span>
+                            </div>
+                            <p className="text-xs sm:text-sm leading-relaxed text-foreground/65">{card.explanation}</p>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* 短答案: 直接显示解析（如有） */}
+                  {answerSplit?.isShort && card?.explanation && (
+                    <div className="mt-3 sm:mt-5 rounded-xl bg-muted/30 dark:bg-muted/10 border border-border/20 p-3 sm:p-5 max-w-xl">
                       <div className="flex items-center gap-2 mb-2.5">
                         <div className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 dark:bg-amber-900/30">
                           <span className="text-[10px]">💡</span>
