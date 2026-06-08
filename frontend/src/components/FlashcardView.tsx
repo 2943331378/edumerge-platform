@@ -13,9 +13,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download, Loader2, Shuffle } from "lucide-react";
+import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download, Loader2, Shuffle, Star } from "lucide-react";
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
-import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards } from "@/lib/api";
+import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards, toggleFlashcardImportant } from "@/lib/api";
 import { toast } from "sonner";
 import { saveProgress, loadProgress, clearProgress, flashcardProgressKey } from "@/lib/progressStorage";
 
@@ -69,6 +69,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [selfAssessed, setSelfAssessed] = useState(false);
   const [shuffled, setShuffled] = useState(false);
   const [dueCount, setDueCount] = useState(0);
+  const [showImportantOnly, setShowImportantOnly] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const autoNextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -157,6 +158,17 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     } catch {
       toast.error("保存复习记录失败");
       setSelfAssessed(false);
+    }
+  };
+
+  // 切换卡片重要标记
+  const handleToggleImportant = async (cardId: number) => {
+    try {
+      const updated = await toggleFlashcardImportant(cardId);
+      setCards((prev) => prev.map((c) => c.id === cardId ? { ...c, isImportant: updated.isImportant } : c));
+      toast.success(updated.isImportant ? "已标记为重要" : "已取消重要标记");
+    } catch {
+      toast.error("操作失败");
     }
   };
 
@@ -266,7 +278,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     setCurrentDeck(deck);
     setLoading(true);
     try {
-      const loaded = await listFlashcardsByDeck(deck.id);
+      const loaded = await listFlashcardsByDeck(deck.id, showImportantOnly || undefined);
       setCards(loaded);
       setShuffled(false);
 
@@ -372,6 +384,15 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                 到期复习 ({dueCount})
               </Button>
             )}
+            <Button
+              size="sm"
+              variant={showImportantOnly ? "default" : "outline"}
+              className={`rounded-xl gap-1.5 h-8 ${showImportantOnly ? "bg-amber-500 hover:bg-amber-600 text-white" : "border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"}`}
+              onClick={() => setShowImportantOnly((v) => !v)}
+            >
+              <Star className={`h-3.5 w-3.5 ${showImportantOnly ? "fill-current" : ""}`} />
+              {showImportantOnly ? "显示全部" : "仅看重要"}
+            </Button>
             {(cards.length > 0 || decks.length > 0) && (
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8" onClick={handleExportCSV}>
                 <Download className="h-3.5 w-3.5" />
@@ -529,6 +550,10 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               <Card key={card.id ?? i} className="relative group rounded-xl border-border/50 bg-card/80 shadow-sm">
                 {/* Hover actions */}
                 <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleImportant(card.id); }}
+                    className={`p-1 rounded transition-colors ${card.isImportant ? "text-amber-400 hover:text-amber-500" : "text-muted-foreground/50 hover:text-amber-400"}`} title={card.isImportant ? "取消重要标记" : "标记为重要"}>
+                    <Star className={`h-3 w-3 ${card.isImportant ? "fill-amber-400" : ""}`} />
+                  </button>
                   <button type="button" onClick={() => { setEditingCardId(card.id); setEditForm({ question: card.question, answer: card.answer, explanation: card.explanation ?? "" }); }}
                     className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
                     <Pencil className="h-3 w-3" />
@@ -568,6 +593,9 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 text-[10px] font-bold text-primary">{i + 1}</span>
                         <span className="text-[9px] font-semibold text-primary/50 uppercase tracking-wider">问题</span>
+                        {card.isImportant && (
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                        )}
                       </div>
                       <p className="text-[13px] text-foreground/85 leading-relaxed font-medium">{card.question}</p>
                     </div>
@@ -658,7 +686,19 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
       {/* 翻转卡片 — 大尺寸展示 */}
       <div className="flex-1 flex flex-col items-center justify-center gap-3 sm:gap-6 px-3 sm:px-8 overflow-y-auto py-3 sm:py-4">
-        <p className="text-[10px] sm:text-xs text-muted-foreground/40 tracking-wider">{currentIdx + 1} / {displayCards.length}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] sm:text-xs text-muted-foreground/40 tracking-wider">{currentIdx + 1} / {displayCards.length}</p>
+          {card && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleToggleImportant(card.id); }}
+              className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full transition-all hover:bg-amber-100 dark:hover:bg-amber-900/30"
+              title={card.isImportant ? "取消重要标记" : "标记为重要"}
+            >
+              <Star className={`h-4 w-4 sm:h-5 sm:w-5 transition-colors ${card.isImportant ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30 hover:text-amber-400"}`} />
+            </button>
+          )}
+        </div>
 
         {/* 容器: 宽大 + 渐变边框光晕 + 动画 */}
         <div

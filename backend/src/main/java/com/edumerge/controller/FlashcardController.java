@@ -43,13 +43,23 @@ public class FlashcardController {
     @GetMapping
     public Result<List<FlashcardResponse>> list(@RequestParam(required = false) Long docId,
                                                 @RequestParam(required = false) Long sessionId,
-                                                @RequestParam(required = false) Long deckId) {
+                                                @RequestParam(required = false) Long deckId,
+                                                @RequestParam(required = false) Boolean important) {
         List<Flashcard> cards;
-        if (deckId != null) cards = flashcardService.listByDeckId(deckId);
-        else {
+        if (deckId != null) {
+            cards = Boolean.TRUE.equals(important)
+                    ? flashcardService.listImportantByDeckId(deckId)
+                    : flashcardService.listByDeckId(deckId);
+        } else {
             if (sessionId != null) docId = flashcardService.resolveDocId(sessionId);
             if (docId != null) documentService.verifyOwnership(docId);
-            cards = docId != null ? flashcardService.listByDocId(docId) : List.of();
+            if (docId != null) {
+                cards = Boolean.TRUE.equals(important)
+                        ? flashcardService.listImportantByDocId(docId)
+                        : flashcardService.listByDocId(docId);
+            } else {
+                cards = List.of();
+            }
         }
         return Result.success(DtoMapper.toFlashcardResponseList(cards));
     }
@@ -77,6 +87,12 @@ public class FlashcardController {
     public Result<FlashcardResponse> review(@PathVariable Long id, @Valid @RequestBody ReviewRequest req) {
         Flashcard card = flashcardService.review(id, req.getQuality(), SecurityUtils.getCurrentUserId());
         return Result.success("复习记录已保存", DtoMapper.toResponse(card));
+    }
+
+    @PutMapping("/{id}/important")
+    public Result<FlashcardResponse> toggleImportant(@PathVariable Long id) {
+        Flashcard card = flashcardService.toggleImportant(id);
+        return Result.success("重要标记已更新", DtoMapper.toResponse(card));
     }
 
     @GetMapping("/due")

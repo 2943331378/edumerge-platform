@@ -390,6 +390,9 @@ ALTER TABLE documents ADD FOREIGN KEY (folder_id) REFERENCES document_folders(id
 -- 已有数据库执行此语句安全（IF NOT EXISTS 不支持，用 IGNORE 跳过重复列错误）
 ALTER TABLE documents ADD COLUMN subject_type VARCHAR(20) DEFAULT 'GENERAL' COMMENT '学科类型: ALGORITHM/MATH/PROGRAMMING/SCIENCE/THEORY/MEDICAL/HUMANITIES/GENERAL';
 
+-- ===== 增量变更：flashcards 表新增 is_important 列 =====
+ALTER TABLE flashcards ADD COLUMN is_important TINYINT DEFAULT 0 COMMENT '是否重要标记: 0=普通 1=重要';
+
 -- ===== 初始化示例数据 =====
 -- 默认管理员账号: admin / admin123
 INSERT IGNORE INTO users (username, email, password, display_name, status)

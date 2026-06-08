@@ -38,6 +38,7 @@ public final class DtoMapper {
                 .difficulty(f.getDifficulty()).reviewCount(f.getReviewCount())
                 .lastReviewedAt(f.getLastReviewedAt()).easeFactor(f.getEaseFactor())
                 .reviewInterval(f.getReviewInterval()).nextReviewAt(f.getNextReviewAt())
+                .isImportant(f.getIsImportant() != null && f.getIsImportant() == 1)
                 .createdAt(f.getCreatedAt()).updatedAt(f.getUpdatedAt())
                 .build();
     }

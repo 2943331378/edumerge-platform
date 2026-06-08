@@ -68,6 +68,9 @@ public class Flashcard {
     /** 下次复习时间 (NULL=新卡片或已归档) */
     private LocalDateTime nextReviewAt;
 
+    /** 是否重要标记: 0=普通, 1=重要 */
+    private Integer isImportant;
+
     @TableLogic
     private Integer deleted;
 

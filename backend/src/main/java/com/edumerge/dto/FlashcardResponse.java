@@ -26,6 +26,7 @@ public class FlashcardResponse {
     private Double easeFactor;
     private Integer reviewInterval;
     private LocalDateTime nextReviewAt;
+    private Boolean isImportant;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

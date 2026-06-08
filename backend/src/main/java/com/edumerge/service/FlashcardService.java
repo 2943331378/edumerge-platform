@@ -76,6 +76,39 @@ public class FlashcardService {
                         .orderByAsc(Flashcard::getId));
     }
 
+    @Transactional(readOnly = true)
+    public List<Flashcard> listImportantByDocId(Long docId) {
+        return flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getDocId, docId)
+                        .eq(Flashcard::getIsImportant, 1)
+                        .orderByAsc(Flashcard::getId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Flashcard> listImportantByDeckId(Long deckId) {
+        return flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getDeckId, deckId)
+                        .eq(Flashcard::getIsImportant, 1)
+                        .orderByAsc(Flashcard::getId));
+    }
+
+    /**
+     * 切换卡片重要标记
+     */
+    @Transactional
+    public Flashcard toggleImportant(Long id) {
+        verifyOwnership(id);
+        Flashcard card = getById(id);
+        if (card == null) throw new IllegalArgumentException("卡片不存在: " + id);
+        int newVal = (card.getIsImportant() != null && card.getIsImportant() == 1) ? 0 : 1;
+        card.setIsImportant(newVal);
+        flashcardMapper.updateById(card);
+        log.info("卡片重要标记已切换: id={}, isImportant={}", id, newVal);
+        return card;
+    }
+
     @Transactional
     public void updateById(Flashcard card) {
         verifyOwnership(card.getId());

@@ -445,6 +445,7 @@ export interface FlashcardItem {
   answer: string;
   explanation?: string;
   sourceSegment?: string;
+  isImportant?: boolean;
 }
 
 export async function listFlashcards(docId?: number, sessionId?: number): Promise<FlashcardItem[]> {
@@ -452,8 +453,10 @@ export async function listFlashcards(docId?: number, sessionId?: number): Promis
   return request<FlashcardItem[]>(`/flashcards${params}`);
 }
 
-export async function listFlashcardsByDeck(deckId: number): Promise<FlashcardItem[]> {
-  return request<FlashcardItem[]>(`/flashcards?deckId=${deckId}`);
+export async function listFlashcardsByDeck(deckId: number, important?: boolean): Promise<FlashcardItem[]> {
+  const params = new URLSearchParams({ deckId: String(deckId) });
+  if (important) params.set("important", "true");
+  return request<FlashcardItem[]>(`/flashcards?${params.toString()}`);
 }
 
 export async function generateFlashcards(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<FlashcardItem[]> {
@@ -489,6 +492,11 @@ export async function reviewFlashcard(id: number, quality: number): Promise<Flas
 /** 查询到期需复习的卡片 */
 export async function listDueFlashcards(docId: number): Promise<FlashcardItem[]> {
   return request<FlashcardItem[]>(`/flashcards/due?docId=${docId}`);
+}
+
+/** 切换卡片重要标记 */
+export async function toggleFlashcardImportant(id: number): Promise<FlashcardItem> {
+  return request<FlashcardItem>(`/flashcards/${id}/important`, { method: "PUT" });
 }
 
 // ===== 测试题 =====
