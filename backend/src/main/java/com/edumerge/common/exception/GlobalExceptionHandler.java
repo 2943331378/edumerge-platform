@@ -5,6 +5,7 @@ import com.edumerge.common.result.ResultCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.util.stream.Collectors;
@@ -34,6 +36,30 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.OK)
                 .body(Result.fail(e.getCode(), e.getMessage()));
+    }
+
+    /**
+     * 处理认证异常 (AuthenticationException)
+     * SecurityUtils.getCurrentUserId() 未认证时抛出
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<Result<?>> handleAuthenticationException(AuthenticationException e) {
+        log.warn("认证异常: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(Result.fail(ResultCode.UNAUTHORIZED.getCode(), "未登录或登录已过期，请重新登录"));
+    }
+
+    /**
+     * 处理 HTTP 状态码异常 (ResponseStatusException)
+     * 如 verifyOwnership() 抛出的 403
+     */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Result<?>> handleResponseStatusException(ResponseStatusException e) {
+        log.warn("HTTP 异常: status={}, message={}", e.getStatusCode(), e.getReason());
+        return ResponseEntity
+                .status(e.getStatusCode())
+                .body(Result.fail(e.getStatusCode().value(), e.getReason() != null ? e.getReason() : "请求错误"));
     }
 
     /**

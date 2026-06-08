@@ -1,15 +1,13 @@
 package com.edumerge.security;
 
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
  * 从 SecurityContext 提取当前登录用户信息的工具类。
- * 未登录时返回默认值 (userId=1L) 以兼容开发环境。
+ * 未认证时抛出异常，防止以默认用户身份执行操作。
  */
 public final class SecurityUtils {
-
-    /** 未登录时的默认 userId — 仅用于向后兼容 */
-    private static final Long DEFAULT_USER_ID = 1L;
 
     private SecurityUtils() {}
 
@@ -18,7 +16,7 @@ public final class SecurityUtils {
         if (auth != null && auth.getPrincipal() instanceof AuthUser authUser) {
             return authUser.getUserId();
         }
-        return DEFAULT_USER_ID;
+        throw new AuthenticationCredentialsNotFoundException("用户未认证，无法获取当前用户 ID");
     }
 
     public static String getCurrentUsername() {
@@ -26,6 +24,6 @@ public final class SecurityUtils {
         if (auth != null && auth.getPrincipal() instanceof AuthUser authUser) {
             return authUser.getUsername();
         }
-        return "admin";
+        throw new AuthenticationCredentialsNotFoundException("用户未认证，无法获取当前用户名");
     }
 }
