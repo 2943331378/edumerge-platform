@@ -111,7 +111,7 @@ export function ChatSidebar({ documents, onUpload, onDelete, className }: ChatSi
               </Badge>
               <button
                 onClick={(e) => { e.stopPropagation(); onDelete(doc.id); }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-destructive/10 transition-all"
                 aria-label="删除文档"
                 title="删除文档"
               >

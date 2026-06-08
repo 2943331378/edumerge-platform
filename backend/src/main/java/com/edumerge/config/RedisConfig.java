@@ -34,7 +34,7 @@ public class RedisConfig {
 
         // String 序列化器
         StringRedisSerializer stringRedisSerializer = new StringRedisSerializer();
-        
+
         // JSON 序列化器（支持泛型和复杂对象）
         GenericJackson2JsonRedisSerializer jsonRedisSerializer = new GenericJackson2JsonRedisSerializer();
 

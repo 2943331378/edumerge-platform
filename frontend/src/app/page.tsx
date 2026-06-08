@@ -540,7 +540,7 @@ export default function HomePage() {
                         e.stopPropagation();
                         handleDeleteDocument(s.id);
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all shrink-0"
+                      className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all shrink-0"
                       title="删除文档"
                     >
                       <X className="h-3 w-3" />

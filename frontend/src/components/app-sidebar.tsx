@@ -131,12 +131,7 @@ export function AppSidebar({
     });
   }, []);
 
-  // Auto-expand folders when they are first created
-  useEffect(() => {
-    if (folders.length > 0 && expandedFolders.size === 0) {
-      setExpandedFolders(new Set(folders.map((f) => f.id)));
-    }
-  }, [folders]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Folders default to collapsed — user clicks to expand
 
   const handleFile = (file: File | FileList | null) => {
     if (!file) return;
@@ -315,16 +310,16 @@ export function AppSidebar({
         onTouchEnd={cancelLongPress}
         onTouchMove={cancelLongPress}
         className={cn(
-          "group flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs transition-all duration-200 select-none",
+          "group flex items-center gap-2 rounded-lg px-3 py-1.5 max-md:py-2.5 text-xs transition-all duration-200 select-none",
           doc.sessionId > 0 && "cursor-pointer",
           isActive
             ? "bg-white/40 dark:bg-white/10 ring-1 ring-primary/30 text-foreground font-medium"
-            : "text-muted-foreground hover:bg-white/10 dark:hover:bg-white/5",
+            : "text-muted-foreground hover:bg-white/10 dark:hover:bg-white/5 active:bg-white/10 dark:active:bg-white/5",
           dragDocId === doc.id && "opacity-40",
         )}
       >
         {onMoveDocument && (
-          <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/30 cursor-grab active:cursor-grabbing hidden group-hover:block" />
+          <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/30 cursor-grab active:cursor-grabbing hidden max-md:block group-hover:block" />
         )}
         <FileText
           className={cn(
@@ -375,7 +370,7 @@ export function AppSidebar({
               e.stopPropagation();
               onRetryDocument(doc.sessionId);
             }}
-            className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="p-0.5 max-md:p-1.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重新处理"
           >
             <RotateCw className="h-3 w-3" />
@@ -388,7 +383,7 @@ export function AppSidebar({
               e.stopPropagation();
               startRename(doc);
             }}
-            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重命名"
           >
             <Pencil className="h-3 w-3" />
@@ -400,7 +395,7 @@ export function AppSidebar({
             e.stopPropagation();
             onDeleteDocument(doc.sessionId);
           }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+          className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
           title="删除文档"
         >
           <X className="h-3 w-3" />
@@ -436,10 +431,10 @@ export function AppSidebar({
           onDragLeave={() => setDropFolderId(undefined)}
           onDrop={(e) => handleFolderDrop(e, folder.id)}
           className={cn(
-            "group flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs cursor-pointer transition-all duration-200 select-none",
+            "group flex items-center gap-2 rounded-lg px-3 py-1.5 max-md:py-2.5 text-xs cursor-pointer transition-all duration-200 select-none",
             isDropping
               ? "bg-primary/15 ring-1 ring-primary/40 text-foreground"
-              : "text-muted-foreground hover:bg-white/10 dark:hover:bg-white/5",
+              : "text-muted-foreground hover:bg-white/10 dark:hover:bg-white/5 active:bg-white/10 dark:active:bg-white/5",
           )}
         >
           <ChevronRight
@@ -481,10 +476,14 @@ export function AppSidebar({
                 e.stopPropagation();
                 setEditFolderColorId(editFolderColorId === folder.id ? null : folder.id);
               }}
-              className="h-3 w-3 rounded-full shrink-0 ring-1 ring-white/20 hover:ring-primary/50 transition-all cursor-pointer"
-              style={{ backgroundColor: folder.color }}
+              className="h-5 w-5 max-md:h-7 max-md:w-7 flex items-center justify-center rounded-full shrink-0 hover:ring-primary/50 active:ring-primary/50 transition-all cursor-pointer"
               title="更换颜色"
-            />
+            >
+              <span
+                className="h-3 w-3 rounded-full ring-1 ring-white/20"
+                style={{ backgroundColor: folder.color }}
+              />
+            </button>
           )}
 
           {/* Rename button */}
@@ -497,7 +496,7 @@ export function AppSidebar({
                 setEditFolderValue(folder.name);
                 setTimeout(() => editFolderInputRef.current?.select(), 0);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
               title="重命名"
             >
               <Pencil className="h-2.5 w-2.5" />
@@ -512,7 +511,7 @@ export function AppSidebar({
                 e.stopPropagation();
                 handleDeleteFolder(folder.id);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
               title="删除文件夹"
             >
               <X className="h-2.5 w-2.5" />
@@ -625,10 +624,10 @@ export function AppSidebar({
         )}
       </div>
 
-      {/* Upload zone + Document list */}
+      {/* Content area: upload + search + doc list — flex-1 min-h-0 enables proper scrolling */}
       {!collapsed && (
-        <>
-          <div className="px-3 pt-1 pb-2">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="px-3 pt-1 pb-2 shrink-0">
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -677,7 +676,7 @@ export function AppSidebar({
 
           {/* Search + Create Folder */}
           {(documents.length > 3 || hasAnyFolders) && (
-            <div className="px-3 pb-1 flex items-center gap-1.5">
+            <div className="px-3 pb-1 flex items-center gap-1.5 shrink-0">
               {documents.length > 3 && (
                 <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
@@ -710,7 +709,7 @@ export function AppSidebar({
 
           {/* Create folder form */}
           {showCreateFolder && onCreateFolder && (
-            <div className="px-3 pb-2 space-y-2">
+            <div className="px-3 pb-2 space-y-2 shrink-0">
               <div className="flex items-center gap-1.5">
                 <input
                   type="text"
@@ -751,8 +750,8 @@ export function AppSidebar({
             </div>
           )}
 
-          {/* Document list with folders */}
-          <ScrollArea className="flex-1">
+          {/* Document list with folders — fills remaining space and scrolls */}
+          <ScrollArea className="flex-1 min-h-0">
             <div className="px-2 pb-2 space-y-0.5">
               {filteredDocs.length === 0 && documents.length > 0 && (
                 <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
@@ -805,7 +804,7 @@ export function AppSidebar({
               {!hasAnyFolders && filteredDocs.map(renderDocItem)}
             </div>
           </ScrollArea>
-        </>
+        </div>
       )}
 
       {/* Footer */}

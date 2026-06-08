@@ -667,17 +667,17 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
             {cards.map((card, i) => (
               <Card key={card.id ?? i} className="relative group rounded-xl border-border/50 bg-card/80 shadow-sm">
                 {/* Hover actions */}
-                <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 max-md:opacity-100 group-hover:opacity-100 transition-opacity z-10">
                   <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleImportant(card.id); }}
-                    className={`p-1 rounded transition-colors ${card.isImportant ? "text-amber-400 hover:text-amber-500" : "text-muted-foreground/50 hover:text-amber-400"}`} title={card.isImportant ? "取消重要标记" : "标记为重要"}>
+                    className={`p-1 max-md:p-1.5 rounded active:bg-muted transition-colors ${card.isImportant ? "text-amber-400 hover:text-amber-500" : "text-muted-foreground/50 hover:text-amber-400"}`} title={card.isImportant ? "取消重要标记" : "标记为重要"}>
                     <Star className={`h-3 w-3 ${card.isImportant ? "fill-amber-400" : ""}`} />
                   </button>
                   <button type="button" onClick={() => { setEditingCardId(card.id); setEditForm({ question: card.question, answer: card.answer, explanation: card.explanation ?? "" }); }}
-                    className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
+                    className="p-1 max-md:p-1.5 rounded active:bg-muted hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
                     <Pencil className="h-3 w-3" />
                   </button>
                   <button type="button" onClick={() => { if (confirm("确定删除这张卡片？")) { deleteFlashcard(card.id).then(() => { setCards(prev => prev.filter(c => c.id !== card.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
-                    className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
+                    className="p-1 max-md:p-1.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
                     <X className="h-3 w-3" />
                   </button>
                 </div>
