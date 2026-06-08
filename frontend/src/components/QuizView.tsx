@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil, Download, Loader2 } from "lucide-react";
+import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil, Download, Loader2, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { DeckRecord, QuizItem, QuizAttemptRecord, WeaknessItem } from "@/lib/api";
@@ -50,6 +50,13 @@ function isAnswerMatch(input: string, answer: string): boolean {
   return normalize(input) === normalize(answer);
 }
 
+/** 格式化秒数为 MM:SS */
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
   const [view, setView] = useState<"decks" | "quiz">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
@@ -80,6 +87,11 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const [saving, setSaving] = useState(false);
   const [showErrorBook, setShowErrorBook] = useState(false);
   const [weakness, setWeakness] = useState<WeaknessItem[]>([]);
+
+  // Timer state — elapsed quiz time
+  const [startTime, setStartTime] = useState<Date | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const wrongQuizzes = quizzes.filter((q) => answers.some((a) => a.quizId === q.id && !a.correct));
 
@@ -127,6 +139,24 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   ];
   const [mindMapTextIdx, setMindMapTextIdx] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Timer interval — ticks every second while startTime is set
+  useEffect(() => {
+    if (!startTime) return;
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime.getTime()) / 1000));
+    }, 1000);
+    return () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    };
+  }, [startTime]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    };
+  }, []);
 
   const cancelGeneration = () => {
     if (abortRef.current) {
@@ -201,6 +231,10 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const enterDeck = async (deck: DeckRecord) => {
     setCurrentDeck(deck);
     setLoading(true);
+    // Reset timer
+    setStartTime(null);
+    setElapsedSeconds(0);
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     try {
       setQuizzes(await listQuizzesByDeck(deck.id));
       setCurrentIdx(0);
@@ -260,7 +294,13 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     } catch { toast.error("删除失败"); }
   };
 
-  const handleSelect = (opt: string) => { if (!submitted) setSelected(opt); };
+  const handleSelect = (opt: string) => {
+    if (!submitted) {
+      setSelected(opt);
+      // Start timer on first answer selection
+      if (!startTime) setStartTime(new Date());
+    }
+  };
 
   const handleSubmit = () => {
     if (!selected || submitted) return;
@@ -274,8 +314,9 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
       const newAnswer = { quizId: quiz.id, selectedAnswer: selected!, correct: !!isCorrect };
       const newAnswers = [...answers, newAnswer];
       setAnswers(newAnswers);
-      // 最后一题提交时立即保存答题记录
+      // 最后一题提交时停止计时并保存答题记录
       if (currentIdx >= quizzes.length - 1) {
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
         const correctCount = newAnswers.filter((a) => a.correct).length;
         saveQuizAttempt({
           docId: docId!,
@@ -687,7 +728,15 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-4 sm:px-6 sm:py-8 space-y-4 sm:space-y-6">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground/50">
-            <span>{activeIdx + 1} / {totalItems}</span>
+            <div className="flex items-center gap-2">
+              <span>{activeIdx + 1} / {totalItems}</span>
+              {startTime && !reviewMode && (
+                <span className="inline-flex items-center gap-1 tabular-nums text-muted-foreground/60">
+                  <Clock className="h-3 w-3" />
+                  {formatElapsed(elapsedSeconds)}
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               {quiz?.quizType === "FILL_BLANK" && (
                 <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">填空题</span>
@@ -796,7 +845,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                     <p className="text-sm font-medium text-foreground/80">
                       {reviewMode
                         ? `错题完成! 重新正确 ${reviewScore}/${wrongQuizzes.length}`
-                        : `完成! 正确率 ${Math.round((score / quizzes.length) * 100)}%`}
+                        : `完成! 正确率 ${Math.round((score / quizzes.length) * 100)}%${elapsedSeconds > 0 ? ` · 用时 ${formatElapsed(elapsedSeconds)}` : ""}`}
                     </p>
                     {reviewMode && (
                       <Button variant="ghost" size="sm" className="rounded-lg text-xs h-8" onClick={endReview}>
