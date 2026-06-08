@@ -17,6 +17,7 @@ import { KnowledgeGraphPage } from "@/components/KnowledgeGraphPage";
 import { DocumentOutlineView } from "@/components/DocumentOutlineView";
 import { StatsDashboard } from "@/components/StatsDashboard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ShortcutsHelp, ShortcutsButton } from "@/components/ShortcutsHelp";
 import { OnboardingTour, isOnboardingDone } from "@/components/OnboardingTour";
 import { StepHint, isStepHintDismissed, dismissStepHint } from "@/components/StepHint";
 import { useAuth } from "@/lib/auth-context";
@@ -127,6 +128,7 @@ export default function HomePage() {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [chatContext, setChatContext] = useState("");
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
   const [docSearch, setDocSearch] = useState("");
@@ -273,12 +275,14 @@ export default function HomePage() {
     updateSessionCache({ completedSteps: next });
   }, [step1Ready, step2Ready]); // eslint-disable-line
 
-  // 全局键盘快捷键: 1-6 跳转步骤, Ctrl+/ 对话, Ctrl+Shift+D 暗黑模式
+  // 全局键盘快捷键: 1-6 跳转步骤, Ctrl+/ 对话, Ctrl+Shift+D 暗黑模式, ? 快捷键帮助
   // step 4(卡片) 时禁用数字键 1-4（卡片自评用），5-6 仍可跳转
   const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
+  const toggleShortcuts = useCallback(() => setShortcutsOpen((v) => !v), []);
   useGlobalKeyboard({
     onGoStep: goStep,
     onToggleChat: toggleChat,
+    onToggleShortcuts: toggleShortcuts,
     totalSteps: STEPS.length,
     numberKeysHandledUpTo: currentStep === 4 ? 4 : 0,
   });
@@ -622,6 +626,7 @@ export default function HomePage() {
               <MessageSquare className="h-4 w-4" />
             </Button>
             <ThemeToggle />
+            <ShortcutsButton onClick={toggleShortcuts} />
 
             {/* User menu → 个人中心 */}
             <button
@@ -803,6 +808,9 @@ export default function HomePage() {
 
       {/* Onboarding tour — first-time user guide */}
       <OnboardingTour open={tourOpen} onClose={() => setTourOpen(false)} />
+
+      {/* Keyboard shortcuts help overlay */}
+      <ShortcutsHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </div>
   );
 }
