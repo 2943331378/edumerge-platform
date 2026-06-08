@@ -54,10 +54,10 @@ public class SubjectClassifier {
 
         String sample = text.length() > 2000 ? text.substring(0, 2000) : text;
         try {
-            ChatResponse response = chatLanguageModel.chat(
+            ChatResponse response = AiGeneratorBase.AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(
                     new SystemMessage(CLASSIFICATION_PROMPT),
                     new UserMessage("以下是文档内容片段：\n\n" + sample)
-            );
+            ));
             String result = response.aiMessage().text().trim().toUpperCase()
                     .replaceAll("[^A-Z_]", "");
 

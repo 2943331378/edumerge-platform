@@ -276,7 +276,7 @@ public class AiOutlineGenerator extends AiGeneratorBase {
         messages.add(new UserMessage("请分析以上文档内容, 判断文档类型并提取章节大纲。仅输出 JSON。"));
 
         try {
-            ChatResponse response = chatLanguageModel.chat(messages);
+            ChatResponse response = AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(messages));
             return response.aiMessage().text();
         } catch (Exception e) {
             log.error("LLM 大纲生成调用失败: {}", e.getMessage(), e);

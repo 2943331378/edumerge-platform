@@ -143,7 +143,7 @@ public class AiRagService {
             List<ChatMessage> messages = buildMessagesWithMemory(userMessage, context, contextHint, memory);
 
             log.info("调用大模型生成回答 (记忆条数={})...", memory.messages().size());
-            ChatResponse response = chatLanguageModel.chat(messages);
+            ChatResponse response = AiGeneratorBase.AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(messages));
             String answer = response.aiMessage().text();
 
             // 提取 token 用量
@@ -360,7 +360,7 @@ public class AiRagService {
 
                     用户问题: %s""".formatted(totalCount - 1, userMessage);
 
-            ChatResponse response = chatLanguageModel.chat(new UserMessage(prompt));
+            ChatResponse response = AiGeneratorBase.AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(new UserMessage(prompt)));
             if (response == null || response.aiMessage() == null || response.aiMessage().text() == null) {
                 return List.of(userMessage);
             }
@@ -404,7 +404,7 @@ public class AiRagService {
                     %s
                     仅输出JSON数组，格式: [{"id":1,"score":0.8},{"id":2,"score":0.3},...]""".formatted(userMessage, sb);
 
-            ChatResponse response = chatLanguageModel.chat(new UserMessage(prompt));
+            ChatResponse response = AiGeneratorBase.AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(new UserMessage(prompt)));
             if (response == null || response.aiMessage() == null || response.aiMessage().text() == null) {
                 log.warn("相关性过滤: LLM 返回空响应, 保留原始结果");
                 return matches;

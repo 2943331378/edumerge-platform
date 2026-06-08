@@ -1,5 +1,6 @@
 package com.edumerge.common.exception;
 
+import com.edumerge.ai.CircuitBreaker;
 import com.edumerge.common.result.Result;
 import com.edumerge.common.result.ResultCode;
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +61,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(e.getStatusCode())
                 .body(Result.fail(e.getStatusCode().value(), e.getReason() != null ? e.getReason() : "请求错误"));
+    }
+
+    /**
+     * 处理熔断器异常 (CircuitBreakerOpenException)
+     * AI 模型 API 连续失败时触发
+     */
+    @ExceptionHandler(CircuitBreaker.CircuitBreakerOpenException.class)
+    public ResponseEntity<Result<?>> handleCircuitBreakerOpenException(CircuitBreaker.CircuitBreakerOpenException e) {
+        log.warn("熔断器异常: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Result.fail(503, "AI 服务暂时不可用，请稍后重试"));
     }
 
     /**

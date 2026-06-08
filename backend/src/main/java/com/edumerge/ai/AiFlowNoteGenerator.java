@@ -109,7 +109,7 @@ public class AiFlowNoteGenerator extends AiGeneratorBase {
         messages.add(system);
         messages.add(new UserMessage("请基于以上对话记录和文档内容，提取结构化学习笔记。"));
 
-        ChatResponse response = chatLanguageModel.chat(messages);
+        ChatResponse response = AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(messages));
         return response.aiMessage().text();
     }
 }

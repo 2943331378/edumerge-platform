@@ -228,8 +228,11 @@ public abstract class AiGeneratorBase {
         };
     }
 
-    /** 调用内容生成模型 (预留 customParameters 扩展点) */
+    /** AI 模型调用熔断器：连续 5 次失败后开启，30 秒冷却。所有 AI 调用共享此实例。 */
+    public static final CircuitBreaker AI_CIRCUIT_BREAKER = new CircuitBreaker("AI-Model", 5, 30_000);
+
+    /** 调用内容生成模型 (带熔断保护) */
     protected ChatResponse chatContent(ChatModel model, List<ChatMessage> messages) {
-        return model.chat(messages);
+        return AI_CIRCUIT_BREAKER.execute(() -> model.chat(messages));
     }
 }

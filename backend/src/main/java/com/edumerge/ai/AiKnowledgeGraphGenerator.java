@@ -253,7 +253,7 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
         messages.add(system);
         messages.add(new UserMessage("请基于以上文档内容，提取跨文档知识概念网络。仅输出JSON。"));
 
-        ChatResponse response = chatLanguageModel.chat(messages);
+        ChatResponse response = AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(messages));
         return response.aiMessage().text();
     }
 
