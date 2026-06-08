@@ -1,13 +1,12 @@
 package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
-import com.edumerge.dto.DtoMapper;
-import com.edumerge.dto.FlowNoteExtractRequest;
-import com.edumerge.dto.FlowNoteResponse;
+import com.edumerge.dto.*;
 import com.edumerge.entity.FlowNote;
 import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.FlowNoteService;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -58,16 +57,28 @@ public class FlowNoteController {
 
     /** 手动创建条目 */
     @PostMapping("/entries")
-    public Result<FlowNoteResponse> create(@RequestBody FlowNote note) {
-        note.setUserId(SecurityUtils.getCurrentUserId());
-        note.setSourceType(note.getSourceType() != null ? note.getSourceType() : "USER_WRITTEN");
+    public Result<FlowNoteResponse> create(@Valid @RequestBody FlowNoteCreateRequest req) {
+        FlowNote note = FlowNote.builder()
+                .userId(SecurityUtils.getCurrentUserId())
+                .docId(req.getDocId())
+                .sessionId(req.getSessionId())
+                .category(req.getCategory())
+                .title(req.getTitle())
+                .content(req.getContent())
+                .sourceType("USER_WRITTEN")
+                .build();
         flowNoteService.create(note);
         return Result.success("条目已创建", DtoMapper.toResponse(note));
     }
 
     /** 更新条目 */
     @PutMapping("/entries/{id}")
-    public Result<Void> update(@PathVariable Long id, @RequestBody FlowNote note) {
+    public Result<Void> update(@PathVariable Long id, @RequestBody FlowNoteUpdateRequest req) {
+        FlowNote note = new FlowNote();
+        note.setCategory(req.getCategory());
+        note.setTitle(req.getTitle());
+        note.setContent(req.getContent());
+        note.setSourceSegment(req.getSourceSegment());
         flowNoteService.update(id, note);
         return Result.success("条目已更新", null);
     }
