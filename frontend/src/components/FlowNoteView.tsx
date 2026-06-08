@@ -172,10 +172,13 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
             <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs" onClick={() => setShowAddForm((v) => !v)}>
               <Plus className="h-3.5 w-3.5" />手动添加
             </Button>
-            <Button size="sm" className="rounded-xl gap-1.5 h-8 text-xs" onClick={handleExtract} disabled={extracting || !docId || docStatus !== "COMPLETED"}>
-              {extracting ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {extracting ? "提取中..." : "从对话提取"}
-            </Button>
+            <div className="flex flex-col items-end gap-0.5">
+              <Button size="sm" className="rounded-xl gap-1.5 h-8 text-xs" onClick={handleExtract} disabled={extracting || !docId || docStatus !== "COMPLETED"} title="需至少 5 轮对话后可提取">
+                {extracting ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                {extracting ? "提取中..." : "从对话提取"}
+              </Button>
+              <span className="text-[9px] text-muted-foreground/40 leading-none">需至少 5 轮对话后可提取</span>
+            </div>
           </div>
         </div>
       )}
