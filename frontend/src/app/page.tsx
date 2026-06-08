@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ChatDrawer } from "@/components/chat/ChatDrawer";
 import { AppSidebar, type UploadedDoc } from "@/components/app-sidebar";
@@ -21,14 +20,15 @@ import { OnboardingTour, isOnboardingDone } from "@/components/OnboardingTour";
 import { StepHint, isStepHintDismissed, dismissStepHint } from "@/components/StepHint";
 import { useAuth } from "@/lib/auth-context";
 import { useGlobalKeyboard } from "@/hooks/useGlobalKeyboard";
+import { useSessionState } from "@/hooks/useSessionState";
+import { useStepNavigation } from "@/hooks/useStepNavigation";
+import { useUploadState } from "@/hooks/useUploadState";
 import {
   Upload, NotebookText, GitFork, Layers, HelpCircle,
   MessageSquare, ChevronLeft, ChevronRight,
   FileText, Loader2, X, BarChart3, Menu, Search, LogOut, User, BookOpen, GitBranch,
-  CheckCircle2, Clock,
+  CheckCircle2,
 } from "lucide-react";
-import type { SessionRecord, MindMapRecord, StudyNoteRecord } from "@/lib/api";
-import { listSessions, uploadDocument, deleteDocument, retryDocument, renameDocument } from "@/lib/api";
 
 const STEPS: StepDef[] = [
   { id: 1, label: "文档大纲", icon: Upload },
@@ -115,31 +115,16 @@ function ProcessingStatusCard({ fileName, status, chunkCount }: {
 export default function HomePage() {
   const auth = useAuth();
 
-  const [currentStep, setCurrentStep] = useState(1);
+  const { currentStep, setCurrentStep, goStep, goNext, goPrev } = useStepNavigation();
 
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
-  const [activeSession, setActiveSession] = useState<SessionRecord | null>(null);
+  const {
+    sessions, activeSession, setActiveSession, sessionCache, loadSessions, updateSessionCache,
+    handleSelectSession, handleDeleteDocument, handleRetryDocument, handleRenameDocument,
+  } = useSessionState(() => setCurrentStep(1));
+
+  const { uploading, uploadProgress, handleUpload } = useUploadState(loadSessions, setActiveSession, setCurrentStep);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-
-  // Per-session cache to preserve AI content when switching documents
-  const [sessionCache, setSessionCache] = useState<
-    Map<number, {
-      note?: StudyNoteRecord | null;
-      mindMap?: MindMapRecord | null;
-      completedSteps?: Set<number>;
-      sectionContext?: string;
-      startChunk?: number;
-      endChunk?: number;
-      outlineGenerateTrigger?: { type: string; counter: number };
-      noteGenerating?: boolean;
-      mindMapGenerating?: boolean;
-      flashcardGenerating?: boolean;
-      quizGenerating?: boolean;
-    }>
-  >(new Map());
-
   const [chatOpen, setChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState("");
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
@@ -200,16 +185,6 @@ export default function HomePage() {
     setStepHintVisible(false);
   };
 
-  const updateSessionCache = (updates: Partial<NonNullable<typeof activeCache>>) => {
-    if (!activeSession) return;
-    setSessionCache((prev) => {
-      const next = new Map(prev);
-      const existing = next.get(activeSession.id) ?? {};
-      next.set(activeSession.id, { ...existing, ...updates });
-      return next;
-    });
-  };
-
   // 大纲底部工具栏 → 导航到目标步骤并传递选中章节
   const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string, startChunk?: number, endChunk?: number) => {
     const prev = activeCache?.outlineGenerateTrigger?.counter ?? 0;
@@ -222,22 +197,6 @@ export default function HomePage() {
     const targetStep = OUTLINE_STEP_MAP[type];
     if (targetStep) setCurrentStep(targetStep);
   }, [activeSession, sessionCache]);
-
-  const loadSessions = useCallback(async () => {
-    try {
-      const list = await listSessions();
-      setSessions(list);
-      setActiveSession((cur) => {
-        if (!cur?.id) {
-          const completed = list.find((s) => s.docStatus === "COMPLETED");
-          return completed ?? list[0] ?? null;
-        }
-        // 用列表中的最新数据替换，确保 status 等字段同步更新
-        const updated = list.find((s) => s.id === cur.id);
-        return updated ?? cur;
-      });
-    } catch { /* ignore */ }
-  }, []);
 
   useEffect(() => {
     const t = setTimeout(loadSessions, 0);
@@ -303,85 +262,6 @@ export default function HomePage() {
     pageCount: s.pageCount,
   }));
 
-  const handleSelectSession = useCallback((sessionId: number) => {
-    const s = sessions.find((x) => x.id === sessionId);
-    if (s) {
-      setActiveSession(s);
-      setCurrentStep(1);
-    }
-  }, [sessions]);
-
-  const handleDeleteDocument = useCallback(async (sessionId: number) => {
-    const session = sessions.find((s) => s.id === sessionId);
-    if (!session?.docId) return;
-    if (!confirm(`确定删除「${session.fileName ?? session.title}」及其全部关联数据吗？此操作不可撤销。`)) return;
-    try {
-      await deleteDocument(session.docId);
-      toast.success("文档已删除");
-      if (activeSession?.id === sessionId) {
-        setActiveSession(null);
-        setSessionCache((prev) => {
-          const next = new Map(prev);
-          next.delete(sessionId);
-          return next;
-        });
-      }
-      await loadSessions();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除失败");
-    }
-  }, [sessions, activeSession, loadSessions]);
-
-  const handleRetryDocument = useCallback(async (sessionId: number) => {
-    const session = sessions.find((s) => s.id === sessionId);
-    if (!session?.docId) return;
-    try {
-      await retryDocument(session.docId);
-      toast.success("已重新提交处理");
-      await loadSessions();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "重试失败");
-    }
-  }, [sessions, loadSessions]);
-
-  const handleRenameDocument = useCallback(async (sessionId: number, newTitle: string) => {
-    const session = sessions.find((s) => s.id === sessionId);
-    if (!session?.docId) return;
-    try {
-      await renameDocument(session.docId, newTitle);
-      await loadSessions();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "重命名失败");
-    }
-  }, [sessions, loadSessions]);
-
-  const handleUpload = useCallback(async (file: File | FileList) => {
-    if (uploading) return;
-    const files = file instanceof FileList ? Array.from(file) : [file];
-    if (files.length === 0) return;
-    setUploading(true);
-    setUploadProgress(0);
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const result = await uploadDocument(files[i], (p) => {
-          const overall = ((i * 100 + p) / files.length);
-          setUploadProgress(Math.round(overall));
-        });
-        toast.success(`${result.fileName} 上传成功，正在后台处理`);
-      }
-      setUploadProgress(100);
-      await loadSessions();
-      const list = await listSessions();
-      if (list.length > 0) {
-        setActiveSession(list[0]);
-        setCurrentStep(1);
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传失败");
-    }
-    setUploading(false);
-  }, [loadSessions, uploading]);
-
   const step1Ready = !!activeSession && activeSession.docStatus === "COMPLETED";
   const step2Ready = !!note;
 
@@ -391,16 +271,6 @@ export default function HomePage() {
     if (step2Ready) next.add(2);
     updateSessionCache({ completedSteps: next });
   }, [step1Ready, step2Ready]); // eslint-disable-line
-
-  const goStep = useCallback((s: number) => {
-    if (s >= 1 && s <= STEPS.length) setCurrentStep(s);
-  }, []);
-  const goNext = useCallback(() => {
-    setCurrentStep((prev) => Math.min(prev + 1, STEPS.length));
-  }, []);
-  const goPrev = useCallback(() => {
-    setCurrentStep((prev) => Math.max(prev - 1, 1));
-  }, []);
 
   // 全局键盘快捷键: 1-6 跳转步骤, Ctrl+/ 对话, Ctrl+Shift+D 暗黑模式
   // step 4(卡片) 时禁用数字键 1-4（卡片自评用），5-6 仍可跳转
