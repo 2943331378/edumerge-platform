@@ -16,14 +16,15 @@ import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.TextContent;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.http.*;
 import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
 import org.apache.poi.hslf.usermodel.HSLFTextShape;
@@ -54,7 +55,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -79,19 +79,10 @@ public class DocumentListener {
     private int chunkSize;
     @Value("${app.rag.chunk-overlap:100}")
     private int chunkOverlap;
-    @Value("${app.ai.vision.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}")
-    private String visionBaseUrl;
-    @Value("#{systemEnvironment['DASHSCOPE_API_KEY'] ?: '${langchain4j.openai.embedding-api-key:}'}")
-    private String visionApiKey;
-    @Value("${app.ai.vision.model:qwen-vl-max}")
-    private String visionModel;
-    @Value("${app.ai.vision.max-tokens:4096}")
-    private int visionMaxTokens;
     @Value("${app.ai.vision.ocr-concurrency:10}")
     private int visionOcrConcurrency;
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ChatModel visionChatModel;
 
     @Autowired
     public DocumentListener(EmbeddingModel embeddingModel,
@@ -100,6 +91,7 @@ public class DocumentListener {
                             DocumentChunkMapper documentChunkMapper,
                             AiOutlineGenerator outlineGenerator,
                             SubjectClassifier subjectClassifier,
+                            @org.springframework.beans.factory.annotation.Qualifier("visionChatModel") ChatModel visionChatModel,
                             @org.springframework.beans.factory.annotation.Qualifier("documentTaskExecutor") ExecutorService documentTaskExecutor) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
@@ -107,6 +99,7 @@ public class DocumentListener {
         this.documentChunkMapper = documentChunkMapper;
         this.outlineGenerator = outlineGenerator;
         this.subjectClassifier = subjectClassifier;
+        this.visionChatModel = visionChatModel;
         this.documentTaskExecutor = documentTaskExecutor;
     }
 
@@ -512,7 +505,7 @@ public class DocumentListener {
             }
 
             // 文字层为空 → Vision LLM 并发逐页识别
-            log.info("PDF 无文字层, 启用 Vision OCR: model={}, pages={}, concurrency={}", visionModel, pageCount, visionOcrConcurrency);
+            log.info("PDF 无文字层, 启用 Vision OCR: pages={}, concurrency={}", pageCount, visionOcrConcurrency);
             PDFRenderer renderer = new PDFRenderer(pdfDoc);
             long startTime = System.currentTimeMillis();
             Semaphore semaphore = new Semaphore(visionOcrConcurrency);
@@ -573,39 +566,15 @@ public class DocumentListener {
         return new ExtractionResult(text, 1);
     }
 
-    /** 调用 DashScope Vision API 提取图片文字 */
+    /** 调用 Vision LLM 提取图片文字 (通过 LangChain4j ChatModel 多模态接口) */
     private String callVisionApi(String base64Image) {
         try {
-            String apiUrl = visionBaseUrl + "/chat/completions";
-            String body = objectMapper.writeValueAsString(Map.of(
-                    "model", visionModel,
-                    "messages", List.of(Map.of(
-                            "role", "user",
-                            "content", List.of(
-                                    Map.of("type", "image_url",
-                                            "image_url", Map.of("url", "data:image/jpeg;base64," + base64Image)),
-                                    Map.of("type", "text",
-                                            "text", "请精确识别图片中的所有文字内容，包括手写文字、印刷文字、公式、图表文字。保持原文结构和段落划分。仅输出识别到的文字，不要添加任何解释或说明。")
-                            )
-                    )),
-                    "max_tokens", visionMaxTokens,
-                    "temperature", 0.1
-            ));
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(visionApiKey);
-            HttpEntity<String> request = new HttpEntity<>(body, headers);
-
-            ResponseEntity<String> response = restTemplate.exchange(apiUrl, HttpMethod.POST, request, String.class);
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                JsonNode root = objectMapper.readTree(response.getBody());
-                JsonNode content = root.path("choices").path(0).path("message").path("content");
-                if (!content.isMissingNode()) {
-                    return content.asText("").trim();
-                }
-            }
-            log.warn("Vision API 返回异常: status={}", response.getStatusCode());
+            UserMessage userMessage = UserMessage.from(
+                    ImageContent.from(base64Image, "image/jpeg"),
+                    TextContent.from("请精确识别图片中的所有文字内容，包括手写文字、印刷文字、公式、图表文字。保持原文结构和段落划分。仅输出识别到的文字，不要添加任何解释或说明。"));
+            ChatResponse response = visionChatModel.chat(userMessage);
+            String text = response.aiMessage().text();
+            return text != null ? text.trim() : "";
         } catch (Exception e) {
             log.error("Vision API 调用失败: {}", e.getMessage());
         }

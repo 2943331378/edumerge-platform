@@ -41,6 +41,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 /**
@@ -61,6 +63,7 @@ public class AiRagService {
     private final DocumentMapper documentMapper;
     private final FlowNoteService flowNoteService;
     private final ObjectMapper objectMapper;
+    private final ExecutorService documentTaskExecutor;
 
     // FlowNote 自动提取：每 5 轮对话触发一次 (已持久化到 conversations.exchange_count)
 
@@ -95,7 +98,8 @@ public class AiRagService {
                         ChatHistoryMapper chatHistoryMapper,
                         DocumentMapper documentMapper,
                         FlowNoteService flowNoteService,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper,
+                        @Qualifier("documentTaskExecutor") ExecutorService documentTaskExecutor) {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.chatLanguageModel = chatLanguageModel;
@@ -106,6 +110,7 @@ public class AiRagService {
         this.documentMapper = documentMapper;
         this.flowNoteService = flowNoteService;
         this.objectMapper = objectMapper;
+        this.documentTaskExecutor = documentTaskExecutor;
     }
 
     /** 同步 RAG 对话 — 带上下文记忆 */
@@ -269,10 +274,10 @@ public class AiRagService {
         // 步骤 3: 并行嵌入 + 检索, 合并去重
         List<List<EmbeddingMatch<TextSegment>>> allResults;
         if (queries.size() > 1) {
-            List<java.util.concurrent.CompletableFuture<List<EmbeddingMatch<TextSegment>>>> futures = new ArrayList<>();
+            List<CompletableFuture<List<EmbeddingMatch<TextSegment>>>> futures = new ArrayList<>();
             for (String q : queries) {
-                futures.add(java.util.concurrent.CompletableFuture.supplyAsync(
-                        () -> searchMilvus(q, docFilter, topK)));
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> searchMilvus(q, docFilter, topK), documentTaskExecutor));
             }
             allResults = new ArrayList<>();
             for (var f : futures) {
@@ -369,6 +374,7 @@ public class AiRagService {
                 }
             }
             if (queries.isEmpty()) queries.add(userMessage);
+            while (queries.size() < totalCount) queries.add(userMessage);
             log.info("查询扩展: 原始='{}', 生成{}个查询", truncateForLog(userMessage), queries.size());
             return queries;
         } catch (Exception e) {

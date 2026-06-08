@@ -154,17 +154,13 @@ export async function regenerateDocumentOutline(docId: number): Promise<Document
 }
 
 export function uploadDocument(
-  file: File | FileList,
+  file: File,
   onProgress?: (percent: number) => void,
 ): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
-    if (file instanceof FileList) {
-      for (let i = 0; i < file.length; i++) formData.append("file", file[i]);
-    } else {
-      formData.append("file", file);
-    }
+    formData.append("file", file);
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable && onProgress) {

@@ -364,8 +364,8 @@ export default function HomePage() {
     try {
       for (let i = 0; i < files.length; i++) {
         const result = await uploadDocument(files[i], (p) => {
-          const base = (i / files.length) * 100;
-          setUploadProgress(Math.round(base + p / files.length));
+          const overall = ((i * 100 + p) / files.length);
+          setUploadProgress(Math.round(overall));
         });
         toast.success(`${result.fileName} 上传成功，正在后台处理`);
       }

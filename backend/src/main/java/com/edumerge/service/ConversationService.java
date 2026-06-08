@@ -57,7 +57,10 @@ public class ConversationService {
                 new LambdaUpdateWrapper<Conversation>()
                         .eq(Conversation::getSessionId, sessionId)
                         .setSql("exchange_count = exchange_count + 1"));
-        Conversation c = getBySessionId(sessionId);
+        Conversation c = conversationMapper.selectOne(
+                new LambdaQueryWrapper<Conversation>()
+                        .eq(Conversation::getSessionId, sessionId)
+                        .select(Conversation::getExchangeCount));
         return c != null && c.getExchangeCount() != null ? c.getExchangeCount() : 0;
     }
 
