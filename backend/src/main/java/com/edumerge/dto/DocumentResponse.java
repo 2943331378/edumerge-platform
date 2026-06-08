@@ -23,6 +23,7 @@ public class DocumentResponse {
     private String statusMessage;
     private Integer chunkCount;
     private Integer vectorCount;
+    private Long folderId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

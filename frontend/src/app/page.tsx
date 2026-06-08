@@ -6,7 +6,8 @@ import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ChatDrawer } from "@/components/chat/ChatDrawer";
-import { AppSidebar, type UploadedDoc } from "@/components/app-sidebar";
+import { AppSidebar, type UploadedDoc, type FolderInfo } from "@/components/app-sidebar";
+import { listFolders, createFolder, deleteFolder, updateFolder, moveDocumentToFolder } from "@/lib/api";
 import { LearningPath, type StepDef } from "@/components/learning-path";
 import { StudyNoteView } from "@/components/StudyNoteView";
 import { MindMapView } from "@/components/MindMapView";
@@ -135,7 +136,51 @@ export default function HomePage() {
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
   const [docSearch, setDocSearch] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load folders
+  const loadFolders = useCallback(async () => {
+    try {
+      const list = await listFolders();
+      setFolders(list.map((f) => ({ id: f.id, name: f.name, color: f.color, docCount: f.docCount })));
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(loadFolders, 0);
+    return () => clearTimeout(t);
+  }, [loadFolders]);
+
+  // Folder CRUD callbacks
+  const handleCreateFolder = useCallback(async (name: string, color: string) => {
+    await createFolder({ name, color });
+    await loadFolders();
+  }, [loadFolders]);
+
+  const handleDeleteFolder = useCallback(async (folderId: number) => {
+    await deleteFolder(folderId);
+    await loadFolders();
+    await loadSessions(); // documents moved back to root
+  }, [loadFolders, loadSessions]);
+
+  const handleRenameFolder = useCallback(async (folderId: number, name: string) => {
+    await updateFolder(folderId, { name });
+    await loadFolders();
+  }, [loadFolders]);
+
+  const handleUpdateFolderColor = useCallback(async (folderId: number, color: string) => {
+    await updateFolder(folderId, { color });
+    await loadFolders();
+  }, [loadFolders]);
+
+  const handleMoveDocument = useCallback(async (sessionId: number, folderId: number | null) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session?.docId) return;
+    await moveDocumentToFolder(session.docId, folderId);
+    await loadSessions();
+    await loadFolders(); // update doc counts
+  }, [sessions, loadSessions, loadFolders]);
 
   // 桌面端用侧边面板，移动端跳转全屏页面
   const openDashboard = useCallback(() => {
@@ -268,6 +313,7 @@ export default function HomePage() {
     chunks: s.chunkCount ?? 0,
     fileType: s.fileType,
     pageCount: s.pageCount,
+    folderId: s.folderId,
   }));
 
   const step1Ready = !!activeSession && activeSession.docStatus === "COMPLETED";
@@ -570,12 +616,18 @@ export default function HomePage() {
       <a href="#main-content" className="skip-to-content">跳转到主内容</a>
       <AppSidebar
         documents={sidebarDocs}
+        folders={folders}
         activeSessionId={activeSession?.id ?? null}
         onSelectSession={handleSelectSession}
         onUpload={handleUpload}
         onDeleteDocument={handleDeleteDocument}
         onRetryDocument={handleRetryDocument}
         onRenameDocument={handleRenameDocument}
+        onCreateFolder={handleCreateFolder}
+        onDeleteFolder={handleDeleteFolder}
+        onRenameFolder={handleRenameFolder}
+        onUpdateFolderColor={handleUpdateFolderColor}
+        onMoveDocument={handleMoveDocument}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
       />

@@ -365,6 +365,27 @@ CREATE TABLE IF NOT EXISTS document_outlines (
     INDEX idx_do_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档大纲表';
 
+-- ===== 文档文件夹表 =====
+CREATE TABLE IF NOT EXISTS document_folders (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '文件夹ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    name VARCHAR(100) NOT NULL COMMENT '文件夹名称',
+    color VARCHAR(20) DEFAULT '#6366f1' COMMENT '颜色标签 (hex)',
+    parent_id BIGINT DEFAULT NULL COMMENT '父文件夹ID (NULL=顶级)',
+    sort_order INT DEFAULT 0 COMMENT '排序权重',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    INDEX idx_df_user_id (user_id),
+    INDEX idx_df_parent_id (parent_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES document_folders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档文件夹表';
+
+-- ===== 增量变更：documents 表新增 folder_id 列 =====
+ALTER TABLE documents ADD COLUMN folder_id BIGINT DEFAULT NULL COMMENT '所属文件夹ID';
+ALTER TABLE documents ADD FOREIGN KEY (folder_id) REFERENCES document_folders(id) ON DELETE SET NULL;
+
 -- ===== 增量变更：documents 表新增 subject_type 列 =====
 -- 已有数据库执行此语句安全（IF NOT EXISTS 不支持，用 IGNORE 跳过重复列错误）
 ALTER TABLE documents ADD COLUMN subject_type VARCHAR(20) DEFAULT 'GENERAL' COMMENT '学科类型: ALGORITHM/MATH/PROGRAMMING/SCIENCE/THEORY/MEDICAL/HUMANITIES/GENERAL';

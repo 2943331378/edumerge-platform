@@ -114,6 +114,7 @@ public class SessionService {
             item.put("chunkCount", doc != null ? doc.getChunkCount() : null);
             item.put("vectorCount", doc != null ? doc.getVectorCount() : null);
             item.put("pageCount", doc != null ? doc.getPageCount() : null);
+            item.put("folderId", doc != null ? doc.getFolderId() : null);
             item.put("createdAt", s.getCreatedAt());
             result.add(item);
         }

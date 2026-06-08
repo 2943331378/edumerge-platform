@@ -20,6 +20,7 @@ public final class DtoMapper {
                 .fileName(d.getFileName()).fileSize(d.getFileSize()).fileType(d.getFileType())
                 .status(d.getStatus()).statusMessage(d.getStatusMessage())
                 .chunkCount(d.getChunkCount()).vectorCount(d.getVectorCount())
+                .folderId(d.getFolderId())
                 .createdAt(d.getCreatedAt()).updatedAt(d.getUpdatedAt())
                 .build();
     }

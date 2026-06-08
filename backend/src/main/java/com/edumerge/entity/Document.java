@@ -34,6 +34,7 @@ public class Document {
     private Integer vectorCount;
     private Integer pageCount;
     private String subjectType;
+    private Long folderId;
 
     @TableLogic
     private Integer deleted;

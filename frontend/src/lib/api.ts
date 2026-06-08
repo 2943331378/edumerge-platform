@@ -123,6 +123,7 @@ export interface SessionRecord {
   chunkCount: number | null;
   vectorCount: number | null;
   pageCount: number | null;
+  folderId: number | null;
   createdAt: string;
 }
 
@@ -886,4 +887,45 @@ export async function getConceptDetail(conceptId: number): Promise<ConceptDetail
 
 export async function getConceptDocuments(conceptId: number): Promise<ConceptDocSource[]> {
   return request<ConceptDocSource[]>(`/knowledge-graph/concepts/${conceptId}/documents`);
+}
+
+// ===== 文档文件夹 (Document Folders) =====
+
+export interface FolderRecord {
+  id: number;
+  name: string;
+  color: string;
+  parentId: number | null;
+  sortOrder: number;
+  docCount: number;
+  createdAt: string;
+}
+
+export async function listFolders(): Promise<FolderRecord[]> {
+  return request<FolderRecord[]>("/folders");
+}
+
+export async function createFolder(data: { name: string; color?: string; parentId?: number; sortOrder?: number }): Promise<FolderRecord> {
+  return request<FolderRecord>("/folders", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateFolder(id: number, data: { name?: string; color?: string; sortOrder?: number }): Promise<void> {
+  return request<void>(`/folders/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteFolder(id: number): Promise<void> {
+  return request<void>(`/folders/${id}`, { method: "DELETE" });
+}
+
+export async function moveDocumentToFolder(docId: number, folderId: number | null): Promise<void> {
+  return request<void>(`/folders/documents/${docId}/move`, {
+    method: "PUT",
+    body: JSON.stringify({ folderId }),
+  });
 }
