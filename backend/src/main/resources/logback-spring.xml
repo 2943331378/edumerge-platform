@@ -5,20 +5,29 @@
     <property name="LOG_FILE_MAX_SIZE" value="10MB"/>
     <property name="LOG_FILE_MAX_HISTORY" value="30"/>
 
-    <!-- 控制台输出 -->
+    <!-- MDC traceId 注入过滤器 -->
+    <turboFilter class="ch.qos.logback.classic.turbo.MDCFilter">
+        <MDCKey>traceId</MDCKey>
+        <Value>unknown</Value>
+        <OnMatch>NEUTRAL</OnMatch>
+    </turboFilter>
+
+    <!-- 控制台输出 — 开发环境保留可读格式 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [traceId=%X{traceId:-}] - %msg%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
 
-    <!-- 文件输出 -->
+    <!-- 文件输出 — JSON 结构化日志 (ELK/Loki 友好) -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOG_FILE}</file>
-        <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
-            <charset>UTF-8</charset>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <includeMdcKeyName>requestId</includeMdcKeyName>
+            <timeZone>Asia/Shanghai</timeZone>
         </encoder>
         <!-- 日志轮转策略 -->
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
@@ -36,7 +45,7 @@
         <appender-ref ref="FILE"/>
     </appender>
 
-    <!-- 错误日志 -->
+    <!-- 错误日志 — 同样使用 JSON 格式 -->
     <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/error.log</file>
         <filter class="ch.qos.logback.classic.filter.LevelFilter">
@@ -44,9 +53,10 @@
             <onMatch>ACCEPT</onMatch>
             <onMismatch>DENY</onMismatch>
         </filter>
-        <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
-            <charset>UTF-8</charset>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <timeZone>Asia/Shanghai</timeZone>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
             <fileNamePattern>logs/error.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
@@ -66,6 +76,9 @@
     <logger name="org.springframework.web" level="INFO"/>
     <logger name="com.baomidou.mybatisplus" level="DEBUG"/>
     <logger name="org.apache.http" level="WARN"/>
+
+    <!-- Actuator 端点日志降噪 -->
+    <logger name="org.springframework.boot.actuate" level="INFO"/>
 
     <!-- 根日志级别 -->
     <root level="INFO">

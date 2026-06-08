@@ -206,3 +206,20 @@ server:
     include-binding-errors: always
     include-stacktrace: on_param
     include-exception: false
+
+# ===== Actuator + Prometheus 监控 =====
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info,metrics
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: edumerge
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
