@@ -194,4 +194,19 @@
 /* ─── 品牌衬线字体 ─── */
 .font-brand {
   font-family: "Playfair Display", "Noto Serif SC", Georgia, serif;
+
+/* ─── 无障碍: 焦点指示器 ─── */
+@layer base {
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary;
+  }
+}
+
+/* ─── 无障碍: Skip to content ─── */
+.skip-to-content {
+  @apply sr-only;
+}
+.skip-to-content:focus {
+  @apply not-sr-only fixed top-2 left-2 z-[9999] px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium;
+}
 }

@@ -364,6 +364,9 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
           ref={listRef}
           onScroll={handleScroll}
           className="absolute inset-0 overflow-y-auto"
+          role="log"
+          aria-live="polite"
+          aria-label="对话消息"
         >
           {historyLoading ? (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">

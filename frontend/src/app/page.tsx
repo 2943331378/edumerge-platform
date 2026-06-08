@@ -557,6 +557,8 @@ export default function HomePage() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {/* Skip to content — keyboard-only */}
+      <a href="#main-content" className="skip-to-content">跳转到主内容</a>
       <AppSidebar
         documents={sidebarDocs}
         activeSessionId={activeSession?.id ?? null}
@@ -569,7 +571,7 @@ export default function HomePage() {
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
       />
 
-      <main className="flex-1 flex flex-col min-w-0">
+      <main id="main-content" role="main" className="flex-1 flex flex-col min-w-0">
         <header className="flex items-center justify-between px-3 md:px-4 py-2 border-b border-border/50 bg-background/50 backdrop-blur shrink-0">
           <div className="flex items-center gap-2 md:gap-3">
             <button
@@ -725,7 +727,7 @@ export default function HomePage() {
       {userMenuOpen && (
         <>
           <div className="hidden md:block fixed inset-0 z-40 bg-black/30" onClick={() => setUserMenuOpen(false)} />
-          <div className="hidden md:flex fixed right-0 top-0 bottom-0 z-50 w-[340px] max-w-[85vw] bg-card border-l border-border shadow-2xl flex-col animate-in slide-in-from-right duration-200">
+          <div role="dialog" aria-modal="true" aria-label="个人中心" className="hidden md:flex fixed right-0 top-0 bottom-0 z-50 w-[340px] max-w-[85vw] bg-card border-l border-border shadow-2xl flex-col animate-in slide-in-from-right duration-200">
             {/* 用户信息 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
               <div className="flex items-center gap-2.5 min-w-0">

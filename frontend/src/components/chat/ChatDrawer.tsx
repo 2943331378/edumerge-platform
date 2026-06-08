@@ -77,6 +77,9 @@ export function ChatDrawer({ open, onClose, docUuid, docId, activityType, contex
       {/* Drawer panel — mobile: bottom sheet, desktop: right slide-in */}
       <div
         ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={activityType && ACTIVITY_LABELS[activityType] ? `关于「${ACTIVITY_LABELS[activityType]}」的对话` : "AI 对话助手"}
         className={cn(
           "fixed z-50 flex flex-col transition-transform duration-300 ease-in-out",
           "bg-white dark:bg-slate-900 shadow-2xl",
