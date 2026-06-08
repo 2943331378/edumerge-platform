@@ -4,6 +4,7 @@ import com.edumerge.common.result.Result;
 import com.edumerge.dto.LearnerDashboardResponse;
 import com.edumerge.dto.LearningStatsResponse;
 import com.edumerge.dto.StatsResponse;
+import com.edumerge.service.LearnerDashboardService;
 import com.edumerge.service.StatsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,10 +24,12 @@ import java.util.Map;
 public class StatsController {
 
     private final StatsService statsService;
+    private final LearnerDashboardService learnerDashboardService;
 
     @Autowired
-    public StatsController(StatsService statsService) {
+    public StatsController(StatsService statsService, LearnerDashboardService learnerDashboardService) {
         this.statsService = statsService;
+        this.learnerDashboardService = learnerDashboardService;
     }
 
     /**
@@ -72,7 +75,7 @@ public class StatsController {
      */
     @GetMapping("/learner")
     public Result<LearnerDashboardResponse> learnerDashboard() {
-        LearnerDashboardResponse resp = statsService.calculateLearnerDashboard();
+        LearnerDashboardResponse resp = learnerDashboardService.calculate();
         return Result.success(resp);
     }
 
