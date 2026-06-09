@@ -1,6 +1,7 @@
 package com.edumerge.controller;
 
 import com.edumerge.ai.AiRagService;
+import com.edumerge.dto.ChatStreamRequest;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.SessionService;
 import dev.langchain4j.data.segment.TextSegment;
@@ -50,14 +51,14 @@ public class LearningChatController {
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestBody Map<String, String> body,
+    public SseEmitter stream(@RequestBody ChatStreamRequest body,
                               HttpServletResponse response) {
-        String message = body.get("message");
-        String documentId = body.get("documentId");
-        String sessionIdStr = body.get("sessionId");
-        String docIdStr = body.get("docId");
-        String activityType = body.get("activityType");
-        String contextHint = body.get("contextHint");
+        String message = body.getMessage();
+        String documentId = body.getDocumentId();
+        String sessionIdStr = body.getSessionId();
+        String docIdStr = body.getDocId();
+        String activityType = body.getActivityType();
+        String contextHint = body.getContextHint();
 
         // 解析 docId（数据库主键，用于 FlowNote 精确关联）
         Long docId = null;

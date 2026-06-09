@@ -215,11 +215,12 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
     }
 
     private String callLLM(String context, int docCount) {
-        String template = """
+        // SystemMessage: 仅静态指令（prefix cache 友好）
+        String systemTemplate = """
                 你是一个知识图谱构建专家，擅长从多篇学习文档中分析知识概念体系。
 
                 # 任务
-                分析以下 {DOC_COUNT} 篇文档的片段，提取跨文档知识概念网络。
+                分析以下文档片段，提取跨文档知识概念网络。
 
                 ## 第一步：提取核心概念
                 - "name": 概念名称（不超过20字）
@@ -236,22 +237,17 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
                 - "description": 关系描述（不超过100字）
                 - "strength": 关系强度 0.3(弱) | 0.5(中) | 0.8(强)
 
-                # 文档内容
-                {CONTEXT}
-
                 # 输出要求
                 - 仅输出纯JSON: {"concepts":[...], "relationships":[...]}
                 - 至少5个概念，最多30个概念，每个至少引用1个文档编号
                 - 使用简体中文，严格基于文档内容""";
+        SystemMessage system = new SystemMessage(systemTemplate);
 
-        String prompt = template
-                .replace("{DOC_COUNT}", String.valueOf(docCount))
-                .replace("{CONTEXT}", context);
-
-        SystemMessage system = new SystemMessage(prompt);
+        // UserMessage: 动态内容（文档上下文）
+        String userText = "# 文档内容（共" + docCount + "篇）\n" + context + "\n请基于以上文档内容，提取跨文档知识概念网络。仅输出JSON。";
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(system);
-        messages.add(new UserMessage("请基于以上文档内容，提取跨文档知识概念网络。仅输出JSON。"));
+        messages.add(new UserMessage(userText));
 
         ChatResponse response = AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(messages));
         return response.aiMessage().text();

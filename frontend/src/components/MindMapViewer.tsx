@@ -73,6 +73,10 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
     nodeMinHeight: 26,
   }), [colorByDepth, lineWidthByDepth]);
 
+  // Ref 始终指向最新 mmOptions，供 effect 内读取而不触发重运行
+  const mmOptionsRef = useRef(mmOptions);
+  useEffect(() => { mmOptionsRef.current = mmOptions; }, [mmOptions]);
+
   // 跟踪容器像素尺寸, 避开 D3 读取百分比 SVGLength 的 bug
   useEffect(() => {
     const el = containerRef.current;
@@ -99,7 +103,7 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
       mmRef.current.setData(root);
       setTimeout(() => mmRef.current?.fit(), 100);
     } else {
-      mmRef.current = Markmap.create(svg, { ...mmOptions(), autoFit: false }, root);
+      mmRef.current = Markmap.create(svg, { ...mmOptionsRef.current(), autoFit: false }, root);
       setTimeout(() => mmRef.current?.fit(), 100);
     }
     setReady(true);
@@ -113,7 +117,7 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
       mmRef.current?.destroy();
       mmRef.current = null;
     };
-  }, [markdown]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [markdown]);
 
   // 容器尺寸变化时更新 SVG 尺寸
   useEffect(() => {
@@ -127,9 +131,9 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
   // 主题切换时重新应用节点颜色
   useEffect(() => {
     if (!mmRef.current || !rootRef.current || !ready) return;
-    mmRef.current.setData(rootRef.current, mmOptions());
+    mmRef.current.setData(rootRef.current, mmOptionsRef.current());
     setTimeout(() => mmRef.current?.fit(), 100);
-  }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isDark]);
 
   // 点击节点后自动自适应
   useEffect(() => {
@@ -207,6 +211,12 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
       clone.setAttribute("height", String(h));
       clone.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
+      // Inject font-family fallback into the cloned SVG so exported PNG
+      // renders correctly even when external web fonts are unavailable.
+      const fontStyle = document.createElementNS("http://www.w3.org/2000/svg", "style");
+      fontStyle.textContent = `* { font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important; }`;
+      clone.insertBefore(fontStyle, clone.firstChild);
+
       const svgData = new XMLSerializer().serializeToString(clone);
       const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(svgBlob);
@@ -224,11 +234,13 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
 
         canvas.toBlob((blob) => {
           if (!blob) return;
+          const pngUrl = URL.createObjectURL(blob);
           const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
+          a.href = pngUrl;
           a.download = `思维导图_${new Date().toISOString().slice(0, 10)}.png`;
           a.click();
           URL.revokeObjectURL(url);
+          setTimeout(() => URL.revokeObjectURL(pngUrl), 100);
           toast.success("PNG 导出成功");
         }, "image/png");
       };
@@ -246,7 +258,12 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
     const clone = svg.cloneNode(true) as SVGSVGElement;
     clone.setAttribute("width", String(svgSize.w));
     clone.setAttribute("height", String(svgSize.h));
-    const svgData = new XMLSerializer().serializeToString(clone);
+    let svgData = new XMLSerializer().serializeToString(clone);
+    // Sanitize SVG to prevent XSS: remove script tags, event handlers, and data: URIs in href/src
+    svgData = svgData
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      .replace(/(href|src)\s*=\s*("(?:data:[^"]*)?"|'(?:data:[^']*)?')/gi, "");
     const w = window.open("", "_blank", "width=1200,height=800");
     if (!w) { toast.error("请允许弹出窗口以导出 PDF"); return; }
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>思维导图</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh}svg{max-width:100%;max-height:100vh}@media print{body{margin:0}svg{max-width:100%;page-break-inside:avoid}}</style></head><body>${svgData}</body></html>`);

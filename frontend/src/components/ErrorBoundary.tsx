@@ -12,15 +12,16 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  retryCount: number;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, retryCount: 0 };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error) {
     return { hasError: true, error };
   }
 
@@ -29,7 +30,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleReset = () => {
-    this.setState({ hasError: false, error: null });
+    this.setState((prev) => ({ hasError: false, error: null, retryCount: prev.retryCount + 1 }));
   };
 
   render() {
@@ -37,7 +38,7 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) return this.props.fallback;
 
       return (
-        <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
+        <div role="alert" className="flex flex-col items-center justify-center gap-4 p-8 text-center">
           <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10">
             <AlertCircle className="h-7 w-7 text-destructive" />
           </div>
@@ -47,10 +48,14 @@ export class ErrorBoundary extends Component<Props, State> {
               {this.state.error?.message ?? "发生了未知错误"}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={this.handleReset} className="gap-1.5">
-            <RefreshCw className="h-3.5 w-3.5" />
-            重试
-          </Button>
+          {this.state.retryCount >= 3 ? (
+            <p className="text-sm text-muted-foreground">多次重试失败，请刷新页面重试。</p>
+          ) : (
+            <Button variant="outline" size="sm" onClick={this.handleReset} className="gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" />
+              重试
+            </Button>
+          )}
         </div>
       );
     }

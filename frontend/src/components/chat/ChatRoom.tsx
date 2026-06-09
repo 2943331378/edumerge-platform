@@ -64,8 +64,10 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastQuery = useRef<string>("");
   const titledRef = useRef(false); // 是否已用首条消息命名
+  const activeIdRef = useRef(activeId);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
   // Conversation search
   const [searchQuery, setSearchQuery] = useState("");
@@ -101,7 +103,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
           setMessages([]);
           return;
         }
-      } catch { /* fallback */ }
+      } catch (e) { console.warn("加载对话列表失败:", e); }
       if (cancelled) return;
 
       const newId = randomId();
@@ -132,7 +134,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
         }
         setMessages(msgs);
         setTimeout(() => scrollToBottom(false), 50);
-      } catch { /* 静默 */ }
+      } catch { toast.error("加载对话历史失败"); }
       if (!cancelled) setHistoryLoading(false);
     })();
     return () => { cancelled = true; };
@@ -151,9 +153,10 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
 
   const handleDeleteConv = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    deleteConversation(id).catch(() => {});
-    setConversations((prev) => {
-      const remaining = prev.filter((c) => c.id !== id);
+    if (!confirm("删除此对话？所有聊天记录将一并删除。")) return;
+    const prev = conversations;
+    setConversations((curr) => {
+      const remaining = curr.filter((c) => c.id !== id);
       if (id === activeId) {
         if (remaining.length > 0) {
           setActiveId(remaining[0].id);
@@ -165,6 +168,10 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
         }
       }
       return remaining;
+    });
+    deleteConversation(id).catch(() => {
+      toast.error("删除失败，正在恢复");
+      setConversations(prev);
     });
   };
 
@@ -209,16 +216,18 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
 
   const doSend = useCallback(async (text: string) => {
     lastQuery.current = text;
+    const convId = activeId; // 快照：防止流式过程中切换会话导致状态错乱
 
     // 首条消息自动命名
     if (!titledRef.current) {
       titledRef.current = true;
       const title = text.length > 40 ? text.slice(0, 40) + "..." : text;
-      setConversations((prev) => prev.map((c) => c.id === activeId ? { ...c, title } : c));
+      setConversations((prev) => prev.map((c) => c.id === convId ? { ...c, title } : c));
     }
 
     const userMsg: Message = { id: randomId(), role: "user", content: text };
     const assistantMsg: Message = { id: randomId(), role: "assistant", content: "", loading: true };
+    const assistantMsgId = assistantMsg.id; // 稳定引用，不依赖闭包
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput("");
@@ -229,10 +238,23 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     abortRef.current = controller;
 
     try {
-      const stream = await chatStream(text, docUuid ?? undefined, activeId, docId ?? undefined, activityType ?? undefined, contextHint ?? undefined, controller.signal);
+      const stream = await chatStream(text, docUuid ?? undefined, convId, docId ?? undefined, activityType ?? undefined, contextHint ?? undefined, controller.signal);
+      if (!stream) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId ? { ...m, content: "服务器未返回数据流，请稍后重试", error: true, loading: false } : m
+          )
+        );
+        toast.error("服务器未返回数据流，请稍后重试");
+        return;
+      }
       const reader = stream.getReader();
       if (!reader) throw new Error("不支持流式读取");
 
+      // TODO: Extract this SSE parsing logic into lib/sse.ts to avoid duplication
+      // with other SSE consumers (e.g., StudyNoteView, MindMapViewer). The parsing
+      // handles: buffer splitting, multi-line data accumulation, [DONE] sentinel,
+      // and event boundary detection (blank lines).
       const decoder = new TextDecoder();
       let buffer = "";
       let streamDone = false;
@@ -245,31 +267,32 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data:")) continue;
-          const payload = trimmed.slice(5).trim();
-          if (payload === "[DONE]") { streamDone = true; break; }
-
+        // SSE spec: accumulate multiple data: fields until a blank line (event boundary),
+        // then join with "\n" and process as one event.
+        let dataBuf = "";
+        const processPayload = (payload: string) => {
+          if (payload === "[DONE]") { streamDone = true; return; }
           try {
             const data = JSON.parse(payload);
+            // 仅在当前会话仍为目标会话时更新消息，防止切换会话后 token 写入错误会话
+            if (activeIdRef.current !== convId) return;
             if (data.token) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantMsg.id ? { ...m, content: m.content + data.token } : m
+                  m.id === assistantMsgId ? { ...m, content: m.content + data.token } : m
                 )
               );
             } else if (data.sources) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantMsg.id ? { ...m, sources: data.sources } : m
+                  m.id === assistantMsgId ? { ...m, sources: data.sources } : m
                 )
               );
             } else if (data.error) {
               const errText = String(data.error);
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantMsg.id
+                  m.id === assistantMsgId
                     ? { ...m, content: errText, error: true }
                     : m
                 )
@@ -277,7 +300,21 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
               toast.error("生成失败", { description: errText });
             }
           } catch { /* skip unparseable */ }
+        };
+        for (const line of lines) {
+          const trimmed = line.trim();
+          // Empty line = event boundary — flush accumulated data
+          if (!trimmed) {
+            if (dataBuf) { processPayload(dataBuf); dataBuf = ""; }
+            if (streamDone) break;
+            continue;
+          }
+          if (!trimmed.startsWith("data:")) continue;
+          const field = trimmed.slice(5).trimStart();
+          dataBuf = dataBuf ? dataBuf + "\n" + field : field;
         }
+        // Flush remaining data if stream ended without a trailing blank line
+        if (dataBuf && !streamDone) { processPayload(dataBuf); dataBuf = ""; }
         if (streamDone) break;
       }
       reader.cancel();
@@ -285,13 +322,15 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       if (err instanceof DOMException && err.name === "AbortError") return;
       const msg = err instanceof Error ? err.message : "网络请求失败";
       // Preserve already-received content — don't wipe it with the error
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMsg.id && !m.content
-            ? { ...m, content: msg, error: true }
-            : m
-        )
-      );
+      if (activeIdRef.current === convId) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId && !m.content
+              ? { ...m, content: msg, error: true }
+              : m
+          )
+        );
+      }
       if (msg.includes("chunked") || msg.includes("interrupted") || msg.includes("network")) {
         // Connection interrupted after content received — content is preserved, just notify
         toast.error("连接中断，但已收到的内容已保留", { duration: 3000 });
@@ -383,7 +422,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
               <div
                 key={c.id}
                 onClick={() => { if (!isRenaming) handleSelectConv(c.id); }}
-                className={`group flex items-center gap-1 shrink-0 rounded-lg px-3 py-1.5 text-xs cursor-pointer transition-colors select-none
+                className={`group flex items-center gap-1 shrink-0 rounded-lg px-3 py-1.5 min-h-[44px] text-xs cursor-pointer transition-colors select-none
                   ${c.id === activeId
                     ? "bg-background shadow-sm text-foreground font-medium"
                     : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
@@ -409,7 +448,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
                 )}
                 <button
                   onClick={(e) => handleDeleteConv(e, c.id)}
-                  className="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded p-0.5 transition-opacity"
+                  className="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded min-w-[44px] min-h-[44px] p-2 flex items-center justify-center transition-opacity"
                   title="删除对话"
                 >
                   <Trash2 className="h-2.5 w-2.5" />
@@ -420,7 +459,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 rounded-lg shrink-0 ml-1"
+            className="min-w-[44px] min-h-[44px] rounded-lg shrink-0 ml-1"
             onClick={handleNewConv}
             title="新建对话"
           >
@@ -463,7 +502,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
                     className="text-xs text-muted-foreground"
                     onClick={() => setVisibleCount((c) => Math.min(c + 50, messages.length))}
                   >
-                    加载更早的消息 ({messages.length - visibleCount} 条)
+                    显示更早的消息 ({messages.length - visibleCount} 条)
                   </Button>
                 </div>
               )}
@@ -480,7 +519,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
             <Button
               size="icon"
               variant="secondary"
-              className="h-8 w-8 rounded-full shadow-md"
+              className="min-w-[44px] min-h-[44px] rounded-full shadow-md"
               onClick={() => { scrollToBottom(true); setShowScrollBtn(false); }}
             >
               <ArrowDown className="h-4 w-4" />
@@ -574,20 +613,22 @@ function EmptyState({
             : "试试下面的问题，或直接输入你的疑问"}
         </p>
       </div>
-      <div className="flex flex-col gap-1.5 w-full max-w-xs">
-        {questions.map((q) => (
-          <button
-            key={q}
-            type="button"
-            onClick={() => onSelectQuestion(q)}
-            disabled={false}
-            className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-muted/40 active:scale-[0.98] transition-all"
-          >
-            <Sparkles className="h-3 w-3 shrink-0 text-primary/50" />
-            <span>{q}</span>
-          </button>
-        ))}
-      </div>
+      {docId && (
+        <div className="flex flex-col gap-1.5 w-full max-w-xs">
+          {questions.map((q) => (
+            <button
+              key={q}
+              type="button"
+              onClick={() => onSelectQuestion(q)}
+              disabled={false}
+              className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-left text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-muted/40 active:scale-[0.98] transition-all"
+            >
+              <Sparkles className="h-3 w-3 shrink-0 text-primary/50" />
+              <span>{q}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

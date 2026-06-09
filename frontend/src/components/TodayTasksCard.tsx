@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { getLearnerDashboard, type LearnerDashboardResponse } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Layers, HelpCircle, Flame, X, RotateCcw, ChevronRight, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 const DISMISS_KEY = "edumerge_today_tasks_dismissed";
 
@@ -50,7 +51,7 @@ export function TodayTasksCard({
     setLoading(true);
     getLearnerDashboard()
       .then((d) => { if (!cancelled) setData(d); })
-      .catch(() => { /* silent */ })
+      .catch(() => { toast.error("加载今日任务失败"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [dismissed, activeSessionExists]);
@@ -82,7 +83,7 @@ export function TodayTasksCard({
       <button
         type="button"
         onClick={handleDismiss}
-        className="absolute top-2 right-2 h-7 w-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all z-10"
+        className="absolute top-2 right-2 h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all z-10"
         aria-label="关闭今日任务"
       >
         <X className="h-3.5 w-3.5" />

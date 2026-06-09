@@ -52,6 +52,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
 
@@ -60,7 +61,7 @@ export default function LoginPage() {
     if (!username.trim() || !password.trim()) { toast.error("请填写用户名和密码"); return; }
     setLoading(true);
     try {
-      await auth.login(username.trim(), password);
+      await auth.login(username.trim(), password, rememberMe);
       toast.success("欢迎回来");
       router.push("/");
     } catch (err) {
@@ -165,13 +166,14 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Username */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">用户名</label>
+                <label htmlFor="login-username" className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">用户名</label>
                 <div className="relative">
                   <UserIcon className={cn(
                     "absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors duration-200",
                     focused === "username" ? "text-primary" : "text-muted-foreground/40",
                   )} />
                   <input
+                    id="login-username"
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -191,13 +193,14 @@ export default function LoginPage() {
 
               {/* Password */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">密码</label>
+                <label htmlFor="login-password" className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">密码</label>
                 <div className="relative">
                   <Lock className={cn(
                     "absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors duration-200",
                     focused === "password" ? "text-primary" : "text-muted-foreground/40",
                   )} />
                   <input
+                    id="login-password"
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -214,6 +217,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(v => !v)}
+                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/30 hover:text-foreground transition-colors"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -222,8 +226,14 @@ export default function LoginPage() {
               </div>
 
               {/* Remember */}
-              <label className="flex items-center gap-2 cursor-pointer select-none group">
-                <input type="checkbox" className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary/20" />
+              <label htmlFor="login-remember" className="flex items-center gap-2 cursor-pointer select-none group">
+                <input
+                  id="login-remember"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary/20"
+                />
                 <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">记住登录</span>
               </label>
 

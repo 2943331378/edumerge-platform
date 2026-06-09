@@ -140,6 +140,15 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   ];
   const [mindMapTextIdx, setMindMapTextIdx] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const mindMapAbortRef = useRef<AbortController | null>(null);
+
+  // Cleanup: abort in-flight requests on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      mindMapAbortRef.current?.abort();
+    };
+  }, []);
 
   // Timer interval — ticks every second while startTime is set
   useEffect(() => {
@@ -163,11 +172,15 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
-      setLoading(false);
-      onGeneratingChange?.(false);
-      setMindMapGenerating(false);
-      toast.info("已取消生成");
     }
+    if (mindMapAbortRef.current) {
+      mindMapAbortRef.current.abort();
+      mindMapAbortRef.current = null;
+    }
+    setLoading(false);
+    onGeneratingChange?.(false);
+    setMindMapGenerating(false);
+    toast.info("已取消生成");
   };
 
   // Report current quiz context to parent for chat context injection
@@ -185,7 +198,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, reviewMode, currentIdx, reviewIdx, selected, submitted, reviewSelected, reviewSubmitted, quizzes.length, wrongQuizzes.length, onContextChange]);
 
-  // Persist quiz progress to localStorage
+  // Persist quiz progress to localStorage (debounced — not every timer tick)
   useEffect(() => {
     if (view === "quiz" && currentDeck && answers.length > 0) {
       saveProgress(quizProgressKey(currentDeck.id), {
@@ -194,7 +207,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
         elapsed: elapsedSeconds,
       });
     }
-  }, [view, currentDeck, currentIdx, answers, elapsedSeconds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, currentDeck, currentIdx, answers]);
 
   const reloadDecks = async () => {
     if (!docId) return;
@@ -226,17 +240,20 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   /** 生成全书思维大纲 → 自动跳转导图页 */
   const handleGenerateMindMap = async () => {
     if (!docId || mindMapGenerating) return;
+    const controller = new AbortController();
+    mindMapAbortRef.current = controller;
     setMindMapGenerating(true);
     setMindMapProgress(0);
     setMindMapTextIdx(0);
     try {
-      await getMindMap(docId);
+      await getMindMap(docId, controller.signal);
       setMindMapProgress(100);
       toast.success("思维导图生成成功");
       setTimeout(() => onMindMapGenerated?.(), 400);
     } catch {
       toast.error("思维导图生成失败");
     }
+    mindMapAbortRef.current = null;
     setMindMapGenerating(false);
   };
 
@@ -301,13 +318,14 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   /** 生成后自动加载列表并进入最新 Deck */
   const handleGenerate = async () => {
     if (!sessionId || generating) return;
+    if (!docId) { toast.error("文档尚未处理完成，请稍后再试"); return; }
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
     onGeneratingChange?.(true);
     try {
       await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined, startChunk, endChunk);
-      const fresh = await listDecks(docId!, "QUIZ");
+      const fresh = await listDecks(docId, "QUIZ");
       setDecks(fresh);
       onGenerated?.();
       toast.success("测试题生成成功");
@@ -338,6 +356,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
 
   const handleDeleteDeck = async (e: React.MouseEvent, deckId: number) => {
     e.stopPropagation();
+    if (!confirm("确定删除该测验组？组内所有题目将被删除且无法恢复。")) return;
     try {
       await deleteDeck(deckId);
       setDecks((prev) => prev.filter((d) => d.id !== deckId));
@@ -354,7 +373,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   };
 
   const handleSubmit = () => {
-    if (!selected || submitted) return;
+    if (!selected || submitted || !docId) return;
     setSubmitted(true);
     const quiz = quizzes[currentIdx];
     const isCorrect = quiz && (
@@ -372,13 +391,13 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
         if (currentDeck) clearProgress(quizProgressKey(currentDeck.id));
         const correctCount = newAnswers.filter((a) => a.correct).length;
         saveQuizAttempt({
-          docId: docId!,
+          docId: docId,
           deckId: currentDeck!.id,
           totalQuestions: quizzes.length,
           correctCount,
           scorePercent: Math.round((correctCount / quizzes.length) * 100),
           answerDetails: JSON.stringify(newAnswers),
-        }).then(() => reloadDecks()).catch(() => {});
+        }).then(() => reloadDecks()).catch(() => { toast.error("保存答题记录失败"); });
       }
     }
   };
@@ -423,7 +442,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
               {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
               {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
             </Button>
-            {loading ? (
+            {(loading || mindMapGenerating) ? (
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
                 <XCircle className="h-3.5 w-3.5" />
                 取消生成
@@ -611,7 +630,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
           correctCount,
           scorePercent: Math.round((correctCount / wrongQuizzes.length) * 100),
           answerDetails: JSON.stringify(newReviewAnswers),
-        }).catch(() => {});
+        }).catch(() => { toast.error("保存回顾记录失败"); });
       }
     }
   };
@@ -657,8 +676,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
               返回答题
             </Button>
           )}
-          {!reviewMode && !manageMode && submitted && (
-            <span className="ml-auto text-[11px] text-muted-foreground">得分: {score}/{currentIdx + 1}</span>
+          {!reviewMode && !manageMode && answers.length > 0 && (
+            <span className="ml-auto text-[11px] text-muted-foreground">得分: {answers.filter((a) => a.correct).length}/{answers.length}</span>
           )}
           {reviewMode && (
             <span className="ml-auto text-[11px] text-muted-foreground">错题 {reviewIdx + 1}/{wrongQuizzes.length}</span>
@@ -690,8 +709,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
             <span className="text-[11px] text-muted-foreground/60 group-hover:text-foreground/80 truncate max-w-[180px] transition-colors">
               {reviewMode ? "错题回顾" : (currentDeck?.title ?? "")}
             </span>
-            {!reviewMode && !manageMode && submitted && (
-              <span className="text-[10px] text-emerald-600/60 dark:text-emerald-400/60 font-medium">{score}/{currentIdx + 1}</span>
+            {!reviewMode && !manageMode && answers.length > 0 && (
+              <span className="text-[10px] text-emerald-600/60 dark:text-emerald-400/60 font-medium">{answers.filter((a) => a.correct).length}/{answers.length}</span>
             )}
             {reviewMode && (
               <span className="text-[10px] text-muted-foreground/40">{reviewIdx + 1}/{wrongQuizzes.length}</span>
@@ -883,7 +902,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
             ) : (
               <>
                 {!reviewMode && (
-                  <Button variant="outline" className="rounded-xl h-9" onClick={handleGenerate} disabled={loading}>
+                  <Button variant="outline" className="rounded-xl h-9" onClick={() => { if (confirm("开始新测验将覆盖当前进度，确定继续？")) handleGenerate(); }} disabled={loading}>
                     {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
                     开启新任务
                   </Button>

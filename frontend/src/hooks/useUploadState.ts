@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import type { SessionRecord } from "@/lib/api";
 import { uploadDocument, listSessions } from "@/lib/api";
@@ -16,11 +16,13 @@ export function useUploadState(
 ) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const uploadingRef = useRef(false);
 
   const handleUpload = useCallback(async (file: File | FileList) => {
-    if (uploading) return;
+    if (uploadingRef.current) return;
     const files = file instanceof FileList ? Array.from(file) : [file];
     if (files.length === 0) return;
+    uploadingRef.current = true;
     setUploading(true);
     setUploadProgress(0);
     let lastResult: { fileName: string; sessionId: number } | null = null;
@@ -45,9 +47,11 @@ export function useUploadState(
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "上传失败");
+    } finally {
+      uploadingRef.current = false;
+      setUploading(false);
     }
-    setUploading(false);
-  }, [loadSessions, setActiveSession, setCurrentStep, uploading, onUploadComplete]);
+  }, [loadSessions, setActiveSession, setCurrentStep, onUploadComplete]);
 
   return { uploading, uploadProgress, handleUpload };
 }

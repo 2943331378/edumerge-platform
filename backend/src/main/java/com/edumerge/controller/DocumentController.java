@@ -64,6 +64,7 @@ public class DocumentController {
         return Result.success(documentService.listChunks(docId));
     }
 
+    // TODO: 替换 Map<String, String> 为 RenameDocumentRequest DTO（仅含 title 字段）
     @PutMapping("/{id}")
     public Result<Void> rename(@PathVariable Long id, @RequestBody Map<String, String> body) {
         documentService.verifyOwnership(id);

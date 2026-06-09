@@ -17,7 +17,7 @@ export function ChatInput({ value, onChange, onSend, onStop, loading }: ChatInpu
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    ref.current?.focus();
+    if (window.matchMedia("(hover: hover)").matches) ref.current?.focus();
   }, []);
 
   // Auto-resize: 随内容撑高, 最大不超过视口 30%
@@ -50,11 +50,11 @@ export function ChatInput({ value, onChange, onSend, onStop, loading }: ChatInpu
           className="min-h-[46px] resize-none rounded-2xl border-muted-foreground/15 bg-muted/30 focus-visible:ring-0 focus-visible:border-primary/30 transition-colors"
         />
         {loading ? (
-          <Button size="icon" variant="outline" onClick={onStop} className="shrink-0 h-10 w-10 rounded-xl">
+          <Button size="icon" variant="outline" onClick={onStop} aria-label="停止生成" className="shrink-0 h-11 w-11 rounded-xl">
             <Square className="h-3.5 w-3.5" />
           </Button>
         ) : (
-          <Button size="icon" onClick={onSend} disabled={!value.trim()} className="shrink-0 h-10 w-10 rounded-xl">
+          <Button size="icon" onClick={onSend} disabled={!value.trim()} aria-label="发送" className="shrink-0 h-11 w-11 rounded-xl">
             <Send className="h-3.5 w-3.5" />
           </Button>
         )}

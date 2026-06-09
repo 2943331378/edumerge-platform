@@ -69,7 +69,8 @@ public class AiFlowNoteGenerator extends AiGeneratorBase {
     }
 
     private String callLLM(String conversationText, String docContext) {
-        String template = """
+        // SystemMessage: 仅静态指令（prefix cache 友好）
+        String systemTemplate = """
                 你是一个严谨的学习日志整理助手。基于对话记录和文档内容，提取结构化笔记。
 
                 # 要求
@@ -92,22 +93,20 @@ public class AiFlowNoteGenerator extends AiGeneratorBase {
 
                 # 输出格式（仅输出JSON数组）
                 [{"category":"KEY_POINT","title":"...","content":"...","sourceSegment":"..."}]
-
-                【文档内容】
-                {DCONTEXT}
-
-                【对话记录】
-                {CHAT}
                 """;
+        SystemMessage system = new SystemMessage(systemTemplate);
 
-        String prompt = template
-                .replace("{DCONTEXT}", docContext.isBlank() ? "（无）" : docContext)
-                .replace("{CHAT}", conversationText);
+        // UserMessage: 动态内容（文档上下文 + 对话记录）
+        StringBuilder userSb = new StringBuilder();
+        if (!docContext.isBlank()) {
+            userSb.append("【文档内容】\n").append(docContext).append("\n");
+        }
+        userSb.append("【对话记录】\n").append(conversationText).append("\n");
+        userSb.append("请基于以上对话记录和文档内容，提取结构化学习笔记。");
 
-        SystemMessage system = new SystemMessage(prompt);
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(system);
-        messages.add(new UserMessage("请基于以上对话记录和文档内容，提取结构化学习笔记。"));
+        messages.add(new UserMessage(userSb.toString()));
 
         ChatResponse response = AI_CIRCUIT_BREAKER.execute(() -> chatLanguageModel.chat(messages));
         return response.aiMessage().text();

@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 学习卡片接口 — 业务逻辑委托给 FlashcardService
@@ -32,11 +31,11 @@ public class FlashcardController {
     }
 
     @PostMapping("/generate")
-    public Result<List<FlashcardResponse>> generate(@RequestBody Map<String, String> body) {
-        Integer startChunk = body.get("startChunk") != null ? Integer.parseInt(body.get("startChunk")) : null;
-        Integer endChunk = body.get("endChunk") != null ? Integer.parseInt(body.get("endChunk")) : null;
+    public Result<List<FlashcardResponse>> generate(@RequestBody GenerateRequest body) {
+        Integer startChunk = body.getStartChunk() != null ? Integer.parseInt(body.getStartChunk()) : null;
+        Integer endChunk = body.getEndChunk() != null ? Integer.parseInt(body.getEndChunk()) : null;
         List<Flashcard> cards = flashcardService.generate(
-                body.get("docId"), body.get("docUuid"), body.get("sessionId"), body.get("sectionContext"), startChunk, endChunk);
+                body.getDocId(), body.getDocUuid(), body.getSessionId(), body.getSectionContext(), startChunk, endChunk);
         return Result.success("学习卡片生成成功", DtoMapper.toFlashcardResponseList(cards));
     }
 

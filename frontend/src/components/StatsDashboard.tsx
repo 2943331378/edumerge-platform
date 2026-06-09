@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import {
   getLearnerDashboard,
   type LearnerDashboardResponse,
@@ -156,20 +157,25 @@ interface StatsDashboardProps {
 export function StatsDashboard({ onAction }: StatsDashboardProps) {
   const [data, setData] = useState<LearnerDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [expandedError, setExpandedError] = useState<number | null>(null);
+  const [selectedHeatDay, setSelectedHeatDay] = useState<{ date: string; reviews: number; quizzes: number } | null>(null);
   const [dailyGoal, setDailyGoal] = useState(() => getGoal(DAILY_GOAL_KEY, DAILY_GOAL_DEFAULT));
   const [weeklyGoal, setWeeklyGoal] = useState(() => getGoal(WEEKLY_GOAL_KEY, WEEKLY_GOAL_DEFAULT));
   const [monthlyGoal, setMonthlyGoal] = useState(() => getGoal(MONTHLY_GOAL_KEY, MONTHLY_GOAL_DEFAULT));
   const [editingGoal, setEditingGoal] = useState(false);
+  const stableToday = useMemo(() => new Date(), []);
 
-  useEffect(() => {
-    let cancelled = false;
+  const fetchData = useCallback(() => {
+    setLoading(true);
+    setError(false);
     getLearnerDashboard()
-      .then((d) => { if (!cancelled) setData(d); })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .then((d) => { setData(d); setError(false); })
+      .catch(() => { setError(true); })
+      .finally(() => { setLoading(false); });
   }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading) {
     return (
@@ -185,9 +191,15 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
   if (!data) {
     return (
       <div className="flex-1 flex items-center justify-center py-16">
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
           <FileWarning className="h-8 w-8 text-muted-foreground/40 mx-auto" />
           <p className="text-sm text-muted-foreground">数据暂不可用</p>
+          {error && (
+            <Button variant="outline" size="sm" className="rounded-xl h-8" onClick={fetchData}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1" />
+              重试
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -236,7 +248,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                     key={doc.docId}
                     type="button"
                     onClick={() => onAction?.({ type: "flashcard-doc", docId: doc.docId })}
-                    className="w-full flex items-center justify-between text-xs py-1 px-1 -mx-1 rounded hover:bg-primary/5 transition-colors"
+                    className="w-full flex items-center justify-between text-xs py-2 px-1 -mx-1 rounded hover:bg-primary/5 transition-colors"
                   >
                     <span className="text-foreground/70 truncate flex-1 mr-2 text-left">{doc.docName}</span>
                     <span className={cn(
@@ -408,7 +420,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
             const maxActivity = Math.max(...monthly.map(d => d.reviews + d.quizzes), 1);
             const dayLabels = ["日", "一", "二", "三", "四", "五", "六"];
             // 让最后一列对齐到今天（今天在最右下角）
-            const today = new Date();
+            const today = stableToday;
             const todayDow = today.getDay(); // 0=Sun
             // 补齐到完整的周：从 30 天前的周日开始
             const firstDate = new Date(today);
@@ -441,11 +453,11 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
             return (
               <div>
                 {/* 星期标签 + 热力格子 */}
-                <div className="flex gap-0.5">
+                <div className="flex">
                   {/* 左侧星期标签 */}
-                  <div className="flex flex-col gap-0.5 mr-1">
+                  <div className="flex flex-col mr-1">
                     {Array.from({ length: rows }, (_, r) => (
-                      <div key={r} className="flex items-center" style={{ height: 14 }}>
+                      <div key={r} className="flex items-center h-[22px]">
                         {r % 2 === 0 && (
                           <span className="text-[8px] text-muted-foreground/30 w-3 text-right leading-none">
                             {dayLabels[(r * 7) % 7]}
@@ -454,23 +466,34 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                       </div>
                     ))}
                   </div>
-                  {/* 格子 */}
-                  <div className="flex flex-col gap-0.5">
+                  {/* 格子 — 每格 44x44px 触摸区域，内部 12px 色块居中 */}
+                  <div className="flex flex-col">
                     {Array.from({ length: rows }, (_, row) => (
-                      <div key={row} className="flex gap-0.5">
+                      <div key={row} className="flex">
                         {Array.from({ length: 7 }, (_, col) => {
                           const idx = row * 7 + col - leadingBlanks;
                           if (idx < 0 || idx >= 30) {
-                            return <div key={col} className="w-3 h-3 rounded-sm" />;
+                            return <div key={col} className="min-w-[44px] min-h-[44px]" />;
                           }
                           const day = monthly[idx];
                           const level = getLevel(day.reviews, day.quizzes);
+                          const isSelected = selectedHeatDay?.date === day.date;
                           return (
-                            <div
+                            <button
                               key={col}
+                              type="button"
                               title={`${day.date}: ${day.reviews}张卡片, ${day.quizzes}次测验`}
-                              className={cn("w-3 h-3 rounded-sm transition-colors", levelColors[level])}
-                            />
+                              onClick={() => setSelectedHeatDay(isSelected ? null : day)}
+                              className="flex items-center justify-center min-w-[44px] min-h-[44px] cursor-pointer border-0 bg-transparent p-0"
+                            >
+                              <div
+                                className={cn(
+                                  "w-3 h-3 rounded-sm transition-colors",
+                                  levelColors[level],
+                                  isSelected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+                                )}
+                              />
+                            </button>
                           );
                         })}
                       </div>
@@ -496,10 +519,31 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                     const weeklyTotal = rhythm.weekly.reduce((s, d) => s + d.reviews, 0);
                     const monthlyTotal = monthly.reduce((s, d) => s + d.reviews, 0);
                     return (
-                      <div className="space-y-1.5">
-                        <MiniProgress label="本周" current={weeklyTotal} goal={weeklyGoal} />
-                        <MiniProgress label="本月" current={monthlyTotal} goal={monthlyGoal} />
-                      </div>
+                      <>
+                        <div className="space-y-1.5">
+                          <MiniProgress label="本周" current={weeklyTotal} goal={weeklyGoal} />
+                          <MiniProgress label="本月" current={monthlyTotal} goal={monthlyGoal} />
+                        </div>
+                        {/* 选中日期详情（点击格子触发，移动端触摸友好） */}
+                        {selectedHeatDay && (
+                          <div className="flex items-center gap-3 pt-1.5 border-t border-border/30">
+                            <span className="text-[11px] font-medium text-foreground/80">{selectedHeatDay.date}</span>
+                            <span className="text-[10px] text-muted-foreground/60">
+                              {selectedHeatDay.reviews} 张卡片
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/60">
+                              {selectedHeatDay.quizzes} 次测验
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedHeatDay(null)}
+                              className="ml-auto text-[9px] text-muted-foreground/40 hover:text-muted-foreground"
+                            >
+                              关闭
+                            </button>
+                          </div>
+                        )}
+                      </>
                     );
                   })()}
                 </div>
@@ -971,14 +1015,18 @@ function TrendStat({ label, value, unit, prev }: { label: string; value: number;
         {typeof value === "number" && value % 1 !== 0 ? value.toFixed(1) : value}
         <span className="text-[10px] text-muted-foreground/40 ml-0.5">{unit}</span>
       </p>
-      {prev > 0 && (
+      {prev > 0 ? (
         <div className={cn("flex items-center justify-center gap-0.5 mt-1", trendColor)}>
           <TrendIcon className="h-2.5 w-2.5" />
           <span className="text-[9px] tabular-nums">
             {trend === "flat" ? "持平" : `${trend === "up" ? "+" : ""}${pctChange}%`}
           </span>
         </div>
-      )}
+      ) : value > 0 ? (
+        <div className="flex items-center justify-center gap-0.5 mt-1 text-primary">
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10">新</span>
+        </div>
+      ) : null}
     </div>
   );
 }

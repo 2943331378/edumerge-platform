@@ -231,6 +231,7 @@ public class QuizService {
             item.put("options", quiz.getOptions());
             item.put("answer", quiz.getAnswer());
             item.put("explanation", quiz.getExplanation());
+            item.put("quizType", quiz.getQuizType());
             item.put("errorCount", entry.getValue()[0]);
             item.put("deckId", quiz.getDeckId());
             result.add(item);

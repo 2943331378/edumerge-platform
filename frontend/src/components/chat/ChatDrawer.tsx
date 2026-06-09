@@ -35,27 +35,69 @@ export function ChatDrawer({ open, onClose, docUuid, docId, activityType, contex
     return () => { document.body.style.overflow = ""; };
   }, [open]);
 
+  // Escape key to close
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [open, onClose]);
+
+  // Focus trap: focus first focusable element on open, trap Tab/Shift+Tab
+  useEffect(() => {
+    if (!open || !panelRef.current) return;
+    const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length > 0) focusable[0].focus();
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const els = panelRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleTab);
+    return () => window.removeEventListener("keydown", handleTab);
+  }, [open]);
+
   // Swipe-to-dismiss for mobile bottom sheet
   const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const touchStartY = useRef<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
+    setIsDragging(true);
     setDragOffset(0);
   }, []);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (touchStartY.current === null) return;
     const delta = e.touches[0].clientY - touchStartY.current;
-    // Only allow dragging down (positive delta)
     setDragOffset(Math.max(0, delta));
   }, []);
 
   const handleTouchEnd = useCallback(() => {
     if (touchStartY.current === null) return;
     touchStartY.current = null;
-    // If dragged more than 100px or 30% of panel height, close
+    setIsDragging(false);
     const threshold = panelRef.current ? panelRef.current.offsetHeight * 0.3 : 100;
     if (dragOffset > threshold) {
       onClose();
@@ -81,18 +123,19 @@ export function ChatDrawer({ open, onClose, docUuid, docId, activityType, contex
         aria-modal="true"
         aria-label={activityType && ACTIVITY_LABELS[activityType] ? `关于「${ACTIVITY_LABELS[activityType]}」的对话` : "AI 对话助手"}
         className={cn(
-          "fixed z-50 flex flex-col transition-transform duration-300 ease-in-out",
+          "fixed z-50 flex flex-col",
+          isDragging ? "transition-none" : "transition-transform duration-300 ease-in-out",
           "bg-white dark:bg-slate-900 shadow-2xl",
           // Desktop: right side panel
           "md:right-0 md:top-0 md:bottom-0 md:w-full md:max-w-lg md:border-l md:border-border",
           open ? "md:translate-x-0" : "md:translate-x-full",
           // Mobile: bottom sheet
-          "max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:h-[60vh] max-md:rounded-t-2xl max-md:border-t max-md:border-border",
+          "max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:h-[85vh] max-md:rounded-t-2xl max-md:border-t max-md:border-border",
           open ? "max-md:translate-y-0" : "max-md:translate-y-full",
         )}
-        style={dragOffset > 0 ? { transform: `translateY(${dragOffset}px)`, transition: "none" } : undefined}
+        style={dragOffset > 0 ? { transform: `translateY(${dragOffset}px)` } : undefined}
       >
-        {/* Mobile drag handle — swipe down to close */}
+        {/* Mobile drag handle + header — swipe down to close */}
         <div
           className="md:hidden flex justify-center pt-2 pb-1 shrink-0 touch-none"
           onTouchStart={handleTouchStart}
@@ -102,8 +145,13 @@ export function ChatDrawer({ open, onClose, docUuid, docId, activityType, contex
           <div className="w-10 h-1 rounded-full bg-muted-foreground/20" />
         </div>
 
-        {/* Header — context-aware */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+        {/* Header — context-aware (also draggable on mobile) */}
+        <div
+          className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0 max-md:touch-none"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div>
             <h2 className="text-sm font-semibold text-foreground">
               {activityType && ACTIVITY_LABELS[activityType]

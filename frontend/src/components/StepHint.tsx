@@ -73,7 +73,8 @@ export function StepHint({ step, visible, onDismiss }: Props) {
         <button
           type="button"
           onClick={onDismiss}
-          className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-all"
+          aria-label="关闭提示"
+          className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-all"
         >
           <X className="h-3.5 w-3.5" />
         </button>

@@ -13,6 +13,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ExportBottomSheet } from "@/components/ui/export-bottom-sheet";
 import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download, Loader2, Shuffle, Star } from "lucide-react";
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
 import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards, toggleFlashcardImportant } from "@/lib/api";
@@ -110,7 +111,15 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [showImportantOnly, setShowImportantOnly] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const autoNextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mindMapAbortRef = useRef<AbortController | null>(null);
+
+  // Cleanup: abort in-flight requests on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      mindMapAbortRef.current?.abort();
+    };
+  }, []);
 
   /** Fisher-Yates 洗牌算法 */
   const shuffleArray = useCallback((arr: FlashcardItem[]) => {
@@ -172,22 +181,19 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     setShowExportSheet(false);
   };
 
-  // 组件卸载时清理定时器
-  useEffect(() => {
-    return () => {
-      if (autoNextTimerRef.current) clearTimeout(autoNextTimerRef.current);
-    };
-  }, []);
-
   const cancelGeneration = () => {
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
-      setLoading(false);
-      onGeneratingChange?.(false);
-      setMindMapGenerating(false);
-      toast.info("已取消生成");
     }
+    if (mindMapAbortRef.current) {
+      mindMapAbortRef.current.abort();
+      mindMapAbortRef.current = null;
+    }
+    setLoading(false);
+    onGeneratingChange?.(false);
+    setMindMapGenerating(false);
+    toast.info("已取消生成");
   };
 
   const toggleShuffle = () => {
@@ -211,10 +217,6 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
       await reviewFlashcard(card.id, quality);
       const labels = ["", "已标记「忘了」", "已标记「模糊」", "已标记「记住」", "已标记「秒答」"];
       toast.success(labels[quality]);
-      // 自动跳到下一张
-      if (currentIdx < displayCards.length - 1) {
-        autoNextTimerRef.current = setTimeout(() => goTo(currentIdx + 1), 300);
-      }
     } catch {
       toast.error("保存复习记录失败");
       setSelfAssessed(false);
@@ -237,6 +239,13 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     if (!docId || view !== "decks") return;
     listDueFlashcards(docId).then((due) => setDueCount(due.length)).catch(() => {});
   }, [docId, view]);
+
+  const goTo = (i: number) => {
+    setFlipped(false);
+    setSelfAssessed(false);
+    setExpanded(false);
+    setCurrentIdx(Math.max(0, Math.min(i, displayCards.length - 1)));
+  };
 
   // 键盘快捷键: Space 翻转, ←→ 切换, 1-4 自评 (仅在 cards 视图)
   // 必须在条件 return 之前调用，遵守 React Hooks 规则
@@ -269,7 +278,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
         }
         break;
     }
-  }, [view, currentIdx, flipped, selfAssessed]);
+  }, [view, currentIdx, flipped, selfAssessed, goTo]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleCardKeyboard);
@@ -325,17 +334,20 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   /** 生成全书思维大纲 → 自动跳转导图页 */
   const handleGenerateMindMap = async () => {
     if (!docId || mindMapGenerating) return;
+    const controller = new AbortController();
+    mindMapAbortRef.current = controller;
     setMindMapGenerating(true);
     setMindMapProgress(0);
     setMindMapTextIdx(0);
     try {
-      await getMindMap(docId);
+      await getMindMap(docId, controller.signal);
       setMindMapProgress(100);
       toast.success("思维导图生成成功");
       setTimeout(() => onMindMapGenerated?.(), 400);
     } catch {
       toast.error("思维导图生成失败");
     }
+    mindMapAbortRef.current = null;
     setMindMapGenerating(false);
   };
 
@@ -365,16 +377,32 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     setLoading(false);
   };
 
+  // Re-fetch cards when showImportantOnly changes while already viewing a deck
+  useEffect(() => {
+    if (view !== "cards" || !currentDeck || currentDeck.id === -1) return;
+    listFlashcardsByDeck(currentDeck.id, showImportantOnly || undefined)
+      .then((loaded) => {
+        setCards(loaded);
+        setCurrentIdx(0);
+        setFlipped(false);
+        setSelfAssessed(false);
+        setShuffled(false);
+      })
+      .catch(() => toast.error("加载卡片失败"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showImportantOnly]);
+
   /** 生成后进入预览模式 */
   const handleGenerate = async () => {
     if (!sessionId || generating) return;
+    if (!docId) { toast.error("文档尚未处理完成，请稍后再试"); return; }
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
     onGeneratingChange?.(true);
     try {
       await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined, startChunk, endChunk);
-      const fresh = await listDecks(docId!, "FLASHCARD");
+      const fresh = await listDecks(docId, "FLASHCARD");
       setDecks(fresh);
       onGenerated?.();
       toast.success("学习卡片生成成功");
@@ -407,18 +435,12 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
   const handleDeleteDeck = async (e: React.MouseEvent, deckId: number) => {
     e.stopPropagation();
+    if (!confirm("确定删除该卡片组？组内所有卡片将被删除且无法恢复。")) return;
     try {
       await deleteDeck(deckId);
       setDecks((prev) => prev.filter((d) => d.id !== deckId));
       toast.success("卡片组已删除");
     } catch { toast.error("删除失败"); }
-  };
-
-  const goTo = (i: number) => {
-    setFlipped(false);
-    setSelfAssessed(false);
-    setExpanded(false);
-    setCurrentIdx(Math.max(0, Math.min(i, displayCards.length - 1)));
   };
 
   // ═══════════════ Deck 列表视图 ═══════════════
@@ -469,7 +491,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
               {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
             </Button>
-            {loading ? (
+            {(loading || mindMapGenerating) ? (
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
                 <XCircle className="h-3.5 w-3.5" />
                 取消生成
@@ -571,57 +593,15 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           )}
         </div>
 
-        {/* Export format bottom sheet */}
-        {showExportSheet && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowExportSheet(false)}>
-            <div className="absolute inset-0 bg-black/40" />
-            <div
-              className="relative w-full max-w-md rounded-t-2xl bg-background p-4 pb-8 shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/20" />
-              <p className="text-sm font-medium text-foreground/80 mb-3">选择导出格式</p>
-              <div className="space-y-2">
-                <button
-                  onClick={() => { handleExportCSV(); setShowExportSheet(false); }}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-                >
-                  <Download className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div>
-                    <p className="font-medium text-foreground/85">导出 CSV</p>
-                    <p className="text-[11px] text-muted-foreground/60">表格格式，可导入 Anki 等工具</p>
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleExportPDF("side-by-side")}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-                >
-                  <Download className="h-4 w-4 text-primary shrink-0" />
-                  <div>
-                    <p className="font-medium text-foreground/85">PDF &mdash; 左右对照</p>
-                    <p className="text-[11px] text-muted-foreground/60">每张卡片左侧问题、右侧答案</p>
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleExportPDF("anki")}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-                >
-                  <Download className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <div>
-                    <p className="font-medium text-foreground/85">PDF &mdash; Anki 风格</p>
-                    <p className="text-[11px] text-muted-foreground/60">所有问题在前，答案在后（分页打印）</p>
-                  </div>
-                </button>
-              </div>
-              <button
-                onClick={() => setShowExportSheet(false)}
-                className="mt-3 w-full rounded-xl border border-border/60 py-2.5 text-sm text-muted-foreground hover:bg-muted/40 transition-colors min-h-[44px]"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        )}
+        <ExportBottomSheet
+          open={showExportSheet}
+          onClose={() => setShowExportSheet(false)}
+          options={[
+            { icon: Download, title: "导出 CSV", description: "表格格式，可导入 Anki 等工具", onClick: handleExportCSV },
+            { icon: Download, iconColor: "text-primary", title: "PDF — 左右对照", description: "每张卡片左侧问题、右侧答案", onClick: () => handleExportPDF("side-by-side") },
+            { icon: Download, iconColor: "text-emerald-500", title: "PDF — Anki 风格", description: "所有问题在前，答案在后（分页打印）", onClick: () => handleExportPDF("anki") },
+          ]}
+        />
       </div>
     );
   }
@@ -640,7 +620,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs border-destructive/20 text-destructive hover:bg-destructive/10" onClick={async () => {
-              if (currentDeck) {
+              if (currentDeck && confirm("确定放弃这组卡片？已生成的内容将被删除。")) {
                 try {
                   await deleteDeck(currentDeck.id);
                   setDecks((prev) => prev.filter((d) => d.id !== currentDeck.id));
@@ -688,8 +668,8 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                       className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="问题" rows={2} />
                     <textarea value={editForm.answer} onChange={e => setEditForm(f => ({...f, answer: e.target.value}))}
                       className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="答案" rows={2} />
-                    <input value={editForm.explanation} onChange={e => setEditForm(f => ({...f, explanation: e.target.value}))}
-                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="解析（可选）" />
+                    <textarea value={editForm.explanation} onChange={e => setEditForm(f => ({...f, explanation: e.target.value}))}
+                      className="w-full rounded-lg border border-border/50 bg-background px-2 py-1 text-xs" placeholder="解析（可选）" rows={2} />
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditingCardId(null)} disabled={saving}>取消</Button>
                       <Button size="sm" className="h-6 text-xs" disabled={saving} onClick={async () => {
@@ -938,7 +918,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           >
             <Shuffle className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" className="rounded-lg text-xs gap-1.5 h-8" onClick={handleGenerate} disabled={loading}>
+          <Button variant="ghost" size="sm" className="ml-auto rounded-lg text-xs gap-1.5 h-8" onClick={() => { if (confirm("重新生成将覆盖当前卡片，确定继续？")) handleGenerate(); }} disabled={loading}>
             {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             开启新任务
           </Button>
@@ -951,7 +931,22 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
         {flipped && (
           <div className="flex items-center gap-1.5 sm:gap-2 pb-2 flex-wrap justify-center">
             {selfAssessed ? (
-              <span className="text-xs text-muted-foreground/50">已评估，继续下一张</span>
+              <Button
+                size="sm"
+                variant="default"
+                className="rounded-lg h-8 text-xs gap-1"
+                onClick={() => {
+                  if (currentIdx < displayCards.length - 1) {
+                    goTo(currentIdx + 1);
+                  } else {
+                    setView("decks");
+                    toast.success("本轮复习完成！");
+                  }
+                }}
+              >
+                {currentIdx < displayCards.length - 1 ? "下一张" : "完成复习"}
+                <ChevronRight className="h-3 w-3" />
+              </Button>
             ) : (
               <>
                 <span className="text-[10px] sm:text-[11px] text-muted-foreground/40 mr-1">自评:</span>
@@ -974,57 +969,15 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
         )}
       </div>
 
-      {/* Export format bottom sheet (cards view) */}
-      {showExportSheet && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowExportSheet(false)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div
-            className="relative w-full max-w-md rounded-t-2xl bg-background p-4 pb-8 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/20" />
-            <p className="text-sm font-medium text-foreground/80 mb-3">选择导出格式</p>
-            <div className="space-y-2">
-              <button
-                onClick={() => { handleExportCSV(); setShowExportSheet(false); }}
-                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-              >
-                <Download className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground/85">导出 CSV</p>
-                  <p className="text-[11px] text-muted-foreground/60">表格格式，可导入 Anki 等工具</p>
-                </div>
-              </button>
-              <button
-                onClick={() => handleExportPDF("side-by-side")}
-                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-              >
-                <Download className="h-4 w-4 text-primary shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground/85">PDF &mdash; 左右对照</p>
-                  <p className="text-[11px] text-muted-foreground/60">每张卡片左侧问题、右侧答案</p>
-                </div>
-              </button>
-              <button
-                onClick={() => handleExportPDF("anki")}
-                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-              >
-                <Download className="h-4 w-4 text-emerald-500 shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground/85">PDF &mdash; Anki 风格</p>
-                  <p className="text-[11px] text-muted-foreground/60">所有问题在前，答案在后（分页打印）</p>
-                </div>
-              </button>
-            </div>
-            <button
-              onClick={() => setShowExportSheet(false)}
-              className="mt-3 w-full rounded-xl border border-border/60 py-2.5 text-sm text-muted-foreground hover:bg-muted/40 transition-colors min-h-[44px]"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      )}
+      <ExportBottomSheet
+        open={showExportSheet}
+        onClose={() => setShowExportSheet(false)}
+        options={[
+          { icon: Download, title: "导出 CSV", description: "表格格式，可导入 Anki 等工具", onClick: handleExportCSV },
+          { icon: Download, iconColor: "text-primary", title: "PDF — 左右对照", description: "每张卡片左侧问题、右侧答案", onClick: () => handleExportPDF("side-by-side") },
+          { icon: Download, iconColor: "text-emerald-500", title: "PDF — Anki 风格", description: "所有问题在前，答案在后（分页打印）", onClick: () => handleExportPDF("anki") },
+        ]}
+      />
     </div>
   );
 }

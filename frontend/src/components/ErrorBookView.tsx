@@ -10,7 +10,7 @@
  * - 标记已掌握后隐藏
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -49,6 +49,13 @@ function saveMastered(docId: number, ids: Set<number>) {
   try { localStorage.setItem(MASTERED_KEY(docId), JSON.stringify([...ids])); } catch { /* ignore */ }
 }
 
+/** 填空题答案模糊匹配: trim + 忽略大小写 + 去除中英文标点 + 合并空格 */
+function isAnswerMatch(input: string | null | undefined, answer: string | null | undefined): boolean {
+  const normalize = (s: string) =>
+    s.trim().toLowerCase().replace(/[.,;:!?，。；：！？、""''「」【】（）()\[\]{}]/g, "").replace(/\s+/g, " ").trim();
+  return normalize(input ?? "") === normalize(answer ?? "");
+}
+
 export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   const [items, setItems] = useState<ErrorBookItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,19 +75,28 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   const [retakeCorrect, setRetakeCorrect] = useState(0);
   const [retakeTotal, setRetakeTotal] = useState(0);
   const [retakeDone, setRetakeDone] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!docId) return;
+    // Abort any in-flight request before starting a new one
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setMastered(loadMastered(docId));
-    listErrorBook(docId)
+    listErrorBook(docId, controller.signal)
       .then((data) => {
         setItems(data);
         setLoading(false);
       })
-      .catch(() => {
-        setLoading(false);
+      .catch((err) => {
+        if ((err as Error).name !== "AbortError") {
+          toast.error("加载错题本失败");
+          setLoading(false);
+        }
       });
+    return () => { controller.abort(); };
   }, [docId]);
 
   useEffect(() => {
@@ -90,7 +106,7 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   const visibleItems = items.filter((i) => !mastered.has(i.quizId));
 
   const parseOptions = useCallback((opts: string): string[] => {
-    try { return JSON.parse(opts); } catch { return []; }
+    try { return JSON.parse(opts); } catch { console.warn("选项数据解析失败"); return []; }
   }, []);
 
   const persistMastered = useCallback(
@@ -105,10 +121,15 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
 
   const current = visibleItems[reviewIdx];
 
+  const isFillBlank = (item: ErrorBookItem | undefined) => item?.quizType === "FILL_BLANK";
+
   const handleBrowseSubmit = () => {
     if (!selected || !current) return;
     setSubmitted(true);
-    if (selected === current.answer) {
+    const correct = isFillBlank(current)
+      ? isAnswerMatch(selected, current.answer)
+      : selected === current.answer;
+    if (correct) {
       toast.success("答对了！");
     }
   };
@@ -169,7 +190,9 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   const handleRetakeSubmit = useCallback(() => {
     if (!retakeSelected || !retakeCurrent) return;
     setRetakeSubmitted(true);
-    const isCorrect = retakeSelected === retakeCurrent.answer;
+    const isCorrect = isFillBlank(retakeCurrent)
+      ? isAnswerMatch(retakeSelected, retakeCurrent.answer)
+      : retakeSelected === retakeCurrent.answer;
     if (isCorrect) {
       setRetakeCorrect((c) => c + 1);
       // Auto-mark mastered
@@ -227,6 +250,31 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
     );
   }
 
+  // All mastered — show congratulations
+  if (visibleItems.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 dark:bg-emerald-950/20">
+          <Trophy className="h-7 w-7 text-emerald-500" />
+        </div>
+        <div className="text-center space-y-1.5">
+          <p className="text-sm font-medium">全部掌握</p>
+          <p className="text-xs text-muted-foreground/50">所有错题已标记为「已掌握」，可以重做全部题目巩固</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="rounded-xl h-8" onClick={() => startRetake(true)}>
+            <RotateCw className="h-3.5 w-3.5 mr-1" />
+            全部重做
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-xl h-8" onClick={onBack}>
+            <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+            返回
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   // ---- Re-take: summary screen ----
   if (retakeMode && retakeDone) {
     const wrongCount = retakeTotal - retakeCorrect;
@@ -276,7 +324,9 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   // ---- Re-take: question screen ----
   if (retakeMode && retakeCurrent) {
     const opts = parseOptions(retakeCurrent.options);
-    const isCorrect = retakeSubmitted && retakeSelected === retakeCurrent.answer;
+    const isCorrect = retakeSubmitted && (isFillBlank(retakeCurrent)
+      ? isAnswerMatch(retakeSelected, retakeCurrent.answer)
+      : retakeSelected === retakeCurrent.answer);
     const progress = ((retakeIdx + (retakeSubmitted ? 1 : 0)) / retakeTotal) * 100;
 
     return (
@@ -316,36 +366,69 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
 
             {/* Options */}
             <div className="space-y-2">
-              {opts.map((opt) => {
-                const isSel = retakeSelected === opt;
-                const showCorrect = retakeSubmitted && opt === retakeCurrent.answer;
-                const showWrong = retakeSubmitted && isSel && opt !== retakeCurrent.answer;
-                return (
-                  <button
-                    key={opt}
-                    onClick={() => {
-                      if (!retakeSubmitted) setRetakeSelected(opt);
-                    }}
+              {isFillBlank(retakeCurrent) ? (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={retakeSelected ?? ""}
+                    onChange={(e) => { if (!retakeSubmitted) setRetakeSelected(e.target.value); }}
                     disabled={retakeSubmitted}
+                    placeholder="输入你的答案..."
                     className={cn(
-                      "w-full text-left px-4 py-3.5 rounded-xl border text-sm transition-all min-h-[44px]",
-                      !retakeSubmitted && "active:bg-muted/50 cursor-pointer",
-                      retakeSubmitted && "cursor-default",
-                      isSel && !retakeSubmitted && "border-primary bg-primary/5",
-                      showCorrect &&
-                        "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300",
-                      showWrong && "border-destructive bg-destructive/5 text-destructive",
-                      !isSel && !showCorrect && retakeSubmitted && "text-muted-foreground/50",
+                      "flex-1 w-full rounded-xl border px-4 py-2.5 text-sm outline-none transition-all",
+                      !retakeSubmitted && "border-border/60 bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/10",
+                      retakeSubmitted && isCorrect && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20",
+                      retakeSubmitted && !isCorrect && "border-destructive bg-destructive/5",
                     )}
-                  >
-                    <div className="flex items-center gap-2">
-                      {showCorrect && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
-                      {showWrong && <X className="h-4 w-4 shrink-0 text-destructive" />}
-                      <span>{opt}</span>
+                    onKeyDown={(e) => { if (e.key === "Enter" && !retakeSubmitted && retakeSelected) handleRetakeSubmit(); }}
+                    aria-label="填空题答案输入"
+                  />
+                  {retakeSubmitted && (
+                    <div className={cn(
+                      "flex items-center gap-2 rounded-xl px-4 py-3 text-sm",
+                      isCorrect
+                        ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300"
+                        : "bg-destructive/5 text-destructive"
+                    )}>
+                      {isCorrect
+                        ? <><Check className="h-4 w-4 shrink-0" /><span>正确！</span></>
+                        : <><X className="h-4 w-4 shrink-0" /><span>正确答案: <strong>{retakeCurrent.answer}</strong></span></>
+                      }
                     </div>
-                  </button>
-                );
-              })}
+                  )}
+                </div>
+              ) : (
+                opts.map((opt) => {
+                  const isSel = retakeSelected === opt;
+                  const showCorrect = retakeSubmitted && opt === retakeCurrent.answer;
+                  const showWrong = retakeSubmitted && isSel && opt !== retakeCurrent.answer;
+                  return (
+                    <button
+                      key={opt}
+                      onClick={() => {
+                        if (!retakeSubmitted) setRetakeSelected(opt);
+                      }}
+                      disabled={retakeSubmitted}
+                      className={cn(
+                        "w-full text-left px-4 py-3.5 rounded-xl border text-sm transition-all min-h-[44px]",
+                        !retakeSubmitted && "active:bg-muted/50 cursor-pointer",
+                        retakeSubmitted && "cursor-default",
+                        isSel && !retakeSubmitted && "border-primary bg-primary/5",
+                        showCorrect &&
+                          "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300",
+                        showWrong && "border-destructive bg-destructive/5 text-destructive",
+                        !isSel && !showCorrect && retakeSubmitted && "text-muted-foreground/50",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        {showCorrect && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
+                        {showWrong && <X className="h-4 w-4 shrink-0 text-destructive" />}
+                        <span>{opt}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
 
             {/* Actions */}
@@ -441,37 +524,71 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
 
           {/* Options */}
           <div className="space-y-2">
-            {current &&
-              parseOptions(current.options).map((opt) => {
-                const isSelected = selected === opt;
-                const showCorrect = submitted && opt === current.answer;
-                const showWrong = submitted && isSelected && opt !== current.answer;
-                return (
-                  <button
-                    key={opt}
-                    onClick={() => {
-                      if (!submitted) setSelected(opt);
-                    }}
+            {current && (
+              isFillBlank(current) ? (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={selected ?? ""}
+                    onChange={(e) => { if (!submitted) setSelected(e.target.value); }}
                     disabled={submitted}
+                    placeholder="输入你的答案..."
                     className={cn(
-                      "w-full text-left px-4 py-3.5 rounded-xl border text-sm transition-all min-h-[44px]",
-                      !submitted && "active:bg-muted/50 cursor-pointer",
-                      submitted && "cursor-default",
-                      isSelected && !submitted && "border-primary bg-primary/5",
-                      showCorrect &&
-                        "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300",
-                      showWrong && "border-destructive bg-destructive/5 text-destructive",
-                      !isSelected && !showCorrect && submitted && "text-muted-foreground/50",
+                      "flex-1 w-full rounded-xl border px-4 py-2.5 text-sm outline-none transition-all",
+                      !submitted && "border-border/60 bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/10",
+                      submitted && isAnswerMatch(selected, current.answer) && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20",
+                      submitted && !isAnswerMatch(selected, current.answer) && "border-destructive bg-destructive/5",
                     )}
-                  >
-                    <div className="flex items-center gap-2">
-                      {showCorrect && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
-                      {showWrong && <X className="h-4 w-4 shrink-0 text-destructive" />}
-                      <span>{opt}</span>
+                    onKeyDown={(e) => { if (e.key === "Enter" && !submitted && selected) handleBrowseSubmit(); }}
+                    aria-label="填空题答案输入"
+                  />
+                  {submitted && (
+                    <div className={cn(
+                      "flex items-center gap-2 rounded-xl px-4 py-3 text-sm",
+                      isAnswerMatch(selected, current.answer)
+                        ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300"
+                        : "bg-destructive/5 text-destructive"
+                    )}>
+                      {isAnswerMatch(selected, current.answer)
+                        ? <><Check className="h-4 w-4 shrink-0" /><span>正确！</span></>
+                        : <><X className="h-4 w-4 shrink-0" /><span>正确答案: <strong>{current.answer}</strong></span></>
+                      }
                     </div>
-                  </button>
-                );
-              })}
+                  )}
+                </div>
+              ) : (
+                parseOptions(current.options).map((opt) => {
+                  const isSelected = selected === opt;
+                  const showCorrect = submitted && opt === current.answer;
+                  const showWrong = submitted && isSelected && opt !== current.answer;
+                  return (
+                    <button
+                      key={opt}
+                      onClick={() => {
+                        if (!submitted) setSelected(opt);
+                      }}
+                      disabled={submitted}
+                      className={cn(
+                        "w-full text-left px-4 py-3.5 rounded-xl border text-sm transition-all min-h-[44px]",
+                        !submitted && "active:bg-muted/50 cursor-pointer",
+                        submitted && "cursor-default",
+                        isSelected && !submitted && "border-primary bg-primary/5",
+                        showCorrect &&
+                          "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300",
+                        showWrong && "border-destructive bg-destructive/5 text-destructive",
+                        !isSelected && !showCorrect && submitted && "text-muted-foreground/50",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        {showCorrect && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
+                        {showWrong && <X className="h-4 w-4 shrink-0 text-destructive" />}
+                        <span>{opt}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )
+            )}
           </div>
 
           {/* Actions */}
@@ -486,7 +603,9 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
               </Button>
             ) : (
               <>
-                {selected === current?.answer && (
+                {(isFillBlank(current)
+                  ? isAnswerMatch(selected, current?.answer)
+                  : selected === current?.answer) && (
                   <Button
                     variant="outline"
                     size="sm"

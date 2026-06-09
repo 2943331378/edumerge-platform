@@ -134,6 +134,7 @@ export default function HomePage() {
   const [chatContext, setChatContext] = useState("");
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
   const [docSearch, setDocSearch] = useState("");
+  const [dragOver, setDragOver] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [folderSuggestion, setFolderSuggestion] = useState<{
@@ -142,13 +143,14 @@ export default function HomePage() {
   } | null>(null);
   const folderSuggestionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Load folders
   const loadFolders = useCallback(async () => {
     try {
       const list = await listFolders();
       setFolders(list.map((f) => ({ id: f.id, name: f.name, color: f.color, docCount: f.docCount })));
-    } catch { /* ignore */ }
+    } catch { toast.error("加载文件夹失败"); }
   }, []);
 
   useEffect(() => {
@@ -199,32 +201,52 @@ export default function HomePage() {
 
   // Folder CRUD callbacks
   const handleCreateFolder = useCallback(async (name: string, color: string) => {
-    await createFolder({ name, color });
-    await loadFolders();
+    try {
+      await createFolder({ name, color });
+      await loadFolders();
+    } catch {
+      toast.error("创建文件夹失败");
+    }
   }, [loadFolders]);
 
   const handleDeleteFolder = useCallback(async (folderId: number) => {
-    await deleteFolder(folderId);
-    await loadFolders();
-    await loadSessions(); // documents moved back to root
+    try {
+      await deleteFolder(folderId);
+      await loadFolders();
+      await loadSessions(); // documents moved back to root
+    } catch {
+      toast.error("删除文件夹失败");
+    }
   }, [loadFolders, loadSessions]);
 
   const handleRenameFolder = useCallback(async (folderId: number, name: string) => {
-    await updateFolder(folderId, { name });
-    await loadFolders();
+    try {
+      await updateFolder(folderId, { name });
+      await loadFolders();
+    } catch {
+      toast.error("重命名失败");
+    }
   }, [loadFolders]);
 
   const handleUpdateFolderColor = useCallback(async (folderId: number, color: string) => {
-    await updateFolder(folderId, { color });
-    await loadFolders();
+    try {
+      await updateFolder(folderId, { color });
+      await loadFolders();
+    } catch {
+      toast.error("更新颜色失败");
+    }
   }, [loadFolders]);
 
   const handleMoveDocument = useCallback(async (sessionId: number, folderId: number | null) => {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session?.docId) return;
-    await moveDocumentToFolder(session.docId, folderId);
-    await loadSessions();
-    await loadFolders(); // update doc counts
+    try {
+      await moveDocumentToFolder(session.docId, folderId);
+      await loadSessions();
+      await loadFolders(); // update doc counts
+    } catch {
+      toast.error("移动文档失败");
+    }
   }, [sessions, loadSessions, loadFolders]);
 
   // 桌面端用侧边面板，移动端跳转全屏页面
@@ -245,6 +267,40 @@ export default function HomePage() {
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
+  }, [userMenuOpen]);
+
+  // User menu: Escape to close + focus trap
+  useEffect(() => {
+    if (!userMenuOpen || !userMenuRef.current) return;
+    const panel = userMenuRef.current;
+    const focusable = panel.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length > 0) focusable[0].focus();
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setUserMenuOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const els = panel.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
   }, [userMenuOpen]);
 
   // Clean stale localStorage progress entries on mount
@@ -454,10 +510,14 @@ export default function HomePage() {
                 "flex flex-col items-center gap-2 md:gap-3 rounded-2xl border-2 border-dashed p-6 md:p-10 cursor-pointer transition-all",
                 "border-muted-foreground/25 hover:border-primary/50 hover:bg-primary/5",
                 "w-full max-w-lg",
+                dragOver && "border-primary bg-primary/5 ring-2 ring-primary/20",
               )}
               onDragOver={(e) => e.preventDefault()}
+              onDragEnter={() => setDragOver(true)}
+              onDragLeave={() => setDragOver(false)}
               onDrop={(e) => {
                 e.preventDefault();
+                setDragOver(false);
                 if (e.dataTransfer.files.length > 0) handleUpload(e.dataTransfer.files);
               }}
             >
@@ -519,7 +579,16 @@ export default function HomePage() {
                   .map((s) => (
                   <div
                     key={s.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`选择文档：${s.fileName ?? s.title}`}
                     onClick={() => handleSelectSession(s.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleSelectSession(s.id);
+                      }
+                    }}
                     className={cn(
                       "group flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-all",
                       activeSession?.id === s.id
@@ -800,6 +869,7 @@ export default function HomePage() {
           {!showKnowledgeGraph && currentStep >= 2 && (
             <button
               type="button"
+              aria-label="打开 AI 对话"
               onClick={() => setChatOpen(true)}
               className="absolute bottom-4 right-4 z-20 flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-sm font-medium"
             >
@@ -853,7 +923,7 @@ export default function HomePage() {
       {userMenuOpen && (
         <>
           <div className="hidden md:block fixed inset-0 z-40 bg-black/30" onClick={() => setUserMenuOpen(false)} />
-          <div role="dialog" aria-modal="true" aria-label="个人中心" className="hidden md:flex fixed right-0 top-0 bottom-0 z-50 w-[340px] max-w-[85vw] bg-card border-l border-border shadow-2xl flex-col animate-in slide-in-from-right duration-200">
+          <div ref={userMenuRef} role="dialog" aria-modal="true" aria-label="个人中心" className="hidden md:flex fixed right-0 top-0 bottom-0 z-50 w-[340px] max-w-[85vw] bg-card border-l border-border shadow-2xl flex-col animate-in slide-in-from-right duration-200">
             {/* 用户信息 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -902,6 +972,7 @@ export default function HomePage() {
             <div className="border-t border-border/50 p-3">
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => { auth.logout(); setUserMenuOpen(false); }}
                 className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
               >

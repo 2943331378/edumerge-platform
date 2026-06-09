@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 
 interface Props {
   docId: number | null;
@@ -65,17 +66,26 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
   const [newCategory, setNewCategory] = useState("KEY_POINT");
+  const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
     if (!docId) return;
+    // Abort any in-flight request before starting a new one
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const [list, s] = await Promise.all([
-        listFlowNotes(docId, activeCategory ?? undefined),
-        getFlowNoteStats(docId),
+        listFlowNotes(docId, activeCategory ?? undefined, controller.signal),
+        getFlowNoteStats(docId, controller.signal),
       ]);
       setEntries(list);
       setStats(s);
-    } catch { /* ignore */ }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        toast.error("加载学习日志失败");
+      }
+    }
     setLoading(false);
   }, [docId, activeCategory]);
 
@@ -121,6 +131,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
   };
 
   const handleDelete = async (id: number) => {
+    if (!confirm("确定删除该条目？")) return;
     try {
       await deleteFlowNote(id);
       setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -132,7 +143,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
     try {
       await markFlowNoteReviewed(id);
       setEntries((prev) => prev.map((e) => e.id === id ? { ...e, isReviewed: 1 } : e));
-    } catch { /* ignore */ }
+    } catch { toast.error("标记复习失败"); }
   };
 
   const handleExport = () => {
@@ -143,7 +154,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
     const blob = new Blob([`# EduMerge 学习日志\n\n${md}`], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = "edumerge-flownote.md"; a.click();
+    a.href = url; a.download = `edumerge-flownote-${new Date().toISOString().slice(0, 10)}.md`; a.click();
     URL.revokeObjectURL(url);
     toast.success("已导出 Markdown");
   };
@@ -333,7 +344,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
                       "prose-code:text-xs prose-code:bg-muted/60 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5",
                       headerBg,
                     )}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
                         {entry.content}
                       </ReactMarkdown>
                     </div>

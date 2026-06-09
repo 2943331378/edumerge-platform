@@ -34,7 +34,7 @@ export function useSessionState(onSessionChange?: () => void) {
         const updated = list.find((s) => s.id === cur.id);
         return updated ?? cur;
       });
-    } catch { /* ignore */ }
+    } catch { toast.error("加载会话列表失败"); }
   }, []);
 
   const updateSessionCache = useCallback((updates: Partial<SessionCacheEntry>) => {

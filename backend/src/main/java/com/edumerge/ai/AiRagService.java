@@ -519,23 +519,34 @@ public class AiRagService {
         return sb.toString();
     }
 
-    /** 拼装: System Prompt (含检索上下文+步骤上下文) + 历史对话记忆 + 当前用户问题 */
+    /** 拼装: System Prompt (静态指令) + 历史对话记忆 + 当前用户问题 (含动态上下文) */
     public List<ChatMessage> buildMessagesWithMemory(String userQuestion, String context,
                                                       String stepContext, ChatMemory memory) {
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(buildSystemMessage(context, stepContext));
+        // SystemMessage: 仅静态指令（prefix cache 友好，同文档会话共享同一 prefix）
+        messages.add(buildSystemMessage(context));
         for (ChatMessage m : memory.messages()) {
             if (!(m instanceof SystemMessage)) {
                 messages.add(m);
             }
         }
-        messages.add(new UserMessage(userQuestion));
+        // UserMessage: 动态内容（文档上下文 + 步骤上下文 + 用户问题）
+        StringBuilder userSb = new StringBuilder();
+        if (!context.isBlank()) {
+            userSb.append("# 参考文档\n").append(context).append("\n");
+        }
+        if (stepContext != null && !stepContext.isBlank()) {
+            userSb.append("# 用户当前活动上下文\n").append(stepContext).append("\n");
+            userSb.append("请结合此上下文理解用户的问题。如果用户使用“这个”、“这里”、“刚才那个”等指示代词，请根据上述活动上下文推断其所指。\n\n");
+        }
+        userSb.append(userQuestion);
+        messages.add(new UserMessage(userSb.toString()));
         return messages;
     }
 
-    /** 构建 System Prompt — 平衡文档约束与对话连贯性，注入步骤上下文 */
-    public SystemMessage buildSystemMessage(String context, String stepContext) {
-        String baseTemplate = context.isBlank()
+    /** 构建 System Prompt — 仅静态指令（不包含动态上下文，最大化 prefix cache 命中率） */
+    public SystemMessage buildSystemMessage(String context) {
+        String prompt = context.isBlank()
             ? """
                你是一个严谨的 AI 学习导师。
                当前未在知识库中检索到与用户问题相关的文档内容。
@@ -553,24 +564,7 @@ public class AiRagService {
                5. 结合历史对话保持连贯性（如追问时回顾上轮主题）
                6. 回答精准简洁、结构化；总结类问题按"概述→核心知识点→可复习问题"组织
                7. 面向深度理解，回答要覆盖"为什么"和"怎么用"，不要停留在"是什么"层面
-               8. 涉及对比、辨析、应用场景时，用具体例子说明而非泛泛而谈
-
-               # 文档上下文
-               {CONTEXT}""";
-
-        // 注入步骤级上下文（用户当前正在查看的内容）
-        if (stepContext != null && !stepContext.isBlank()) {
-            baseTemplate += """
-
-               # 用户当前活动上下文
-               {STEP_CONTEXT}
-               请结合此上下文理解用户的问题。如果用户使用"这个"、"这里"、"刚才那个"等指示代词，请根据上述活动上下文推断其所指。""";
-        }
-
-        String prompt = baseTemplate.replace("{CONTEXT}", context);
-        if (stepContext != null && !stepContext.isBlank()) {
-            prompt = prompt.replace("{STEP_CONTEXT}", stepContext);
-        }
+               8. 涉及对比、辨析、应用场景时，用具体例子说明而非泛泛而谈""";
         return new SystemMessage(prompt);
     }
 

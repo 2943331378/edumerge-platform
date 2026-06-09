@@ -52,6 +52,7 @@ public class AuthController {
     }
 
     /** 刷新 access token — 用 refresh token 换取新的 access token */
+    // TODO: 替换 Map<String, String> 为 RefreshTokenRequest DTO（仅含 refreshToken 字段）
     @PostMapping("/refresh")
     public Result<LoginResponse> refresh(@RequestBody java.util.Map<String, String> body) {
         String refreshToken = body.get("refreshToken");

@@ -46,7 +46,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
               <span
                 key={s.id}
                 className={cn(
-                  "h-1.5 w-1.5 rounded-full transition-colors",
+                  "h-2 w-2 rounded-full transition-colors",
                   completedSteps.has(s.id)
                     ? "bg-lime-500"
                     : s.id === currentStep
@@ -67,7 +67,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
 
   // ═══ 展开态 — 完整路径 ═══
   return (
-    <nav className="relative flex items-center justify-center gap-0 px-3 md:px-6 py-3 md:py-4 overflow-x-auto">
+    <nav className="relative flex items-center justify-center gap-0 px-3 md:px-6 py-3 md:py-4 overflow-x-auto animate-in fade-in slide-in-from-top-1 duration-300 ease-in-out">
       {steps.map((step, idx) => {
         const isCompleted = completedSteps.has(step.id);
         const isActive = currentStep === step.id;
@@ -79,7 +79,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
               type="button"
               onClick={() => onStepClick(step.id)}
               className={cn(
-                "flex flex-col items-center gap-1 md:gap-1.5 group transition-all cursor-pointer",
+                "flex flex-col items-center gap-1 md:gap-1.5 group transition-all cursor-pointer min-w-[44px] min-h-[44px]",
               )}
             >
               <div
@@ -134,7 +134,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
       <button
         type="button"
         onClick={() => setCollapsed(true)}
-        className="absolute right-2 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full bg-muted/40 hover:bg-muted/70 text-muted-foreground/40 hover:text-foreground transition-all"
+        className="absolute right-2 top-1/2 -translate-y-1/2 flex min-w-[44px] min-h-[44px] items-center justify-center rounded-full bg-muted/40 hover:bg-muted/70 text-muted-foreground/40 hover:text-foreground transition-all"
         title="收起学习路径"
       >
         <ChevronDown className="h-3.5 w-3.5 rotate-180" />

@@ -12,6 +12,7 @@ interface ShortcutsHelpProps {
 
 export function ShortcutsHelp({ open, onOpenChange }: ShortcutsHelpProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   // Close on Escape
   const handleKeyDown = useCallback(
@@ -39,6 +40,31 @@ export function ShortcutsHelp({ open, onOpenChange }: ShortcutsHelpProps) {
         document.body.style.overflow = "";
       };
     }
+  }, [open]);
+
+  // Focus trap: focus close button on mount, trap Tab/Shift+Tab
+  useEffect(() => {
+    if (!open) return;
+    closeBtnRef.current?.focus();
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleTab);
+    return () => window.removeEventListener("keydown", handleTab);
   }, [open]);
 
   if (!open) return null;
@@ -72,9 +98,11 @@ export function ShortcutsHelp({ open, onOpenChange }: ShortcutsHelpProps) {
             <h2 className="text-sm font-semibold text-foreground">键盘快捷键</h2>
           </div>
           <button
+            ref={closeBtnRef}
             type="button"
             onClick={() => onOpenChange(false)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="关闭"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
@@ -146,6 +174,7 @@ export function ShortcutsButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
+      aria-label="键盘快捷键"
       className={cn(
         "flex h-8 w-8 items-center justify-center rounded-lg",
         "text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",

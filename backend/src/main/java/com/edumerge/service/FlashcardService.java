@@ -203,8 +203,9 @@ public class FlashcardService {
         double oldEF = card.getEaseFactor() != null ? card.getEaseFactor() : 2.5;
         int oldInterval = card.getReviewInterval() != null ? card.getReviewInterval() : 0;
 
-        // SM-2 公式: EF' = max(1.3, EF + (0.1 - (5-q)*(0.08 + (5-q)*0.02)))
-        double newEF = Math.max(1.3, oldEF + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02)));
+        // SM-2 公式（适配 1-4 量表）: EF' = max(1.3, EF + (0.1 - (4-q)*(0.08 + (4-q)*0.02)))
+        // quality: 1=忘了 2=模糊 3=记住 4=秒答；原版 SM-2 用 0-5 量表，此处映射为 4-q
+        double newEF = Math.max(1.3, oldEF + (0.1 - (4 - quality) * (0.08 + (4 - quality) * 0.02)));
 
         int newInterval;
         if (quality < 3) {

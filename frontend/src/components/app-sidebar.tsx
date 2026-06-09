@@ -119,6 +119,7 @@ export function AppSidebar({
 
   // Drag and drop state
   const [dragDocId, setDragDocId] = useState<string | null>(null);
+  const dragDocIdRef = useRef<string | null>(null);
   const [dropFolderId, setDropFolderId] = useState<number | null | undefined>(undefined);
 
   // Toggle folder expand/collapse
@@ -209,12 +210,14 @@ export function AppSidebar({
 
   // Drag-and-drop handlers (desktop)
   const handleDragStart = useCallback((e: React.DragEvent, doc: UploadedDoc) => {
+    dragDocIdRef.current = doc.id;
     setDragDocId(doc.id);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", doc.id);
   }, []);
 
   const handleDragEnd = useCallback(() => {
+    dragDocIdRef.current = null;
     setDragDocId(null);
     setDropFolderId(undefined);
   }, []);
@@ -228,9 +231,11 @@ export function AppSidebar({
   const handleFolderDrop = useCallback(async (e: React.DragEvent, folderId: number | null) => {
     e.preventDefault();
     setDropFolderId(undefined);
+    const currentDragId = dragDocIdRef.current;
+    dragDocIdRef.current = null;
     setDragDocId(null);
-    if (!onMoveDocument || !dragDocId) return;
-    const doc = documents.find((d) => d.id === dragDocId);
+    if (!onMoveDocument || !currentDragId) return;
+    const doc = documents.find((d) => d.id === currentDragId);
     if (!doc || doc.folderId === folderId) return;
     try {
       await onMoveDocument(doc.sessionId, folderId);
@@ -238,7 +243,7 @@ export function AppSidebar({
     } catch {
       toast.error("移动失败");
     }
-  }, [onMoveDocument, dragDocId, documents]);
+  }, [onMoveDocument, documents]);
 
   // Create folder
   const handleCreateFolder = async () => {
@@ -278,6 +283,12 @@ export function AppSidebar({
     }
   };
 
+  // Dismiss move sheet and reset long-press flag
+  const dismissMoveSheet = useCallback(() => {
+    setMoveTarget(null);
+    longPressTriggered.current = false;
+  }, []);
+
   // Move document from bottom sheet
   const handleMoveToFolder = async (folderId: number | null) => {
     if (!moveTarget || !onMoveDocument) return;
@@ -287,7 +298,7 @@ export function AppSidebar({
     } catch {
       toast.error("移动失败");
     }
-    setMoveTarget(null);
+    dismissMoveSheet();
   };
 
   // Render a single document item
@@ -303,9 +314,6 @@ export function AppSidebar({
           if (longPressTriggered.current) return;
           if (doc.sessionId > 0) onSelectSession(doc.sessionId);
         }}
-        onMouseDown={() => startLongPress(doc)}
-        onMouseUp={cancelLongPress}
-        onMouseLeave={cancelLongPress}
         onTouchStart={() => startLongPress(doc)}
         onTouchEnd={cancelLongPress}
         onTouchMove={cancelLongPress}
@@ -370,7 +378,7 @@ export function AppSidebar({
               e.stopPropagation();
               onRetryDocument(doc.sessionId);
             }}
-            className="p-0.5 max-md:p-1.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重新处理"
           >
             <RotateCw className="h-3 w-3" />
@@ -383,7 +391,7 @@ export function AppSidebar({
               e.stopPropagation();
               startRename(doc);
             }}
-            className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重命名"
           >
             <Pencil className="h-3 w-3" />
@@ -393,9 +401,11 @@ export function AppSidebar({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onDeleteDocument(doc.sessionId);
+            if (confirm(`确定删除「${doc.name}」？此操作将删除文档及所有关联的闪卡、测验、笔记等数据。`)) {
+              onDeleteDocument(doc.sessionId);
+            }
           }}
-          className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+          className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
           title="删除文档"
         >
           <X className="h-3 w-3" />
@@ -476,7 +486,7 @@ export function AppSidebar({
                 e.stopPropagation();
                 setEditFolderColorId(editFolderColorId === folder.id ? null : folder.id);
               }}
-              className="h-5 w-5 max-md:h-7 max-md:w-7 flex items-center justify-center rounded-full shrink-0 hover:ring-primary/50 active:ring-primary/50 transition-all cursor-pointer"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full shrink-0 hover:ring-primary/50 active:ring-primary/50 transition-all cursor-pointer"
               title="更换颜色"
             >
               <span
@@ -496,7 +506,7 @@ export function AppSidebar({
                 setEditFolderValue(folder.name);
                 setTimeout(() => editFolderInputRef.current?.select(), 0);
               }}
-              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
               title="重命名"
             >
               <Pencil className="h-2.5 w-2.5" />
@@ -511,7 +521,7 @@ export function AppSidebar({
                 e.stopPropagation();
                 handleDeleteFolder(folder.id);
               }}
-              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 p-0.5 max-md:p-1.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
               title="删除文件夹"
             >
               <X className="h-2.5 w-2.5" />
@@ -675,37 +685,33 @@ export function AppSidebar({
           </div>
 
           {/* Search + Create Folder */}
-          {(documents.length > 3 || hasAnyFolders) && (
-            <div className="px-3 pb-1 flex items-center gap-1.5 shrink-0">
-              {documents.length > 3 && (
-                <div className="relative flex-1">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="搜索文档..."
-                    className="w-full rounded-lg border border-border/50 bg-muted/30 pl-7 pr-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/30 focus:bg-muted/50 transition-all"
-                  />
-                </div>
-              )}
-              {onCreateFolder && (
-                <button
-                  type="button"
-                  onClick={() => setShowCreateFolder(!showCreateFolder)}
-                  className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-lg transition-all shrink-0",
-                    showCreateFolder
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-white/10 hover:text-foreground",
-                  )}
-                  title="新建文件夹"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              )}
+          <div className="px-3 pb-1 flex items-center gap-1.5 shrink-0">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索文档..."
+                className="w-full rounded-lg border border-border/50 bg-muted/30 pl-7 pr-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/30 focus:bg-muted/50 transition-all"
+              />
             </div>
-          )}
+            {onCreateFolder && (
+              <button
+                type="button"
+                onClick={() => setShowCreateFolder(!showCreateFolder)}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-lg transition-all shrink-0",
+                  showCreateFolder
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-white/10 hover:text-foreground",
+                )}
+                title="新建文件夹"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
 
           {/* Create folder form */}
           {showCreateFolder && onCreateFolder && (
@@ -830,7 +836,7 @@ export function AppSidebar({
       <>
         <div
           className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm"
-          onClick={() => setMoveTarget(null)}
+          onClick={dismissMoveSheet}
         />
         <div className="fixed inset-x-0 bottom-0 z-[61] bg-card border-t border-border rounded-t-2xl shadow-2xl max-h-[60vh] flex flex-col animate-in slide-in-from-bottom duration-200">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
@@ -840,7 +846,7 @@ export function AppSidebar({
             </div>
             <button
               type="button"
-              onClick={() => setMoveTarget(null)}
+              onClick={dismissMoveSheet}
               className="h-7 w-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
               <X className="h-4 w-4" />

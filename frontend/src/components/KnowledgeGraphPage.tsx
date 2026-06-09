@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +19,9 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import dynamic from "next/dynamic";
+import { useTheme } from "next-themes";
 
 // Dynamic import to avoid SSR issues with canvas
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
@@ -70,8 +72,12 @@ const RELATION_LABELS: Record<string, string> = {
 };
 
 export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Props) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   const [graphData, setGraphData] = useState<KnowledgeGraphData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const [generating, setGenerating] = useState(false);
 
   const [selectedNode, setSelectedNode] = useState<ConceptNode | null>(null);
@@ -81,6 +87,10 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDocId, setFilterDocId] = useState<number | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const dragOffsetRef = useRef(0);
+  const dragStartY = useRef(0);
+  const isDragging = useRef(false);
 
   // Load existing graph
   useEffect(() => {
@@ -88,13 +98,15 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
     const load = async () => {
       try {
         const data = await getKnowledgeGraph();
-        if (!cancelled) setGraphData(data);
-      } catch { /* empty */ }
+        if (!cancelled) { setGraphData(data); setLoadError(false); }
+      } catch {
+        if (!cancelled) { setLoadError(true); toast.error("加载知识图谱失败"); }
+      }
       if (!cancelled) setLoading(false);
     };
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [retryCount]);
 
   // Doc filter options
   const docOptions = useMemo(() => {
@@ -106,25 +118,25 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
     });
   }, [sessions]);
 
+  // Doc filter: filter nodes by which documents they appear in
+  const docFilteredNodeIds = useMemo(() => {
+    if (filterDocId == null || !graphData) return null;
+    return new Set(
+      graphData.concepts
+        .filter((c) => (c as unknown as { documentIds?: number[] }).documentIds?.includes(filterDocId))
+        .map((c) => c.id)
+    );
+  }, [filterDocId, graphData]);
+
   // Transform data for force graph
   const fgData = useMemo(() => {
     if (!graphData) return { nodes: [] as GraphNode[], links: [] as GraphLink[] };
-
-    // Doc filter: filter nodes by which documents they appear in
-    const docFilteredNodeIds = useMemo(() => {
-      if (filterDocId == null || !graphData) return null;
-      return new Set(
-        graphData.concepts
-          .filter((c) => (c as unknown as { documentIds?: number[] }).documentIds?.includes(filterDocId))
-          .map((c) => c.id)
-      );
-    }, [filterDocId, graphData]);
 
     let nodes = graphData.concepts.map((c) => ({
       id: c.id,
       name: c.name,
       val: Math.max(3, (c.importance ?? 5) * 1.5),
-      color: getNodeColor(c.documentCount, false),
+      color: getNodeColor(c.documentCount, isDark),
       conceptId: c.id,
       importance: c.importance,
       docCount: c.documentCount,
@@ -148,7 +160,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
     }));
 
     return { nodes, links };
-  }, [graphData, searchQuery, filterDocId, selectedDocs]);
+  }, [graphData, searchQuery, docFilteredNodeIds, selectedDocs, isDark]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -239,9 +251,9 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
 
         {/* Legend */}
         <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground/60">
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-500" /> 1文档</span>
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-teal-500" /> 2-3文档</span>
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-500" /> 4+文档</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(1, isDark) }} /> 1文档</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(2, isDark) }} /> 2-3文档</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(4, isDark) }} /> 4+文档</span>
         </div>
       </div>
 
@@ -255,15 +267,24 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                 <GitBranch className="h-7 w-7 text-muted-foreground/40" />
               </div>
               <div className="text-center space-y-1.5">
-                <p className="text-sm font-medium">暂无知识图谱</p>
+                <p className="text-sm font-medium">{loadError ? "加载失败" : "暂无知识图谱"}</p>
                 <p className="max-w-sm text-xs leading-6 text-muted-foreground/60">
-                  AI 将自动分析所有已上传文档，提取跨文档的核心概念并构建知识网络
+                  {loadError
+                    ? "知识图谱数据加载失败，请检查网络后重试"
+                    : "AI 将自动分析所有已上传文档，提取跨文档的核心概念并构建知识网络"}
                 </p>
               </div>
-              <Button onClick={handleGenerate} disabled={generating} className="rounded-xl gap-2 h-10">
-                {generating ? <RotateCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                一键生成知识图谱
-              </Button>
+              {loadError ? (
+                <Button variant="outline" onClick={() => setRetryCount((c) => c + 1)} className="rounded-xl gap-2 h-10">
+                  <RotateCw className="h-4 w-4" />
+                  重新加载
+                </Button>
+              ) : (
+                <Button onClick={handleGenerate} disabled={generating} className="rounded-xl gap-2 h-10">
+                  {generating ? <RotateCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  一键生成知识图谱
+                </Button>
+              )}
             </div>
           ) : generating ? (
             <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm z-10">
@@ -290,7 +311,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                 ctx.beginPath();
                 ctx.arc(n.x!, n.y!, n.val * 1.2, 0, 2 * Math.PI);
                 ctx.fill();
-                ctx.fillStyle = "#fff";
+                ctx.fillStyle = isDark ? "#fff" : "#1e293b";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
                 ctx.fillText(label, n.x!, n.y!);
@@ -307,18 +328,51 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
           <>
             {/* Mobile backdrop */}
             <div className="md:hidden fixed inset-0 z-40 bg-black/30" onClick={() => setSelectedNode(null)} />
-            <div className={cn(
-              "flex flex-col border-border bg-card/95 backdrop-blur",
-              "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:z-50 max-md:max-h-[70vh] max-md:rounded-t-2xl max-md:border-t max-md:shadow-2xl",
-              "md:w-[320px] md:shrink-0 md:border-l md:bg-card/50",
-            )}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
+            <div
+              className={cn(
+                "flex flex-col border-border bg-card/95 backdrop-blur",
+                "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:z-50 max-md:max-h-[70vh] max-md:rounded-t-2xl max-md:border-t max-md:shadow-2xl",
+                "md:w-[320px] md:shrink-0 md:border-l md:bg-card/50",
+              )}
+              style={{
+                transform: dragOffset > 0 ? `translateY(${dragOffset}px)` : undefined,
+                transition: isDragging.current ? "none" : "transform 300ms ease-out",
+              }}
+            >
+            <div
+              className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0"
+              onTouchStart={(e) => {
+                isDragging.current = true;
+                dragStartY.current = e.touches[0].clientY;
+              }}
+              onTouchMove={(e) => {
+                if (!isDragging.current) return;
+                const delta = e.touches[0].clientY - dragStartY.current;
+                const val = Math.max(0, delta);
+                dragOffsetRef.current = val;
+                setDragOffset(val);
+              }}
+              onTouchEnd={() => {
+                if (!isDragging.current) return;
+                isDragging.current = false;
+                if (dragOffsetRef.current > 80) {
+                  // Animate panel off-screen before unmounting
+                  setDragOffset(400);
+                  setTimeout(() => {
+                    setSelectedNode(null);
+                    setDragOffset(0);
+                  }, 300);
+                } else {
+                  setDragOffset(0);
+                }
+              }}
+            >
               {/* Mobile drag indicator */}
               <div className="md:hidden absolute left-1/2 -translate-x-1/2 top-1.5">
                 <div className="w-10 h-1 rounded-full bg-muted-foreground/20" />
               </div>
               <h3 className="text-sm font-medium text-foreground truncate">{selectedNode.name}</h3>
-              <button type="button" onClick={() => setSelectedNode(null)} className="p-1 rounded-md hover:bg-muted">
+              <button type="button" onClick={() => setSelectedNode(null)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted">
                 <X className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
             </div>
@@ -355,7 +409,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                     <div>
                       <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">定义</span>
                       <div className="mt-1 text-xs text-muted-foreground leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
                           {selectedDetail.concept.definition}
                         </ReactMarkdown>
                       </div>

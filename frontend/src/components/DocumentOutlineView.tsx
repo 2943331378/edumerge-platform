@@ -9,7 +9,7 @@
  * - 动效: 节点展开/折叠带微妙的弹性，选中时有墨水晕染般的高亮
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -114,7 +114,9 @@ export function DocumentOutlineView({
     const lines: string[] = [`# 文档大纲`, "", `**类型**: ${outline.outline.docTypeLabel}`, `**总切块数**: ${outline.outline.totalChunks}`, ""];
     const renderSection = (s: OutlineSection, depth: number) => {
       lines.push(`${"#".repeat(depth + 1)} ${s.title}`);
-      lines.push(`> 切块范围: ${s.startChunk} - ${s.endChunk}`);
+      if (s.startChunk != null && s.endChunk != null) {
+        lines.push(`> 切块范围: ${s.startChunk} - ${s.endChunk}`);
+      }
       lines.push("");
       (s.children ?? []).forEach((c) => renderSection(c, depth + 1));
     };
@@ -169,12 +171,16 @@ export function DocumentOutlineView({
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [docId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [docId, docStatus, generating]);
 
-  // 轮询等待大纲 — 当大纲正在后台生成时，定期检查是否已就绪
+  // 轮询等待大纲 — 当大纲正在后台生成时，定期检查是否已就绪（最多 60 次，约 3 分钟）
+  const pollCountRef = useRef(0);
   useEffect(() => {
-    if (!docId || outline || docStatus !== "COMPLETED") return;
+    if (!docId || outline || docStatus !== "COMPLETED") { pollCountRef.current = 0; return; }
+    pollCountRef.current = 0;
     const timer = setInterval(() => {
+      if (pollCountRef.current >= 60) { clearInterval(timer); return; }
+      pollCountRef.current++;
       getDocumentOutline(docId)
         .then((data) => {
           setOutline(data);
@@ -283,13 +289,15 @@ export function DocumentOutlineView({
       ...outline,
       outline: { ...outline.outline, sections: updateTitle(outline.outline.sections) },
     };
+    const previous = outline; // 保存回滚快照
     setOutline(updated);
     setEditingId(null);
-    // 异步保存到后端
+    // 异步保存到后端，失败时回滚
     if (docId) {
-      updateDocumentOutline(docId, updated.outline).catch(() =>
-        toast.error("保存编辑失败")
-      );
+      updateDocumentOutline(docId, updated.outline).catch(() => {
+        setOutline(previous);
+        toast.error("保存编辑失败，已恢复原内容");
+      });
     }
   }, [editingId, editTitle, outline, docId]);
 
@@ -625,7 +633,9 @@ function OutlineNode({
           <button
             type="button"
             onClick={() => onToggleExpand(node.id)}
-            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-all shrink-0"
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? "折叠" : "展开"}
+            className="flex min-w-[44px] min-h-[44px] items-center justify-center rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-all shrink-0"
           >
             {isExpanded ? (
               <ChevronDown className="h-3.5 w-3.5" />
@@ -640,9 +650,12 @@ function OutlineNode({
         {/* 复选框 */}
         <button
           type="button"
+          role="checkbox"
+          aria-checked={checkState === "checked" ? "true" : checkState === "indeterminate" ? "mixed" : "false"}
+          aria-label={`选择 ${node.title}`}
           onClick={() => onToggleSelect(node)}
           className={cn(
-            "flex h-[18px] w-[18px] items-center justify-center rounded-[4px] border transition-all shrink-0",
+            "flex min-w-[44px] min-h-[44px] items-center justify-center rounded-[4px] border transition-all shrink-0",
             checkState === "checked"
               ? "bg-primary border-primary text-primary-foreground"
               : checkState === "indeterminate"
@@ -690,12 +703,12 @@ function OutlineNode({
           </span>
         )}
 
-        {/* 编辑按钮 (hover) */}
+        {/* 编辑按钮 (hover / mobile always visible) */}
         {!isEditing && (
           <button
             type="button"
             onClick={() => onStartEdit(node.id, node.title)}
-            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 p-0.5 rounded hover:bg-muted text-muted-foreground transition-all shrink-0"
+            className="opacity-0 max-md:opacity-60 group-hover:opacity-60 hover:!opacity-100 active:!opacity-100 focus-visible:opacity-100 focus-visible:bg-muted min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-muted hover:bg-muted text-muted-foreground transition-all shrink-0"
             title="编辑标题"
           >
             <Pencil className="h-3 w-3" />

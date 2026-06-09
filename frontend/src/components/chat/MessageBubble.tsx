@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Highlight, themes } from "prism-react-renderer";
+import rehypeSanitize from "rehype-sanitize";
+import rehypeHighlight from "rehype-highlight";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -29,18 +30,29 @@ export interface MessageData {
   chatHistoryId?: number;
 }
 
-/** 代码块组件 — 带语法高亮 + 复制按钮 */
-function CodeBlock({ code, language }: { code: string; language?: string }) {
+/** 代码块组件 — rehype-highlight 语法高亮 + 复制按钮 */
+function CodeBlock({ children, language }: { children: React.ReactNode; language?: string }) {
   const [copied, setCopied] = useState(false);
+  const preRef = useRef<HTMLPreElement>(null);
 
   const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(code);
+    const text = preRef.current?.textContent || "";
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for HTTP / insecure contexts
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [code]);
-
-  // prism-react-renderer 需要纯语言名，去掉常见前缀
-  const lang = (language || "").replace(/^(language-|lang-)/, "") || "text";
+  }, []);
 
   return (
     <div className="group relative my-2">
@@ -51,7 +63,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 rounded-md hover:bg-zinc-700"
+          className="min-w-[44px] min-h-[44px] rounded-md hover:bg-zinc-700"
           onClick={handleCopy}
         >
           {copied ? (
@@ -61,19 +73,12 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
           )}
         </Button>
       </div>
-      <Highlight theme={themes.nightOwl} code={code.replace(/\n$/, "")} language={lang}>
-        {({ tokens, getLineProps, getTokenProps }) => (
-          <pre className="overflow-x-auto rounded-b-xl bg-zinc-950 dark:bg-zinc-900 px-4 py-3 text-xs">
-            {tokens.map((line, i) => (
-              <div key={i} {...getLineProps({ line })}>
-                {line.map((token, key) => (
-                  <span key={key} {...getTokenProps({ token })} />
-                ))}
-              </div>
-            ))}
-          </pre>
-        )}
-      </Highlight>
+      <pre
+        ref={preRef}
+        className="overflow-x-auto rounded-b-xl bg-zinc-950 dark:bg-zinc-900 px-4 py-3 text-xs"
+      >
+        {children}
+      </pre>
     </div>
   );
 }
@@ -175,23 +180,20 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
             <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed break-words">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeSanitize, rehypeHighlight]}
                 components={{
                   pre: ({ children }) => {
-                    // 提取代码文本用于自定义 CodeBlock
-                    const child = children as { props?: { children?: string; className?: string } } | undefined;
-                    const code = typeof child?.props?.children === "string" ? child.props.children : "";
-                    const lang = child?.props?.className?.replace("language-", "") || undefined;
-                    if (code) {
-                      return <CodeBlock code={code} language={lang} />;
-                    }
-                    return (
-                      <pre className="overflow-x-auto rounded-xl bg-zinc-950 dark:bg-zinc-900 px-4 py-3 my-2 text-xs text-zinc-100">
-                        {children}
-                      </pre>
-                    );
+                    // rehype-highlight 在 AST 层添加 hljs-* span，直接透传给 CodeBlock
+                    const child = children as { props?: { className?: string } } | undefined;
+                    const lang = child?.props?.className?.replace(/^(language-|lang-)/, "") || undefined;
+                    return <CodeBlock language={lang}>{children}</CodeBlock>;
                   },
-                  code: ({ children, ...props }) => {
-                    // Inline code only — block code handled by pre
+                  code: ({ children, className, ...props }) => {
+                    // Block code (inside pre) — 保留 className，让 rehype-highlight 生效
+                    if (className?.includes("language-") || className?.includes("hljs")) {
+                      return <code className={className} {...props}>{children}</code>;
+                    }
+                    // Inline code
                     return (
                       <code className="rounded-md bg-muted px-1.5 py-0.5 text-[13px] font-mono" {...props}>
                         {children}
@@ -241,7 +243,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                   type="button"
                   onClick={handleSaveToNotes}
                   disabled={saving}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[44px] rounded-md text-[10px] text-muted-foreground/50 active:text-foreground active:bg-muted/50 hover:text-foreground hover:bg-muted/50 transition-colors"
                   title="保存为学习日志"
                 >
                   <BookmarkPlus className="h-3 w-3" />
@@ -254,23 +256,23 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                       type="button"
                       onClick={() => handleFeedback(1)}
                       disabled={feedback !== null}
-                      className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] transition-colors ${
-                        feedback === 1 ? "text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20" : "text-muted-foreground/50 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                      className={`inline-flex items-center gap-1 px-2 py-1.5 min-w-[44px] min-h-[44px] rounded-md text-[10px] transition-colors ${
+                        feedback === 1 ? "text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20" : "text-muted-foreground/50 active:text-emerald-500 hover:text-emerald-500 active:bg-emerald-50 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
                       }`}
                       title="有帮助"
                     >
-                      <ThumbsUp className="h-3 w-3" />
+                      <ThumbsUp className="h-3.5 w-3.5" />
                     </button>
                     <button
                       type="button"
                       onClick={() => handleFeedback(0)}
                       disabled={feedback !== null}
-                      className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] transition-colors ${
-                        feedback === 0 ? "text-destructive bg-destructive/10" : "text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10"
+                      className={`inline-flex items-center gap-1 px-2 py-1.5 min-w-[44px] min-h-[44px] rounded-md text-[10px] transition-colors ${
+                        feedback === 0 ? "text-destructive bg-destructive/10" : "text-muted-foreground/50 active:text-destructive hover:text-destructive active:bg-destructive/10 hover:bg-destructive/10"
                       }`}
                       title="无帮助"
                     >
-                      <ThumbsDown className="h-3 w-3" />
+                      <ThumbsDown className="h-3.5 w-3.5" />
                     </button>
                   </>
                 )}
@@ -282,17 +284,17 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                       onKeyDown={(e) => { if (e.key === "Enter") submitNegativeFeedback(); if (e.key === "Escape") setShowReasonInput(false); }}
                       placeholder="告诉我们哪里不好..."
                       autoFocus
-                      className="w-[180px] text-[10px] bg-background border border-border rounded px-1.5 py-0.5 outline-none focus:border-primary/50"
+                      className="w-[180px] text-[11px] bg-background border border-border rounded-lg px-2.5 py-2 min-h-[44px] outline-none focus:border-primary/50 transition-colors"
                     />
                     <button
                       type="button"
                       onClick={submitNegativeFeedback}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive hover:bg-destructive/20"
+                      className="text-[11px] px-3 py-2 min-h-[44px] rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/30 transition-colors"
                     >提交</button>
                     <button
                       type="button"
                       onClick={() => setShowReasonInput(false)}
-                      className="text-[10px] px-1 py-0.5 text-muted-foreground hover:text-foreground"
+                      className="text-[11px] px-3 py-2 min-h-[44px] rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                     >取消</button>
                   </div>
                 )}

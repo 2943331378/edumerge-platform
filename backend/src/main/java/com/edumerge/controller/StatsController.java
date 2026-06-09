@@ -1,6 +1,7 @@
 package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
+import com.edumerge.dto.EvalMetricsRequest;
 import com.edumerge.dto.LearnerDashboardResponse;
 import com.edumerge.dto.LearningStatsResponse;
 import com.edumerge.dto.StatsResponse;
@@ -85,28 +86,16 @@ public class StatsController {
      * 是实时、可验证的 AI 质量指标。
      */
     @PostMapping("/eval")
-    public Result<String> updateEvalMetrics(@RequestBody Map<String, Object> body) {
+    public Result<String> updateEvalMetrics(@RequestBody EvalMetricsRequest body) {
         log.info("[数据看板] 接收评测指标推送: hitRate={}, faithfulness={}, correctness={}",
-                body.get("hitRate"), body.get("avgFaithfulness"), body.get("avgCorrectness"));
+                body.getHitRate(), body.getAvgFaithfulness(), body.getAvgCorrectness());
         statsService.updateEvalMetrics(
-                toDouble(body.get("hitRate")),
-                toDouble(body.get("avgFaithfulness")),
-                toDouble(body.get("avgCorrectness")),
-                toDouble(body.get("compositeScore")),
-                toInt(body.get("totalQuestions"))
+                body.getHitRate() != null ? body.getHitRate() : 0.0,
+                body.getAvgFaithfulness() != null ? body.getAvgFaithfulness() : 0.0,
+                body.getAvgCorrectness() != null ? body.getAvgCorrectness() : 0.0,
+                body.getCompositeScore() != null ? body.getCompositeScore() : 0.0,
+                body.getTotalQuestions() != null ? body.getTotalQuestions() : 0
         );
         return Result.success("评测指标已更新");
-    }
-
-    private static double toDouble(Object v) {
-        if (v instanceof Number n) return n.doubleValue();
-        if (v instanceof String s) return Double.parseDouble(s);
-        return 0.0;
-    }
-
-    private static int toInt(Object v) {
-        if (v instanceof Number n) return n.intValue();
-        if (v instanceof String s) return Integer.parseInt(s);
-        return 0;
     }
 }

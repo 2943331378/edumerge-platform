@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import {
   FileText, ChevronRight, ChevronLeft, X, Sparkles,
@@ -63,6 +63,8 @@ interface Props {
 
 export function OnboardingTour({ open, onClose }: Props) {
   const [step, setStep] = useState(0);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
   const current = TOUR_STEPS[step];
   const isLast = step === TOUR_STEPS.length - 1;
   const isFirst = step === 0;
@@ -81,6 +83,31 @@ export function OnboardingTour({ open, onClose }: Props) {
     onClose();
   };
 
+  // Focus trap: focus close button on open, trap Tab within dialog
+  useEffect(() => {
+    if (!open) return;
+    closeBtnRef.current?.focus();
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !cardRef.current) return;
+      const focusable = cardRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleTab);
+    return () => window.removeEventListener("keydown", handleTab);
+  }, [open, step]);
+
   if (!open) return null;
 
   return (
@@ -91,6 +118,10 @@ export function OnboardingTour({ open, onClose }: Props) {
       {/* Card — 居中弹窗，不覆盖 header */}
       <div className="fixed inset-x-0 top-11 bottom-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
         <div
+          ref={cardRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="使用引导"
           className={cn(
             "relative w-full max-w-md rounded-2xl border border-white/10 bg-card/95 backdrop-blur-xl shadow-2xl",
             "animate-in fade-in zoom-in-95 duration-300",
@@ -111,8 +142,10 @@ export function OnboardingTour({ open, onClose }: Props) {
               ))}
             </div>
             <button
+              ref={closeBtnRef}
               type="button"
               onClick={handleSkip}
+              aria-label="关闭引导"
               className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
               <X className="h-4 w-4" />
