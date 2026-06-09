@@ -777,6 +777,21 @@ export async function listErrorBook(docId: number, signal?: AbortSignal): Promis
   }));
 }
 
+/** 获取已掌握的错题 ID 列表 */
+export async function listMasteredQuizzes(docId: number): Promise<number[]> {
+  return request<number[]>(`/quizzes/mastered?docId=${docId}`);
+}
+
+/** 标记错题已掌握 */
+export async function markQuizMastered(quizId: number): Promise<void> {
+  return request<void>(`/quizzes/${quizId}/master`, { method: "PUT" });
+}
+
+/** 取消错题掌握标记 */
+export async function unmarkQuizMastered(quizId: number): Promise<void> {
+  return request<void>(`/quizzes/${quizId}/master`, { method: "DELETE" });
+}
+
 /** 按知识点统计正确率 (薄弱度热力图) */
 export interface WeaknessItem {
   deckId: number;

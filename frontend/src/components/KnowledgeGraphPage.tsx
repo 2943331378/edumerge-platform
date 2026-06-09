@@ -71,6 +71,10 @@ const RELATION_LABELS: Record<string, string> = {
   PREREQUISITE: "前置知识", CONTRADICTS: "矛盾", APPLIES_TO: "应用",
 };
 
+// Label collision detection — reset per animation frame
+let _labelRects: { x: number; y: number; w: number; h: number }[] = [];
+let _lastFrameTime = 0;
+
 export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Props) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -92,6 +96,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
   const dragStartY = useRef(0);
   const isDragging = useRef(false);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const [showConceptList, setShowConceptList] = useState(false);
 
   // Load existing graph
   useEffect(() => {
@@ -288,6 +293,19 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
           ))}
         </select>
 
+        {/* Mobile concept list toggle */}
+        {graphData && fgData.nodes.length > 0 && (
+          <Button
+            size="sm"
+            variant={showConceptList ? "default" : "outline"}
+            className="md:hidden rounded-xl gap-1.5 h-8 text-xs"
+            onClick={() => setShowConceptList((v) => !v)}
+          >
+            <Search className="h-3.5 w-3.5" />
+            {showConceptList ? "关闭列表" : "概念列表"}
+          </Button>
+        )}
+
         {/* Legend */}
         <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground/60">
           <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(1, isDark) }} /> 1文档</span>
@@ -295,6 +313,29 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
           <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(4, isDark) }} /> 4+文档</span>
         </div>
       </div>
+
+      {/* Mobile concept list — bypass canvas click issues */}
+      {showConceptList && graphData && (
+        <div className="md:hidden border-b border-border/50 max-h-[40vh] overflow-y-auto bg-background/95 backdrop-blur shrink-0">
+          <div className="p-2 space-y-0.5">
+            {fgData.nodes
+              .slice()
+              .sort((a, b) => b.importance - a.importance)
+              .map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => { handleNodeClick(n); setShowConceptList(false); }}
+                  className="flex items-center gap-2 w-full rounded-lg px-3 py-2 text-xs hover:bg-muted/50 active:bg-muted transition-colors text-left"
+                >
+                  <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: n.color }} />
+                  <span className="flex-1 truncate text-foreground">{n.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{n.docCount} 文档</span>
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Main content: Graph + optional detail panel */}
       <div className="flex-1 flex overflow-hidden">
@@ -342,18 +383,40 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
               linkWidth={(l: Record<string, unknown>) => (l.strength as number ?? 0.5) * 2}
               onNodeClick={(node: Record<string, unknown>) => handleNodeClick(node as unknown as GraphNode)}
               nodeCanvasObject={(node: Record<string, unknown>, ctx: CanvasRenderingContext2D, globalScale: number) => {
+                // Reset label collision rects each animation frame
+                const now = performance.now();
+                if (now - _lastFrameTime > 50) _labelRects = [];
+                _lastFrameTime = now;
                 const n = node as unknown as GraphNode;
-                const label = n.name;
-                const fontSize = 12 / globalScale;
-                ctx.font = `${fontSize}px sans-serif`;
+                const r = n.val * 1.2;
                 ctx.fillStyle = n.color;
                 ctx.beginPath();
-                ctx.arc(n.x!, n.y!, n.val * 1.2, 0, 2 * Math.PI);
+                ctx.arc(n.x!, n.y!, r, 0, 2 * Math.PI);
                 ctx.fill();
-                ctx.fillStyle = isDark ? "#fff" : "#1e293b";
+                // Zoom-aware label filtering: fewer labels when zoomed out
+                const minScale = fgData.nodes.length > 30 ? 2.5 : fgData.nodes.length > 15 ? 1.8 : 1.2;
+                if (globalScale < minScale) return;
+                const fontSize = Math.max(10, Math.min(14, 12 / globalScale * (globalScale * 0.6)));
+                ctx.font = `${fontSize}px sans-serif`;
+                const label = n.name;
+                const labelY = n.y! + r + fontSize;
+                const labelW = ctx.measureText(label).width;
+                const labelH = fontSize * 1.4;
+                const labelX = n.x! - labelW / 2;
+                const tp = 2;
+                for (const rect of _labelRects) {
+                  if (labelX < rect.x + rect.w && labelX + labelW > rect.x &&
+                      labelY - tp < rect.y + rect.h && labelY + labelH > rect.y) return;
+                }
+                _labelRects.push({ x: labelX, y: labelY - tp, w: labelW, h: labelH + tp });
+                ctx.fillStyle = isDark ? "rgba(15,23,42,0.8)" : "rgba(255,255,255,0.85)";
+                ctx.beginPath();
+                ctx.roundRect(labelX - 2, labelY - tp, labelW + 4, labelH + tp, 3);
+                ctx.fill();
+                ctx.fillStyle = isDark ? "#e2e8f0" : "#1e293b";
                 ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText(label, n.x!, n.y!);
+                ctx.textBaseline = "top";
+                ctx.fillText(label, n.x!, labelY);
               }}
               cooldownTicks={100}
               enableZoomInteraction

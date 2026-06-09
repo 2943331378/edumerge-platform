@@ -2,6 +2,7 @@
 @import "../vendor/tw-animate.css";
 @import "../vendor/shadcn-tailwind.css";
 @import "highlight.js/styles/github-dark.css";
+@import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -211,3 +212,23 @@
 .skip-to-content:focus {
   @apply not-sr-only fixed top-2 left-2 z-[9999] px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium;
 }
+
+/* ─── rehype-highlight: 防止 Tailwind prose 覆盖语法高亮色 ─── */
+.prose pre code.hljs,
+.prose pre code .hljs {
+  color: unset;
+  background: transparent;
+}
+.prose pre code .hljs-keyword { color: #ff7b72; }
+.prose pre code .hljs-string { color: #a5d6ff; }
+.prose pre code .hljs-comment { color: #8b949e; font-style: italic; }
+.prose pre code .hljs-function { color: #d2a8ff; }
+.prose pre code .hljs-number { color: #79c0ff; }
+.prose pre code .hljs-title { color: #d2a8ff; }
+.prose pre code .hljs-built_in { color: #ffa657; }
+.prose pre code .hljs-literal { color: #79c0ff; }
+.prose pre code .hljs-attr { color: #79c0ff; }
+.prose pre code .hljs-selector-class { color: #7ee787; }
+.prose pre code .hljs-tag { color: #7ee787; }
+.prose pre code .hljs-name { color: #7ee787; }
+.prose pre code .hljs-attribute { color: #d2a8ff; }

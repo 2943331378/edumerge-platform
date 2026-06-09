@@ -3,8 +3,10 @@
 import { useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeHighlight from "rehype-highlight";
+import rehypeKatex from "rehype-katex";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -27,6 +29,7 @@ export interface MessageData {
   sources?: SourceRef[];
   loading?: boolean;
   error?: boolean;
+  stopped?: boolean;
   chatHistoryId?: number;
 }
 
@@ -96,7 +99,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
   const [showReasonInput, setShowReasonInput] = useState(false);
   const [reasonText, setReasonText] = useState("");
   const [saving, setSaving] = useState(false);
-  const isLoading = message.loading === true && !message.content;
+  const isLoading = message.loading === true && (!message.content || message.stopped);
   const isError = message.error === true;
 
   const handleFeedback = async (isHelpful: number) => {
@@ -135,7 +138,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
     }
     setSaving(true);
     try {
-      const title = message.content.slice(0, 30).replace(/\n/g, " ");
+      const title = message.content.slice(0, 50).replace(/\n/g, " ");
       await createFlowNote({
         docId,
         category: "KEY_POINT",
@@ -179,8 +182,8 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
             {/* Markdown content */}
             <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed break-words">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeSanitize, rehypeHighlight]}
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeHighlight, rehypeSanitize, rehypeKatex]}
                 components={{
                   pre: ({ children }) => {
                     // rehype-highlight 在 AST 层添加 hljs-* span，直接透传给 CodeBlock
@@ -223,6 +226,14 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
               </ReactMarkdown>
             </div>
 
+            {/* Stopped indicator */}
+            {message.stopped && !isError && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/50 mt-1">
+                <span>⏹</span>
+                <span>回答已中断</span>
+              </div>
+            )}
+
             {/* Error state — retry button */}
             {isError && onRetry && (
               <Button
@@ -237,7 +248,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
             )}
 
             {/* Action buttons (AI only, not loading, not error) */}
-            {!isUser && !isLoading && !isError && message.content && (
+            {!isUser && !isLoading && !isError && message.content && !message.stopped && (
               <div className="flex items-center gap-1 pt-1">
                 <button
                   type="button"
@@ -277,25 +288,27 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                   </>
                 )}
                 {showReasonInput && (
-                  <div className="flex items-center gap-1 mt-1">
+                  <div className="mt-1 space-y-1.5">
                     <input
                       value={reasonText}
                       onChange={(e) => setReasonText(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") submitNegativeFeedback(); if (e.key === "Escape") setShowReasonInput(false); }}
                       placeholder="告诉我们哪里不好..."
                       autoFocus
-                      className="w-[180px] text-[11px] bg-background border border-border rounded-lg px-2.5 py-2 min-h-[44px] outline-none focus:border-primary/50 transition-colors"
+                      className="w-full max-w-[280px] text-[11px] bg-background border border-border rounded-lg px-2.5 py-2 min-h-[44px] outline-none focus:border-primary/50 transition-colors"
                     />
-                    <button
-                      type="button"
-                      onClick={submitNegativeFeedback}
-                      className="text-[11px] px-3 py-2 min-h-[44px] rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/30 transition-colors"
-                    >提交</button>
-                    <button
-                      type="button"
-                      onClick={() => setShowReasonInput(false)}
-                      className="text-[11px] px-3 py-2 min-h-[44px] rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                    >取消</button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={submitNegativeFeedback}
+                        className="text-[11px] px-3 py-2 min-h-[44px] rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/30 transition-colors"
+                      >提交</button>
+                      <button
+                        type="button"
+                        onClick={() => setShowReasonInput(false)}
+                        className="text-[11px] px-3 py-2 min-h-[44px] rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >取消</button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -326,7 +339,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-foreground/80">
-                            段落 {s.index}
+                            来源 {s.index}
                           </span>
                           <span className={cn(
                             "text-[10px]",

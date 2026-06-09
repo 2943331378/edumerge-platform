@@ -62,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionStorage.removeItem(USER_KEY);
         sessionStorage.removeItem(REFRESH_KEY);
         deleteCookie(TOKEN_KEY);
+        import("sonner").then(({ toast }) => toast.error("登录已过期，请重新登录")).catch(() => {});
       }
     }
     setLoading(false);

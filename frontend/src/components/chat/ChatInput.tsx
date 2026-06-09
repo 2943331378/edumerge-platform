@@ -46,7 +46,6 @@ export function ChatInput({ value, onChange, onSend, onStop, loading }: ChatInpu
           onKeyDown={handleKeyDown}
           placeholder="输入问题，Enter 发送..."
           rows={1}
-          disabled={loading}
           className="min-h-[46px] resize-none rounded-2xl border-muted-foreground/15 bg-muted/30 focus-visible:ring-0 focus-visible:border-primary/30 transition-colors"
         />
         {loading ? (

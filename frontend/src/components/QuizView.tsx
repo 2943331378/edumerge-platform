@@ -771,8 +771,10 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                         <span className="text-[10px] font-medium text-primary/60 uppercase tracking-wider">Q{i + 1}</span>
                         <p className="text-xs text-foreground/85 leading-relaxed">{quiz.question}</p>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {quiz.options.map((opt) => (
-                            <span key={opt} className={`text-[10px] px-1.5 py-0.5 rounded ${opt === quiz.answer ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground/70'}`}>{opt}</span>
+                          {quiz.options.map((opt, oi) => (
+                            <span key={opt} className={`text-[10px] px-1.5 py-0.5 rounded ${opt === quiz.answer ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground/70'}`}>
+                              <span className="font-medium mr-0.5">{String.fromCharCode(65 + oi)}.</span>{opt}
+                            </span>
                           ))}
                         </div>
                         {quiz.explanation && (
@@ -811,7 +813,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
           <div className="flex items-center justify-between text-[11px] text-muted-foreground/50">
             <div className="flex items-center gap-2">
               <span>{activeIdx + 1} / {totalItems}</span>
-              {startTime && !reviewMode && (
+              {!reviewMode && (
                 <span className="inline-flex items-center gap-1 tabular-nums text-muted-foreground/60">
                   <Clock className="h-3 w-3" />
                   {formatElapsed(elapsedSeconds)}
@@ -873,7 +875,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
           ) : (
             /* 选择题 — 选项按钮 */
             <div className="space-y-2">
-              {quiz?.options.map((opt) => {
+              {quiz?.options.map((opt, idx) => {
+                const letter = String.fromCharCode(65 + idx); // A, B, C, D...
                 const isSelected = activeSelected === opt;
                 const showCorrect = activeSubmitted && opt === quiz.answer;
                 const showWrong = activeSubmitted && isSelected && opt !== quiz.answer;
@@ -893,6 +896,13 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                     )}
                   >
                     <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-medium",
+                        showCorrect ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300" :
+                        showWrong ? "bg-destructive/10 text-destructive" :
+                        isSelected && !activeSubmitted ? "bg-primary/10 text-primary" :
+                        "bg-muted text-muted-foreground/60",
+                      )}>{letter}</span>
                       {showCorrect && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
                       {showWrong && <X className="h-4 w-4 shrink-0 text-destructive" />}
                       <span>{opt}</span>

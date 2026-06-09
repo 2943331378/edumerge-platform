@@ -965,17 +965,17 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
             ) : (
               <>
                 <span className="text-[10px] sm:text-[11px] text-muted-foreground/40 mr-1">自评:</span>
-                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => handleSelfAssess(1)}>
-                  忘了
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs gap-1 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => handleSelfAssess(1)}>
+                  <kbd className="text-[9px] font-mono bg-red-100 dark:bg-red-900/40 px-1 rounded">1</kbd> 忘了
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-orange-200 dark:border-orange-800 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30" onClick={() => handleSelfAssess(2)}>
-                  模糊
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs gap-1 border-orange-200 dark:border-orange-800 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30" onClick={() => handleSelfAssess(2)}>
+                  <kbd className="text-[9px] font-mono bg-orange-100 dark:bg-orange-900/40 px-1 rounded">2</kbd> 模糊
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30" onClick={() => handleSelfAssess(3)}>
-                  记住
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs gap-1 border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30" onClick={() => handleSelfAssess(3)}>
+                  <kbd className="text-[9px] font-mono bg-green-100 dark:bg-green-900/40 px-1 rounded">3</kbd> 记住
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30" onClick={() => handleSelfAssess(4)}>
-                  秒答
+                <Button size="sm" variant="outline" className="rounded-lg h-7 sm:h-8 text-[11px] sm:text-xs gap-1 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30" onClick={() => handleSelfAssess(4)}>
+                  <kbd className="text-[9px] font-mono bg-emerald-100 dark:bg-emerald-900/40 px-1 rounded">4</kbd> 秒答
                 </Button>
                 <span className="hidden sm:inline text-[10px] text-muted-foreground/30 ml-1">快捷键 1-4</span>
               </>

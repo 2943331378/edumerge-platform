@@ -398,4 +398,17 @@ ALTER TABLE flashcards ADD COLUMN is_important TINYINT DEFAULT 0 COMMENT '是否
 INSERT IGNORE INTO users (username, email, password, display_name, status)
 VALUES ('admin', 'admin@edumerge.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '管理员', 1);
 
+-- ===== 用户已掌握错题表 =====
+CREATE TABLE IF NOT EXISTS user_mastered_quizzes (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '记录ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    quiz_id BIGINT NOT NULL COMMENT '测试题ID',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '掌握时间',
+    UNIQUE KEY uk_user_quiz (user_id, quiz_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE,
+    INDEX idx_umq_user_id (user_id),
+    INDEX idx_umq_quiz_id (quiz_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户已掌握错题表';
+
 COMMIT;

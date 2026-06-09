@@ -108,4 +108,22 @@ public class QuizController {
         documentService.verifyOwnership(docId);
         return Result.success(quizService.getWeakness(docId));
     }
+
+    @GetMapping("/mastered")
+    public Result<List<Long>> listMastered(@RequestParam Long docId) {
+        documentService.verifyOwnership(docId);
+        return Result.success(quizService.listMasteredQuizIds(docId));
+    }
+
+    @PutMapping("/{id}/master")
+    public Result<Void> markMastered(@PathVariable Long id) {
+        quizService.markMastered(id);
+        return Result.success(null);
+    }
+
+    @DeleteMapping("/{id}/master")
+    public Result<Void> unmarkMastered(@PathVariable Long id) {
+        quizService.unmarkMastered(id);
+        return Result.success(null);
+    }
 }

@@ -19,7 +19,7 @@ import { MessageBubble } from "./MessageBubble";
 import type { MessageData } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { chatStream, chatHistory, listConversations, deleteConversation, renameConversation } from "@/lib/api";
-import { ArrowDown, Plus, Trash2, MessageSquare, Sparkles, Search, XIcon } from "lucide-react";
+import { ArrowDown, Plus, Trash2, MessageSquare, Sparkles, Search, XIcon, Pencil } from "lucide-react";
 
 const ACTIVE_KEY = "active_chat_id";
 
@@ -84,6 +84,9 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
 
   // 初始化 + docId 变化时从后端加载该文档的会话列表
   useEffect(() => {
+    // 立即清空消息，防止旧文档对话残留
+    setMessages([]);
+    setHistoryLoading(true);
     let cancelled = false;
     (async () => {
       try {
@@ -100,7 +103,6 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
           const saved = localStorage.getItem(ACTIVE_KEY);
           const target = saved && list.some(c => c.id === saved) ? saved : list[0].id;
           setActiveId(target);
-          setMessages([]);
           return;
         }
       } catch (e) { console.warn("加载对话列表失败:", e); toast.error("对话列表加载失败，请刷新重试"); }
@@ -110,7 +112,6 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       const c: Conversation = { id: newId, title: "新对话", createdAt: new Date().toISOString() };
       setConversations([c]);
       setActiveId(newId);
-      setMessages([]);
     })();
     return () => { cancelled = true; };
   }, [docId]);
@@ -340,7 +341,19 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       }
       reader.cancel();
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Keep partial content if any was received
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId && !m.content
+              ? { ...m, loading: false }
+              : m.id === assistantMsgId
+                ? { ...m, loading: false }
+                : m
+          )
+        );
+        return;
+      }
       const msg = err instanceof Error ? err.message : "网络请求失败";
       // Preserve already-received content — don't wipe it with the error
       if (activeIdRef.current === convId) {
@@ -380,7 +393,13 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     if (q) doSend(q);
   }, [loading, doSend]);
 
-  const handleStop = useCallback(() => abortRef.current?.abort(), []);
+  const handleStop = useCallback(() => {
+    // Mark the in-flight assistant message as stopped before aborting
+    setMessages((prev) =>
+      prev.map((m) => m.role === "assistant" && m.loading ? { ...m, stopped: true } : m)
+    );
+    abortRef.current?.abort();
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -468,6 +487,13 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
                     title="双击重命名"
                   >{titleNode}</span>
                 )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setRenamingId(c.id); setRenameTitle(c.title); }}
+                  className="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-foreground rounded min-w-[44px] min-h-[44px] p-2 flex items-center justify-center transition-opacity"
+                  title="重命名"
+                >
+                  <Pencil className="h-2.5 w-2.5" />
+                </button>
                 <button
                   onClick={(e) => handleDeleteConv(e, c.id)}
                   className="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded min-w-[44px] min-h-[44px] p-2 flex items-center justify-center transition-opacity"

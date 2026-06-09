@@ -111,6 +111,10 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
               >
                 {step.label}
               </span>
+              {/* 未完成标记 */}
+              {!isCompleted && !isActive && idx > 0 && !completedSteps.has(steps[idx - 1].id) && (
+                <span className="text-[8px] text-muted-foreground/30 mt-0.5">未解锁</span>
+              )}
             </button>
 
             {/* Connector line */}

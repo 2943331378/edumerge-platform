@@ -16,7 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { ErrorBookItem } from "@/lib/api";
-import { listErrorBook } from "@/lib/api";
+import { listErrorBook, listMasteredQuizzes, markQuizMastered, unmarkQuizMastered } from "@/lib/api";
 import {
   BookX,
   RotateCw,
@@ -37,16 +37,12 @@ interface Props {
 
 const MASTERED_KEY = (docId: number) => `edumerge_mastered_${docId}`;
 
-function loadMastered(docId: number): Set<number> {
+function loadMasteredLocal(docId: number): Set<number> {
   try {
     const raw = localStorage.getItem(MASTERED_KEY(docId));
     if (raw) return new Set(JSON.parse(raw));
   } catch { /* ignore */ }
   return new Set();
-}
-
-function saveMastered(docId: number, ids: Set<number>) {
-  try { localStorage.setItem(MASTERED_KEY(docId), JSON.stringify([...ids])); } catch { /* ignore */ }
 }
 
 /** 填空题答案模糊匹配: trim + 忽略大小写 + 去除中英文标点 + 合并空格 */
@@ -59,7 +55,7 @@ function isAnswerMatch(input: string | null | undefined, answer: string | null |
 export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   const [items, setItems] = useState<ErrorBookItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mastered, setMastered] = useState<Set<number>>(() => (docId ? loadMastered(docId) : new Set()));
+  const [mastered, setMastered] = useState<Set<number>>(() => (docId ? loadMasteredLocal(docId) : new Set()));
 
   // --- Browse mode state (original) ---
   const [reviewIdx, setReviewIdx] = useState(0);
@@ -79,24 +75,31 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
 
   useEffect(() => {
     if (!docId) return;
-    // Abort any in-flight request before starting a new one
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    let cancelled = false;
     setLoading(true);
-    setMastered(loadMastered(docId));
-    listErrorBook(docId, controller.signal)
-      .then((data) => {
+    setMastered(loadMasteredLocal(docId));
+    Promise.all([
+      listErrorBook(docId, controller.signal),
+      listMasteredQuizzes(docId).catch(() => []),
+    ])
+      .then(([data, backendMastered]) => {
+        if (cancelled) return;
         setItems(data);
+        const merged = new Set([...loadMasteredLocal(docId), ...backendMastered]);
+        setMastered(merged);
+        try { localStorage.setItem(MASTERED_KEY(docId), JSON.stringify([...merged])); } catch { /* ignore */ }
         setLoading(false);
       })
       .catch((err) => {
-        if ((err as Error).name !== "AbortError") {
+        if (!cancelled && (err as Error).name !== "AbortError") {
           toast.error("加载错题本失败");
           setLoading(false);
         }
       });
-    return () => { controller.abort(); };
+    return () => { cancelled = true; controller.abort(); };
   }, [docId]);
 
   useEffect(() => {
@@ -110,9 +113,14 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   }, []);
 
   const persistMastered = useCallback(
-    (next: Set<number>) => {
+    (next: Set<number>, addedQuizId?: number, removedQuizId?: number) => {
       setMastered(next);
-      if (docId) saveMastered(docId, next);
+      if (docId) {
+        try { localStorage.setItem(MASTERED_KEY(docId), JSON.stringify([...next])); } catch { /* ignore */ }
+      }
+      // Persist to backend (fire-and-forget)
+      if (addedQuizId != null) markQuizMastered(addedQuizId).catch(() => {});
+      if (removedQuizId != null) unmarkQuizMastered(removedQuizId).catch(() => {});
     },
     [docId],
   );
@@ -136,7 +144,7 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
 
   const handleMaster = (quizId: number) => {
     const next = new Set(mastered).add(quizId);
-    persistMastered(next);
+    persistMastered(next, quizId);
     if (reviewIdx >= visibleItems.length - 1) {
       setReviewIdx(Math.max(0, reviewIdx - 1));
     }
@@ -197,7 +205,7 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
       setRetakeCorrect((c) => c + 1);
       // Auto-mark mastered
       const next = new Set(mastered).add(retakeCurrent.quizId);
-      persistMastered(next);
+      persistMastered(next, retakeCurrent.quizId);
       toast.success("答对了！已自动标记掌握");
     }
   }, [retakeSelected, retakeCurrent, mastered, persistMastered]);

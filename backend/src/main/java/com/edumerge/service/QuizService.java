@@ -6,7 +6,9 @@ import com.edumerge.entity.Document;
 import com.edumerge.entity.Quiz;
 import com.edumerge.entity.QuizAttempt;
 import com.edumerge.mapper.QuizAttemptMapper;
+import com.edumerge.mapper.MasteredQuizMapper;
 import com.edumerge.mapper.QuizMapper;
+import com.edumerge.entity.MasteredQuiz;
 import com.edumerge.security.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +28,7 @@ public class QuizService {
 
     private final QuizMapper quizMapper;
     private final QuizAttemptMapper quizAttemptMapper;
+    private final MasteredQuizMapper masteredQuizMapper;
     private final AiQuizGenerator aiQuizGenerator;
     private final SessionService sessionService;
     private final DocumentService documentService;
@@ -34,12 +37,14 @@ public class QuizService {
     @Autowired
     public QuizService(QuizMapper quizMapper,
                        QuizAttemptMapper quizAttemptMapper,
+                       MasteredQuizMapper masteredQuizMapper,
                        AiQuizGenerator aiQuizGenerator,
                        SessionService sessionService,
                        DocumentService documentService,
                        ObjectMapper objectMapper) {
         this.quizMapper = quizMapper;
         this.quizAttemptMapper = quizAttemptMapper;
+        this.masteredQuizMapper = masteredQuizMapper;
         this.aiQuizGenerator = aiQuizGenerator;
         this.sessionService = sessionService;
         this.documentService = documentService;
@@ -313,6 +318,42 @@ public class QuizService {
 
         result.sort(Comparator.comparingLong(a -> (long) a.get("accuracyRate")));
         return result;
+    }
+
+    // ═══════ 错题掌握状态 ═══════
+
+    public List<Long> listMasteredQuizIds(Long docId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        // Join quizzes to filter by docId
+        List<Long> quizIds = quizMapper.selectList(
+                new LambdaQueryWrapper<Quiz>().eq(Quiz::getDocId, docId).select(Quiz::getId)
+        ).stream().map(Quiz::getId).toList();
+        if (quizIds.isEmpty()) return List.of();
+        return masteredQuizMapper.selectList(
+                new LambdaQueryWrapper<MasteredQuiz>()
+                        .eq(MasteredQuiz::getUserId, userId)
+                        .in(MasteredQuiz::getQuizId, quizIds)
+        ).stream().map(MasteredQuiz::getQuizId).toList();
+    }
+
+    public void markMastered(Long quizId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        LambdaQueryWrapper<MasteredQuiz> wrapper = new LambdaQueryWrapper<MasteredQuiz>()
+                .eq(MasteredQuiz::getUserId, userId)
+                .eq(MasteredQuiz::getQuizId, quizId);
+        if (masteredQuizMapper.selectCount(wrapper) == 0) {
+            MasteredQuiz mq = MasteredQuiz.builder().userId(userId).quizId(quizId).build();
+            masteredQuizMapper.insert(mq);
+        }
+    }
+
+    public void unmarkMastered(Long quizId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        masteredQuizMapper.delete(
+                new LambdaQueryWrapper<MasteredQuiz>()
+                        .eq(MasteredQuiz::getUserId, userId)
+                        .eq(MasteredQuiz::getQuizId, quizId)
+        );
     }
 
     // ═══════ 内部工具 ═══════
