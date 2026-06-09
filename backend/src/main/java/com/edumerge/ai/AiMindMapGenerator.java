@@ -1,17 +1,22 @@
 package com.edumerge.ai;
 
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * AI 思维导图生成器 (架构红线: LangChain4j 隔离在 ai 包)
@@ -26,6 +31,10 @@ public class AiMindMapGenerator extends AiGeneratorBase {
     @Autowired
     @org.springframework.beans.factory.annotation.Qualifier("contentChatModel")
     private ChatModel chatLanguageModel;
+
+    @Autowired
+    @Qualifier("streamingContentChatModel")
+    private StreamingChatModel streamingModel;
 
     /**
      * 根据文档内容生成思维导图
@@ -63,31 +72,91 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         String subjectRules = buildSubjectRules(getSubjectType(docId));
         log.info("思维导图上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, chunkCount, System.currentTimeMillis() - startTime);
 
-        // 步骤 3: 调用 LLM 生成 Markdown 思维导图
         long llmStart = System.currentTimeMillis();
         String markdown = callLLM(context, sectionContext, subjectRules);
         log.info("LLM 思维导图生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, markdown.length(), System.currentTimeMillis() - llmStart);
 
-        // 步骤 4: 清理验证 — 确保输出符合 Markdown 层级格式
         markdown = cleanMarkdown(markdown);
         if (!isValidMindMap(markdown)) {
             log.error("思维导图格式验证失败: docId={}, content={}", docId, markdown.substring(0, Math.min(200, markdown.length())));
             return MindMapResult.empty();
         }
 
-        // 步骤 5: 提取标题，持久化由 MindMapService 负责（避免循环依赖）
         String title = extractTitle(markdown);
         log.info("思维导图内容生成完成: docId={}, title={}", docId, title);
         return MindMapResult.success(title, markdown);
     }
 
-    /** 调用大模型, 使用专用 Prompt 强制输出结构化 Markdown */
-    private String callLLM(String context, String sectionContext, String subjectRules) {
-        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
-                ? "\n\n# 重点关注章节\n请重点围绕以下章节生成思维导图，但保持整体结构完整:\n" + sectionContext.strip() + "\n"
-                : "";
+    /**
+     * 流式生成思维导图 — 逐 token 回调, 完成后返回完整结果
+     */
+    public MindMapResult generateStream(Long docId, String docUuid, String sectionContext,
+                                         Integer startChunk, Integer endChunk, Consumer<String> onToken) {
+        long startTime = System.currentTimeMillis();
+        String context;
+        if (startChunk != null && endChunk != null) {
+            context = buildContextFromRange(docId, startChunk, endChunk);
+            if (context.isEmpty()) {
+                List<EmbeddingMatch<TextSegment>> fallback = retrieveTopChunks(docUuid, 12,
+                        "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容");
+                if (fallback.isEmpty()) return MindMapResult.empty();
+                context = buildContextWithPages(fallback);
+            }
+        } else {
+            List<EmbeddingMatch<TextSegment>> matches = retrieveTopChunks(docUuid, 12,
+                    "文档结构 章节标题 核心主题 关键概念 层级关系 目录大纲 主要内容");
+            if (matches.isEmpty()) return MindMapResult.empty();
+            context = buildContextWithPages(matches);
+        }
+        String subjectRules = buildSubjectRules(getSubjectType(docId));
+        log.info("流式思维导图上下文构建完成: docId={}, 耗时={}ms", docId, System.currentTimeMillis() - startTime);
 
-        String template = """
+        List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectRules);
+
+        StringBuilder fullContent = new StringBuilder();
+        long llmStart = System.currentTimeMillis();
+        try {
+            AI_CIRCUIT_BREAKER.execute(() -> {
+                streamingModel.chat(messages, new StreamingChatResponseHandler() {
+                    @Override
+                    public void onPartialResponse(String token) {
+                        fullContent.append(token);
+                        onToken.accept(token);
+                    }
+                    @Override
+                    public void onCompleteResponse(ChatResponse response) {
+                        log.info("流式思维导图 LLM 完成: docId={}, 长度={}, 耗时={}ms",
+                                docId, fullContent.length(), System.currentTimeMillis() - llmStart);
+                    }
+                    @Override
+                    public void onError(Throwable error) {
+                        log.error("流式思维导图 LLM 错误: docId={}, error={}", docId, error.getMessage());
+                    }
+                });
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("流式思维导图生成异常: docId={}, error={}", docId, e.getMessage(), e);
+            return MindMapResult.empty();
+        }
+
+        String markdown = cleanMarkdown(fullContent.toString());
+        if (!isValidMindMap(markdown)) {
+            log.error("流式思维导图格式验证失败: docId={}", docId);
+            return MindMapResult.empty();
+        }
+        String title = extractTitle(markdown);
+        return MindMapResult.success(title, markdown);
+    }
+
+    private String callLLM(String context, String sectionContext, String subjectRules) {
+        List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectRules);
+        ChatResponse response = chatContent(chatLanguageModel, messages);
+        return response.aiMessage().text();
+    }
+
+    private List<ChatMessage> buildMindMapMessages(String context, String sectionContext, String subjectRules) {
+        String systemTemplate = """
                 你是一个严谨的 AI 知识架构师，擅长从非结构化文本中提取层级知识结构。
 
                 {COMMON_RULES}
@@ -102,22 +171,20 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                 3. 层级间无空行，保持紧凑树状结构
 
                 {SUBJECT_RULES}
-                {SECTION_HINT}
-                # 文档上下文
-                {CONTEXT}
                 """;
-
-        SystemMessage system = new SystemMessage(template
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(new SystemMessage(systemTemplate
                 .replace("{COMMON_RULES}", buildCommonRules())
-                .replace("{SUBJECT_RULES}", subjectRules)
-                .replace("{SECTION_HINT}", sectionHint)
-                .replace("{CONTEXT}", context));
+                .replace("{SUBJECT_RULES}", subjectRules)));
 
-        List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
-        messages.add(system);
-        messages.add(new UserMessage("请基于以上文档内容，生成一份结构清晰的 Markdown 思维导图。仅输出 Markdown 内容。"));
-        ChatResponse response = chatContent(chatLanguageModel, messages);
-        return response.aiMessage().text();
+        StringBuilder userSb = new StringBuilder();
+        if (sectionContext != null && !sectionContext.isBlank()) {
+            userSb.append("# 重点关注章节\n请重点围绕以下章节生成思维导图，但保持整体结构完整:\n").append(sectionContext.strip()).append("\n\n");
+        }
+        userSb.append("# 文档上下文\n").append(context).append("\n");
+        userSb.append("请基于以上文档内容，生成一份结构清晰的 Markdown 思维导图。仅输出 Markdown 内容。");
+        messages.add(new UserMessage(userSb.toString()));
+        return messages;
     }
 
     /** 拼装上下文 — 标注片段来源以实现数据溯源 */

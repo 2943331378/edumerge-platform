@@ -32,7 +32,7 @@ async function tryRefreshToken(): Promise<boolean> {
       localStorage.setItem("edumerge_token", json.data.token);
       if (json.data.refreshToken) localStorage.setItem("edumerge_refresh_token", json.data.refreshToken);
       localStorage.setItem("edumerge_user", JSON.stringify(json.data.user));
-      document.cookie = `edumerge_token=${encodeURIComponent(json.data.token)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+      document.cookie = `edumerge_token=${encodeURIComponent(json.data.token)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax${typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : ""}`;
       return true;
     } catch {
       return false;
@@ -85,6 +85,36 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   }
   if (json?.code !== 0) throw new Error(json?.message ?? "请求失败");
   return json.data as T;
+}
+
+/** 流式请求 — 返回 ReadableStream，由调用方逐行解析 SSE。支持 401 token 刷新重试。 */
+async function streamRequest(url: string, body: Record<string, string>, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+  let res = await fetch(`${BASE}${url}`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (res.status === 401) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      res = await fetch(`${BASE}${url}`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body),
+        signal,
+      });
+    } else {
+      clearAuthAndRedirect();
+      throw new Error("登录已过期，请重新登录");
+    }
+  }
+  if (!res.ok) {
+    const json = await res.json().catch(() => null);
+    throw new Error(json?.message ?? `HTTP ${res.status}`);
+  }
+  if (!res.body) throw new Error("浏览器不支持流式响应");
+  return res.body;
 }
 
 // ===== 对话会话 (Conversation) =====
@@ -217,8 +247,9 @@ export async function regenerateDocumentOutline(docId: number): Promise<Document
   });
 }
 
-export function uploadDocument(
+function uploadWithToken(
   file: File,
+  token: string | null,
   onProgress?: (percent: number) => void,
 ): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
@@ -233,10 +264,6 @@ export function uploadDocument(
     });
 
     xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        // XHR 不方便做 refresh 重试，直接走清理流程
-        clearAuthAndRedirect();
-      }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const json = JSON.parse(xhr.responseText);
@@ -259,10 +286,31 @@ export function uploadDocument(
     xhr.addEventListener("abort", () => reject(new Error("上传已取消")));
 
     xhr.open("POST", `${BASE}/documents/upload`);
-    const token = typeof window !== "undefined" ? localStorage.getItem("edumerge_token") : null;
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.send(formData);
   });
+}
+
+export async function uploadDocument(
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<UploadResult> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("edumerge_token") : null;
+  try {
+    return await uploadWithToken(file, token, onProgress);
+  } catch (err: unknown) {
+    // 401 → 尝试 token 刷新后重试一次
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.includes("401")) {
+      const refreshed = await tryRefreshToken();
+      if (refreshed) {
+        const newToken = localStorage.getItem("edumerge_token");
+        return uploadWithToken(file, newToken, onProgress);
+      }
+      clearAuthAndRedirect();
+    }
+    throw err;
+  }
 }
 
 // ===== 对话 =====
@@ -298,15 +346,16 @@ export async function chatStream(message: string, documentId?: string, sessionId
           body: JSON.stringify(body),
           signal,
         });
-        if (retryRes.ok) return retryRes.body!;
+        if (retryRes.ok && retryRes.body) return retryRes.body;
         clearAuthAndRedirect();
-        throw new Error(`HTTP ${retryRes.status}`);
+        throw new Error(retryRes.body ? `HTTP ${retryRes.status}` : "服务器未返回数据流");
       }
       clearAuthAndRedirect();
     }
     throw new Error(`HTTP ${res.status}`);
   }
-  return res.body!;
+  if (!res.body) throw new Error("服务器未返回数据流");
+  return res.body;
 }
 
 export async function chat(message: string, documentId?: string, sessionId?: string, docId?: number, activityType?: string, contextHint?: string): Promise<{ answer: string; sources: SourceRef[] }> {
@@ -351,8 +400,8 @@ export interface MindMapRecord {
   createdAt: string;
 }
 
-export async function getMindMap(docId: number): Promise<MindMapRecord> {
-  return request<MindMapRecord>(`/mindmap?docId=${docId}`);
+export async function getMindMap(docId: number, signal?: AbortSignal): Promise<MindMapRecord> {
+  return request<MindMapRecord>(`/mindmap?docId=${docId}`, { signal });
 }
 
 export async function listMindMaps(docId: number): Promise<MindMapRecord[]> {
@@ -363,12 +412,64 @@ export async function getMindMapDetail(deckId: number): Promise<MindMapRecord> {
   return request<MindMapRecord>(`/mindmap/detail?deckId=${deckId}`);
 }
 
-export async function generateMindMap(docId: number, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<MindMapRecord> {
+export async function generateMindMap(docId: number, sectionContext?: string, startChunk?: number, endChunk?: number, signal?: AbortSignal): Promise<MindMapRecord> {
   const params = new URLSearchParams({ docId: String(docId) });
   if (sectionContext) params.set("sectionContext", sectionContext);
   if (startChunk != null) params.set("startChunk", String(startChunk));
   if (endChunk != null) params.set("endChunk", String(endChunk));
-  return request<MindMapRecord>(`/mindmap/generate?${params}`, { method: "POST" });
+  return request<MindMapRecord>(`/mindmap/generate?${params}`, { method: "POST", signal });
+}
+
+/** 流式生成思维导图 — SSE token 流 + 进度 + 完成元数据 */
+export async function generateMindMapStream(
+  docId: number,
+  opts: {
+    sectionContext?: string;
+    startChunk?: number;
+    endChunk?: number;
+    signal?: AbortSignal;
+    onToken: (token: string) => void;
+    onProgress?: (progress: number) => void;
+    onDone: (meta: MindMapRecord) => void;
+    onError: (msg: string) => void;
+  }
+): Promise<void> {
+  const params = new URLSearchParams({ docId: String(docId) });
+  if (opts.sectionContext) params.set("sectionContext", opts.sectionContext);
+  if (opts.startChunk != null) params.set("startChunk", String(opts.startChunk));
+  if (opts.endChunk != null) params.set("endChunk", String(opts.endChunk));
+
+  const stream = await streamRequest(`/mindmap/stream?${params}`, {}, opts.signal);
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") return;
+        try {
+          const json = JSON.parse(data);
+          if (json.token) opts.onToken(json.token);
+          if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
+          if (json.done) {
+            try { opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
+            return;
+          }
+          if (json.error) { opts.onError(json.error); return; }
+        } catch { /* 忽略非 JSON 行 */ }
+      }
+    }
+  } catch (e) {
+    if ((e as Error).name !== "AbortError") opts.onError((e as Error).message);
+  }
 }
 
 export async function deleteMindMap(deckId: number): Promise<void> {
@@ -407,6 +508,60 @@ export async function generateStudyNote(docId: number, requirements?: string, si
     body: JSON.stringify(body),
     signal,
   });
+}
+
+/** 流式生成笔记 — 返回 SSE token 流 + 进度 + 完成时的元数据 */
+export async function generateStudyNoteStream(
+  docId: number,
+  opts: {
+    requirements?: string;
+    sectionContext?: string;
+    startChunk?: number;
+    endChunk?: number;
+    signal?: AbortSignal;
+    onToken: (token: string) => void;
+    onProgress?: (progress: number) => void;
+    onDone: (meta: { deckId: number; docId: number; title: string; sourceSummary?: string; createdAt?: string }) => void;
+    onError: (msg: string) => void;
+  }
+): Promise<void> {
+  const body: Record<string, string> = { docId: String(docId) };
+  if (opts.requirements) body.requirements = opts.requirements;
+  if (opts.sectionContext) body.sectionContext = opts.sectionContext;
+  if (opts.startChunk != null) body.startChunk = String(opts.startChunk);
+  if (opts.endChunk != null) body.endChunk = String(opts.endChunk);
+
+  const stream = await streamRequest("/notes/stream", body, opts.signal);
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") return;
+        try {
+          const json = JSON.parse(data);
+          if (json.token) opts.onToken(json.token);
+          if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
+          if (json.done) {
+            try { opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
+            return;
+          }
+          if (json.error) { opts.onError(json.error); return; }
+        } catch { /* 忽略非 JSON 行 */ }
+      }
+    }
+  } catch (e) {
+    if ((e as Error).name !== "AbortError") opts.onError((e as Error).message);
+  }
 }
 
 export async function updateStudyNote(id: number, data: { content?: string; title?: string }): Promise<StudyNoteRecord> {
@@ -517,7 +672,7 @@ export async function listQuizzes(docId?: number, sessionId?: number): Promise<Q
   return raw.map((q) => ({
     id: Number(q.id ?? 0),
     question: String(q.question ?? ""),
-    options: typeof q.options === "string" ? JSON.parse(q.options as string) : (q.options as string[] ?? []),
+    options: typeof q.options === "string" ? (() => { try { return JSON.parse(q.options as string); } catch { console.warn("选项数据解析失败"); return []; } })() : (q.options as string[] ?? []),
     answer: String(q.answer ?? ""),
     explanation: q.explanation ? String(q.explanation) : undefined,
     quizType: q.quizType ? String(q.quizType) : undefined,
@@ -530,7 +685,7 @@ export async function listQuizzesByDeck(deckId: number): Promise<QuizItem[]> {
   return raw.map((q) => ({
     id: Number(q.id ?? 0),
     question: String(q.question ?? ""),
-    options: typeof q.options === "string" ? JSON.parse(q.options as string) : (q.options as string[] ?? []),
+    options: typeof q.options === "string" ? (() => { try { return JSON.parse(q.options as string); } catch { console.warn("选项数据解析失败"); return []; } })() : (q.options as string[] ?? []),
     answer: String(q.answer ?? ""),
     explanation: q.explanation ? String(q.explanation) : undefined,
     quizType: q.quizType ? String(q.quizType) : undefined,
@@ -602,12 +757,13 @@ export interface ErrorBookItem {
   options: string;
   answer: string;
   explanation?: string;
+  quizType?: string;
   errorCount: number;
   deckId: number;
 }
 
-export async function listErrorBook(docId: number): Promise<ErrorBookItem[]> {
-  const raw = await request<ErrorBookItem[]>(`/quizzes/error-book?docId=${docId}`);
+export async function listErrorBook(docId: number, signal?: AbortSignal): Promise<ErrorBookItem[]> {
+  const raw = await request<ErrorBookItem[]>(`/quizzes/error-book?docId=${docId}`, { signal });
   return raw.map((q) => ({
     ...q,
     options: typeof q.options === "string" ? q.options : JSON.stringify(q.options),
@@ -796,10 +952,10 @@ export interface FlowNoteStats {
   byCategory: Record<string, number>;
 }
 
-export async function listFlowNotes(docId: number, category?: string): Promise<FlowNoteItem[]> {
+export async function listFlowNotes(docId: number, category?: string, signal?: AbortSignal): Promise<FlowNoteItem[]> {
   const params = new URLSearchParams({ docId: String(docId) });
   if (category) params.set("category", category);
-  return request<FlowNoteItem[]>(`/flownote?${params.toString()}`);
+  return request<FlowNoteItem[]>(`/flownote?${params.toString()}`, { signal });
 }
 
 export async function extractFlowNotes(docId: number, sessionId?: string, maxExchanges?: number): Promise<FlowNoteItem[]> {
@@ -837,8 +993,8 @@ export async function markFlowNoteReviewed(id: number): Promise<void> {
   return request<void>(`/flownote/entries/${id}/review`, { method: "PUT" });
 }
 
-export async function getFlowNoteStats(docId: number): Promise<FlowNoteStats> {
-  return request<FlowNoteStats>(`/flownote/stats?docId=${docId}`);
+export async function getFlowNoteStats(docId: number, signal?: AbortSignal): Promise<FlowNoteStats> {
+  return request<FlowNoteStats>(`/flownote/stats?docId=${docId}`, { signal });
 }
 
 // ===== 知识图谱 (Knowledge Graph) =====

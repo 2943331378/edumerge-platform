@@ -99,15 +99,15 @@ public class MilvusVectorStoreConfig {
     }
 
     /**
-     * 大纲生成专用快速模型 (deepseek-chat, 比 deepseek-v4-pro 快 5-10 倍)
+     * 大纲生成专用快速模型 (deepseek-v4-flash, 用于大纲/学科分类等轻量任务)
      */
     @Bean("outlineChatModel")
     public ChatModel outlineChatModel() {
-        log.info("初始化大纲生成专用模型: deepseek-chat (baseUrl={})", baseUrl);
+        log.info("初始化大纲生成专用模型: deepseek-v4-flash (baseUrl={})", baseUrl);
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
-                .modelName("deepseek-chat")
+                .modelName("deepseek-v4-flash")
                 .temperature(0.1)
                 .timeout(Duration.ofSeconds(120))
                 .build();
@@ -123,6 +123,25 @@ public class MilvusVectorStoreConfig {
             @Value("${app.ai.content.model:qwen3.7-plus}") String contentModel) {
         log.info("初始化内容生成模型: {} (baseUrl={})", contentModel, contentBaseUrl);
         return OpenAiChatModel.builder()
+                .baseUrl(contentBaseUrl)
+                .apiKey(embeddingApiKey)
+                .modelName(contentModel)
+                .temperature(0.3)
+                .maxTokens(4096)
+                .topP(0.85)
+                .timeout(Duration.ofSeconds(180))
+                .build();
+    }
+
+    /**
+     * 内容生成流式模型 (与 contentChatModel 同配置, 用于笔记/思维导图 SSE 流式输出)
+     */
+    @Bean("streamingContentChatModel")
+    public StreamingChatModel streamingContentChatModel(
+            @Value("${app.ai.content.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String contentBaseUrl,
+            @Value("${app.ai.content.model:qwen3.7-plus}") String contentModel) {
+        log.info("初始化内容生成流式模型: {} (baseUrl={})", contentModel, contentBaseUrl);
+        return OpenAiStreamingChatModel.builder()
                 .baseUrl(contentBaseUrl)
                 .apiKey(embeddingApiKey)
                 .modelName(contentModel)

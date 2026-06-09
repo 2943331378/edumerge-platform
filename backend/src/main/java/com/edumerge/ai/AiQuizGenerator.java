@@ -35,7 +35,7 @@ public class AiQuizGenerator extends AiGeneratorBase {
     @Autowired
     private CardDeckService cardDeckService;
 
-    /** 根据文档内容自动生成测试题 (每次生成创建一个 Deck) */
+    /** 根据文档内容自动生成测试题 (并行分批生成, 总耗时减半) */
     public List<Quiz> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext, Integer startChunk, Integer endChunk) {
         String context;
         List<EmbeddingMatch<TextSegment>> matches;
@@ -61,12 +61,19 @@ public class AiQuizGenerator extends AiGeneratorBase {
         String existingHint = buildExistingHint(existingQuestions);
         String subjectRules = buildSubjectRules(getSubjectType(docId));
 
-        String llmResponse = callLLM(context, existingHint, sectionContext, subjectRules);
+        // 并行分批: 2(选择)+1(填空) 和 1(选择)+1(填空) 同时生成
+        final String ctx = context;
+        final List<EmbeddingMatch<TextSegment>> m = matches;
+        String llmResponse = parallelGenerate(
+                () -> callLLM(ctx, existingHint, sectionContext, subjectRules, 2, 1),
+                () -> callLLM(ctx, existingHint, sectionContext, subjectRules, 1, 1),
+                (r1, r2) -> mergeQuizResponses(r1, r2)
+        );
         log.info("LLM 测试题生成响应: 长度={} 字符", llmResponse.length());
 
         String deckTitle = extractDeckTitle(llmResponse);
         Long deckId = cardDeckService.create(docId, "QUIZ", deckTitle).getId();
-        return parseAndSave(llmResponse, docId, userId, deckId, matches);
+        return parseAndSave(llmResponse, docId, userId, deckId, m);
     }
 
     private String buildExistingHint(List<String> existingQuestions) {
@@ -80,14 +87,16 @@ public class AiQuizGenerator extends AiGeneratorBase {
         return sb.toString();
     }
 
-    private String callLLM(String context, String existingHint, String sectionContext, String subjectRules) {
-        String template = """
-                你是一个严谨的 AI 学习导师。请分析文档片段，生成5道高质量测试题。
+    private String callLLM(String context, String existingHint, String sectionContext,
+                            String subjectRules, int singleCount, int fillCount) {
+        int totalCount = singleCount + fillCount;
+        String systemTemplate = """
+                你是一个严谨的 AI 学习导师。请分析文档片段，生成{TOTAL}道高质量测试题。
 
                 {COMMON_RULES}
 
                 # 任务
-                生成5道测试题：3道选择题（4选项，含3个有迷惑性的干扰项）+ 2道填空题（____标记，答案2-8字）。
+                生成{TOTAL}道测试题：{SINGLE}道选择题（4选项，含3个有迷惑性的干扰项）+ {FILL}道填空题（____标记，答案2-8字）。
 
                 # 质量红线
                 - 禁止元数据问题（章节归属、页码等）、禁止常识题
@@ -96,8 +105,8 @@ public class AiQuizGenerator extends AiGeneratorBase {
                 - 覆盖文档不同主题/概念层级
 
                 # 难度分布
-                - 2题basic：考察核心概念的准确理解（非死记硬背，需理解内涵）
-                - 3题application：必须是以下类型之一：
+                - 基础题：考察核心概念的准确理解（非死记硬背，需理解内涵）
+                - 应用题：必须是以下类型之一：
                   · 场景分析：给定一个具体情境，判断应如何应用
                   · 对比辨析：区分两个易混淆概念的适用条件
                   · 因果推理：改变某个前提条件，结果如何变化
@@ -111,27 +120,72 @@ public class AiQuizGenerator extends AiGeneratorBase {
                   {"type":"FILL_BLANK","question":"...____...","correctAnswer":"关键词","explanation":"...","difficulty":"application"}
                 ]}
                 选择题options必须有4项；填空题options必须为空数组[]。
-
-                {SECTION_HINT}
-                # 文档上下文
-                {CONTEXT}
-                {EXISTING_HINT}
                 """;
-        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
-                ? "# 重点关注章节\n请重点围绕以下章节生成测试题：" + sectionContext.strip() + "\n"
-                : "";
-        SystemMessage system = new SystemMessage(template
+        SystemMessage system = new SystemMessage(systemTemplate
+                .replace("{TOTAL}", String.valueOf(totalCount))
+                .replace("{SINGLE}", String.valueOf(singleCount))
+                .replace("{FILL}", String.valueOf(fillCount))
                 .replace("{COMMON_RULES}", buildCommonRules())
-                .replace("{SUBJECT_RULES}", subjectRules)
-                .replace("{CONTEXT}", context)
-                .replace("{EXISTING_HINT}", existingHint)
-                .replace("{SECTION_HINT}", sectionHint));
+                .replace("{SUBJECT_RULES}", subjectRules));
+
+        StringBuilder userSb = new StringBuilder();
+        if (sectionContext != null && !sectionContext.isBlank()) {
+            userSb.append("# 重点关注章节\n请重点围绕以下章节生成测试题：").append(sectionContext.strip()).append("\n\n");
+        }
+        userSb.append("# 文档上下文\n").append(context).append("\n");
+        if (!existingHint.isEmpty()) {
+            userSb.append(existingHint).append("\n");
+        }
+        userSb.append("请基于以上文档内容，生成").append(totalCount).append("道测试题");
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
-        messages.add(new UserMessage("请基于以上文档内容，生成5道测试题（3道选择题 + 2道填空题），涵盖基础概念和综合应用两个维度。"));
+        messages.add(new UserMessage(userSb.toString()));
         ChatResponse response = chatContent(chatLanguageModel, messages);
         return response.aiMessage().text();
+    }
+
+    /** 合并两批测验 JSON 响应为一个 */
+    private String mergeQuizResponses(String response1, String response2) {
+        List<Map<String, Object>> merged = new ArrayList<>();
+        String deckTitle = "测试题";
+        try {
+            String json1 = extractJsonObject(response1);
+            Map<String, Object> root1 = objectMapper.readValue(json1, new TypeReference<Map<String, Object>>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> quizzes1 = (List<Map<String, Object>>) (List<?>) root1.getOrDefault("quizzes", List.of());
+            merged.addAll(quizzes1);
+            Object t1 = root1.get("deckTitle");
+            if (t1 instanceof String s && !s.isBlank()) deckTitle = s;
+        } catch (Exception e) {
+            log.warn("解析第一批测验失败: {}", e.getMessage());
+        }
+        try {
+            String json2 = extractJsonObject(response2);
+            Map<String, Object> root2 = objectMapper.readValue(json2, new TypeReference<Map<String, Object>>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> quizzes2 = (List<Map<String, Object>>) (List<?>) root2.getOrDefault("quizzes", List.of());
+            merged.addAll(quizzes2);
+            if (merged.size() <= quizzes2.size()) {
+                Object t2 = root2.get("deckTitle");
+                if (t2 instanceof String s && !s.isBlank()) deckTitle = s;
+            }
+        } catch (Exception e) {
+            log.warn("解析第二批测验失败: {}", e.getMessage());
+        }
+        if (merged.isEmpty()) {
+            log.error("两批测验均解析失败, 回退原始响应");
+            return response1;
+        }
+        try {
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("deckTitle", deckTitle);
+            result.put("quizzes", merged);
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            log.error("序列化合并结果失败: {}", e.getMessage());
+            return response1;
+        }
     }
 
     private List<Quiz> parseAndSave(String llmResponse, Long docId, Long userId,

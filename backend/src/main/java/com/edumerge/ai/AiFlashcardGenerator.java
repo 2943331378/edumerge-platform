@@ -35,7 +35,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
     @Autowired
     private CardDeckService cardDeckService;
 
-    /** 根据文档内容自动生成学习卡片 (每次生成创建一个 Deck) */
+    /** 根据文档内容自动生成学习卡片 (并行分批生成, 总耗时减半) */
     public List<Flashcard> generate(Long docId, Long userId, String docUuid, List<String> existingQuestions, String sectionContext, Integer startChunk, Integer endChunk) {
         // 优先按大纲 chunk 范围直接取内容，否则语义搜索
         String context;
@@ -49,7 +49,7 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
                 if (matches.isEmpty()) { log.warn("未检索到文档块: docId={}", docId); return List.of(); }
                 context = buildContext(matches);
             } else {
-                matches = List.of(); // 范围取内容时无 EmbeddingMatch
+                matches = List.of();
             }
         } else {
             matches = retrieveTopChunks(docUuid, 10,
@@ -59,17 +59,22 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         }
         log.info("提取上下文完成: docId={}, 块数={}", docId, matches.size());
 
-        // 拼装已有卡片问题列表，告知 LLM 避免重复
         String existingHint = buildExistingHint(existingQuestions);
         String subjectRules = buildSubjectRules(getSubjectType(docId));
 
-        String llmResponse = callLLM(context, existingHint, sectionContext, subjectRules);
+        // 并行分批: 3+2 张卡片同时生成
+        final String ctx = context;
+        final List<EmbeddingMatch<TextSegment>> m = matches;
+        String llmResponse = parallelGenerate(
+                () -> callLLM(ctx, existingHint, sectionContext, subjectRules, 3),
+                () -> callLLM(ctx, existingHint, sectionContext, subjectRules, 2),
+                (r1, r2) -> mergeCardResponses(r1, r2)
+        );
         log.info("LLM 卡片生成响应: 长度={} 字符", llmResponse.length());
 
-        // 创建卡片组, 将本次生成的卡片绑定到该组
         String deckTitle = extractDeckTitle(llmResponse);
         Long deckId = cardDeckService.create(docId, "FLASHCARD", deckTitle).getId();
-        return parseAndSave(llmResponse, docId, userId, deckId, matches);
+        return parseAndSave(llmResponse, docId, userId, deckId, m);
     }
 
     private String buildExistingHint(List<String> existingQuestions) {
@@ -83,14 +88,14 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
         return sb.toString();
     }
 
-    private String callLLM(String context, String existingHint, String sectionContext, String subjectRules) {
-        String template = """
-                你是一个严谨的 AI 学习导师。请分析文档片段，提取5个核心知识点并转化为学习卡片。
+    private String callLLM(String context, String existingHint, String sectionContext, String subjectRules, int cardCount) {
+        String systemTemplate = """
+                你是一个严谨的 AI 学习导师。请分析文档片段，提取{COUNT}个核心知识点并转化为学习卡片。
 
                 {COMMON_RULES}
 
                 # 任务
-                提取5个核心知识点，转化为问答式学习卡片。
+                提取{COUNT}个核心知识点，转化为问答式学习卡片。
 
                 # 质量红线
                 - 禁止元数据问题（章节归属、页码等）— 必须问概念本身
@@ -102,27 +107,70 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
 
                 # 输出格式（仅输出JSON）
                 {"deckTitle":"10字以内主题","cards":[{"question":"...","answer":"..."}]}
-
-                {SECTION_HINT}
-                # 文档上下文
-                {CONTEXT}
-                {EXISTING_HINT}
                 """;
-        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
-                ? "# 重点关注章节\n请重点围绕以下章节生成学习卡片：" + sectionContext.strip() + "\n"
-                : "";
-        SystemMessage system = new SystemMessage(template
+        SystemMessage system = new SystemMessage(systemTemplate
+                .replace("{COUNT}", String.valueOf(cardCount))
                 .replace("{COMMON_RULES}", buildCommonRules())
-                .replace("{SUBJECT_RULES}", subjectRules)
-                .replace("{CONTEXT}", context)
-                .replace("{EXISTING_HINT}", existingHint)
-                .replace("{SECTION_HINT}", sectionHint));
+                .replace("{SUBJECT_RULES}", subjectRules));
+
+        StringBuilder userSb = new StringBuilder();
+        if (sectionContext != null && !sectionContext.isBlank()) {
+            userSb.append("# 重点关注章节\n请重点围绕以下章节生成学习卡片：").append(sectionContext.strip()).append("\n\n");
+        }
+        userSb.append("# 文档上下文\n").append(context).append("\n");
+        if (!existingHint.isEmpty()) {
+            userSb.append(existingHint).append("\n");
+        }
+        userSb.append("请基于以上文档内容，生成").append(cardCount).append("张学习卡片。");
 
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
         messages.add(system);
-        messages.add(new UserMessage("请基于以上文档内容，生成5张学习卡片。"));
+        messages.add(new UserMessage(userSb.toString()));
         ChatResponse response = chatContent(chatLanguageModel, messages);
         return response.aiMessage().text();
+    }
+
+    /** 合并两批卡片 JSON 响应为一个 */
+    private String mergeCardResponses(String response1, String response2) {
+        List<Map<String, String>> merged = new ArrayList<>();
+        String deckTitle = "学习卡片";
+        try {
+            String json1 = extractJsonObject(response1);
+            Map<String, Object> root1 = objectMapper.readValue(json1, new TypeReference<Map<String, Object>>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, String>> cards1 = (List<Map<String, String>>) (List<?>) root1.getOrDefault("cards", List.of());
+            merged.addAll(cards1);
+            Object t1 = root1.get("deckTitle");
+            if (t1 instanceof String s && !s.isBlank()) deckTitle = s;
+        } catch (Exception e) {
+            log.warn("解析第一批卡片失败: {}", e.getMessage());
+        }
+        try {
+            String json2 = extractJsonObject(response2);
+            Map<String, Object> root2 = objectMapper.readValue(json2, new TypeReference<Map<String, Object>>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, String>> cards2 = (List<Map<String, String>>) (List<?>) root2.getOrDefault("cards", List.of());
+            merged.addAll(cards2);
+            if (merged.size() <= cards2.size()) {
+                Object t2 = root2.get("deckTitle");
+                if (t2 instanceof String s && !s.isBlank()) deckTitle = s;
+            }
+        } catch (Exception e) {
+            log.warn("解析第二批卡片失败: {}", e.getMessage());
+        }
+        if (merged.isEmpty()) {
+            log.error("两批卡片均解析失败, 回退原始响应");
+            return response1;
+        }
+        try {
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("deckTitle", deckTitle);
+            result.put("cards", merged);
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            log.error("序列化合并结果失败: {}", e.getMessage());
+            return response1;
+        }
     }
 
     private List<Flashcard> parseAndSave(String llmResponse, Long docId, Long userId,

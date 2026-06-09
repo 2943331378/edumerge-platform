@@ -12,7 +12,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { GitFork, ArrowLeft, Sparkles, RotateCw, Trash2, Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import type { MindMapRecord } from "@/lib/api";
-import { listMindMaps, getMindMapDetail, generateMindMap, deleteMindMap } from "@/lib/api";
+import { listMindMaps, getMindMapDetail, generateMindMap, generateMindMapStream, deleteMindMap } from "@/lib/api";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MindMapViewer } from "./MindMapViewer";
 
 interface Props {
@@ -36,6 +38,11 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
   const [mindMaps, setMindMaps] = useState<MindMapRecord[]>([]);
   const [currentMap, setCurrentMap] = useState<MindMapRecord | null>(null);
   const [loading, setLoading] = useState(false);
+  const [streamingContent, setStreamingContent] = useState<string | null>(null);
+  const [streamingError, setStreamingError] = useState<string | null>(null);
+  const [streamingProgress, setStreamingProgress] = useState(0);
+  const streamingRef = useRef("");
+  const rafIdRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const isReady = docStatus === "COMPLETED";
@@ -46,26 +53,71 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
     try {
       const list = await listMindMaps(docId);
       setMindMaps(list);
-    } catch { setMindMaps([]); }
+    } catch { setMindMaps([]); toast.error("加载思维导图列表失败"); }
   }, [docId]);
 
   useEffect(() => { reloadList(); setView("list"); setCurrentMap(null); }, [docId]);
 
-  // 生成思维导图
+  // 生成思维导图（流式）
   const handleGenerate = useCallback(async () => {
     if (!docId || generating) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 290_000);
     onGeneratingChange?.(true);
+    streamingRef.current = "";
+    setStreamingContent("");
+    setStreamingError(null);
+    setStreamingProgress(0);
+
     try {
-      const data = await generateMindMap(docId, sectionContext || undefined, startChunk, endChunk);
-      setCurrentMap(data);
-      setView("viewer");
-      await reloadList();
-      toast.success("思维导图生成成功");
-    } catch {
-      toast.error("思维导图生成失败");
+      await generateMindMapStream(docId, {
+        sectionContext: sectionContext || undefined,
+        startChunk,
+        endChunk,
+        signal: controller.signal,
+        onToken: (token) => {
+          streamingRef.current += token;
+          if (rafIdRef.current === null) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              rafIdRef.current = null;
+              setStreamingContent(streamingRef.current);
+            });
+          }
+        },
+        onProgress: (p) => setStreamingProgress(p),
+        onDone: async (meta) => {
+          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          setStreamingContent(null);
+          setStreamingError(null);
+          setStreamingProgress(0);
+          streamingRef.current = "";
+          setCurrentMap(meta);
+          setView("viewer");
+          await reloadList();
+          toast.success("思维导图生成成功");
+        },
+        onError: (msg) => {
+          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          setStreamingError(msg || "生成中断");
+          onGeneratingChange?.(false);
+        },
+      });
+    } catch (err) {
+      if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+      if ((err as Error).name !== "AbortError") {
+        setStreamingError(err instanceof Error ? err.message : "生成中断");
+        toast.error(err instanceof Error ? err.message : "思维导图生成失败");
+      } else {
+        setStreamingContent(null);
+        streamingRef.current = "";
+      }
+      onGeneratingChange?.(false);
     }
+    clearTimeout(timeoutId);
+    abortRef.current = null;
     onGeneratingChange?.(false);
-  }, [docId, generating, sectionContext, reloadList, onGeneratingChange]);
+  }, [docId, generating, sectionContext, startChunk, endChunk, reloadList, onGeneratingChange]);
 
   // 从大纲跳转自动触发
   const prevCounterRef = useRef<number | undefined>(undefined);
@@ -93,6 +145,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
   // 删除
   const handleDelete = useCallback(async (e: React.MouseEvent, deckId: number) => {
     e.stopPropagation();
+    if (!window.confirm("确定要删除此思维导图？")) return;
     try {
       await deleteMindMap(deckId);
       setMindMaps((prev) => prev.filter((m) => m.deckId !== deckId));
@@ -137,7 +190,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
         </h2>
         <div className="flex items-center gap-2">
           {generating ? (
-            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={() => { abortRef.current?.abort(); onGeneratingChange?.(false); toast.info("已取消"); }}>
+            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={() => { abortRef.current?.abort(); setStreamingContent(null); setStreamingError(null); streamingRef.current = ""; onGeneratingChange?.(false); toast.info("已取消"); }}>
               <XCircle className="h-3.5 w-3.5" />
               取消生成
             </Button>
@@ -152,7 +205,39 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
 
       {/* 内容 */}
       <div className="flex-1 overflow-y-auto p-6">
-        {generating ? (
+        {generating && streamingContent !== null ? (
+          /* 流式生成中 — 实时预览 Markdown */
+          <div className="mx-auto max-w-4xl">
+            <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
+              <CardContent className="p-6 sm:p-8">
+                {streamingError ? (
+                  <div className="mb-4 flex items-center justify-between rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    <span>{streamingError}</span>
+                    <Button size="sm" variant="outline" className="h-6 rounded-md gap-1 text-xs border-destructive/30 text-destructive hover:bg-destructive/10" onClick={handleGenerate}>
+                      <RotateCw className="h-3 w-3" />重试
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mb-4 space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-primary/70">
+                      <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                      正在生成思维导图...
+                      {streamingProgress > 0 && <span className="text-muted-foreground/50">{streamingProgress}%</span>}
+                    </div>
+                    {streamingProgress > 0 && (
+                      <div className="h-1 w-full overflow-hidden rounded-full bg-muted/50">
+                        <div className="h-full rounded-full bg-primary/50 transition-all duration-300" style={{ width: `${streamingProgress}%` }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <article className="max-w-none text-sm leading-7 text-foreground/75">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
+                </article>
+              </CardContent>
+            </Card>
+          </div>
+        ) : generating ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <div className="text-center space-y-1">

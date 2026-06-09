@@ -22,6 +22,10 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.BiFunction;
 
 /**
  * AI 生成器基类 — 提供 Milvus 检索、上下文拼装、JSON 提取等公共工具方法
@@ -231,8 +235,50 @@ public abstract class AiGeneratorBase {
     /** AI 模型调用熔断器：连续 5 次失败后开启，30 秒冷却。所有 AI 调用共享此实例。 */
     public static final CircuitBreaker AI_CIRCUIT_BREAKER = new CircuitBreaker("AI-Model", 5, 30_000);
 
+    /** 内容生成并行线程池 (2 线程, 仅用于分批并行 LLM 调用) */
+    private static final ExecutorService PARALLEL_EXECUTOR;
+    static {
+        PARALLEL_EXECUTOR = Executors.newFixedThreadPool(2);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            PARALLEL_EXECUTOR.shutdownNow();
+        }));
+    }
+
     /** 调用内容生成模型 (带熔断保护) */
     protected ChatResponse chatContent(ChatModel model, List<ChatMessage> messages) {
         return AI_CIRCUIT_BREAKER.execute(() -> model.chat(messages));
+    }
+
+    /**
+     * 并行执行两个 LLM 生成任务，合并结果。任一失败则回退为串行。
+     * @param task1 第一批生成 (如前 3 条)
+     * @param task2 第二批生成 (如后 2 条)
+     * @param merger 合并函数: (result1, result2) → merged
+     * @return 合并后的结果
+     */
+    protected <T> T parallelGenerate(java.util.concurrent.Callable<T> task1,
+                                      java.util.concurrent.Callable<T> task2,
+                                      java.util.function.BiFunction<T, T, T> merger) {
+        long start = System.currentTimeMillis();
+        try {
+            CompletableFuture<T> f1 = CompletableFuture.supplyAsync(() -> {
+                try { return task1.call(); } catch (Exception e) { throw new RuntimeException(e); }
+            }, PARALLEL_EXECUTOR);
+            CompletableFuture<T> f2 = CompletableFuture.supplyAsync(() -> {
+                try { return task2.call(); } catch (Exception e) { throw new RuntimeException(e); }
+            }, PARALLEL_EXECUTOR);
+            T result = merger.apply(f1.join(), f2.join());
+            log.info("并行生成完成: 耗时={}ms", System.currentTimeMillis() - start);
+            return result;
+        } catch (Exception e) {
+            log.warn("并行生成失败, 回退串行: {}", e.getMessage());
+            try {
+                T r1 = task1.call();
+                T r2 = task2.call();
+                return merger.apply(r1, r2);
+            } catch (Exception ex) {
+                throw new RuntimeException("串行回退也失败", ex);
+            }
+        }
     }
 }

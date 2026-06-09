@@ -5,14 +5,18 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 @Slf4j
 @Service
@@ -21,6 +25,10 @@ public class AiNoteGenerator extends AiGeneratorBase {
     @Autowired
     @org.springframework.beans.factory.annotation.Qualifier("contentChatModel")
     private ChatModel chatLanguageModel;
+
+    @Autowired
+    @Qualifier("streamingContentChatModel")
+    private StreamingChatModel streamingModel;
 
     public StudyNoteResult generate(Long docId, String docUuid, String requirements, String sectionContext, Integer startChunk, Integer endChunk) {
         long startTime = System.currentTimeMillis();
@@ -63,8 +71,79 @@ public class AiNoteGenerator extends AiGeneratorBase {
         return StudyNoteResult.success(title, content, sourceSummary, requirements);
     }
 
-    private String callLLM(String context, String requirements, String sectionContext, String subjectRules) {
-        String template = """
+    /**
+     * 流式生成笔记 — 逐 token 回调, 完成后返回完整结果
+     * @param onToken 每收到一个 token 片段时回调
+     * @return 生成结果 (含 title, content, sourceSummary)
+     */
+    public StudyNoteResult generateStream(Long docId, String docUuid, String requirements,
+                                           String sectionContext, Integer startChunk, Integer endChunk,
+                                           Consumer<String> onToken) {
+        long startTime = System.currentTimeMillis();
+        String context;
+        List<EmbeddingMatch<TextSegment>> matches;
+        if (startChunk != null && endChunk != null) {
+            context = buildContextFromRange(docId, startChunk, endChunk);
+            if (context.isEmpty()) {
+                matches = retrieveTopChunks(docUuid, 15,
+                        "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 辨析 易错点 对比 应用场景");
+                if (matches.isEmpty()) return StudyNoteResult.empty();
+                context = buildContext(matches);
+            } else {
+                matches = List.of();
+            }
+        } else {
+            matches = retrieveTopChunks(docUuid, 15,
+                    "学习笔记 摘要 总结 章节要点 核心概念 关键知识点 方法 原理 辨析 易错点 对比 应用场景");
+            if (matches.isEmpty()) return StudyNoteResult.empty();
+            context = buildContext(matches);
+        }
+        String subjectRules = buildSubjectRules(getSubjectType(docId));
+        log.info("流式笔记上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
+
+        // 构建 prompt (与 callLLM 相同)
+        List<ChatMessage> messages = buildNoteMessages(context, requirements, sectionContext, subjectRules);
+
+        // 流式调用 LLM (带熔断保护)
+        StringBuilder fullContent = new StringBuilder();
+        long llmStart = System.currentTimeMillis();
+        try {
+            AI_CIRCUIT_BREAKER.execute(() -> {
+                streamingModel.chat(messages, new StreamingChatResponseHandler() {
+                    @Override
+                    public void onPartialResponse(String token) {
+                        fullContent.append(token);
+                        onToken.accept(token);
+                    }
+                    @Override
+                    public void onCompleteResponse(ChatResponse response) {
+                        log.info("流式笔记 LLM 完成: docId={}, 长度={}, 耗时={}ms",
+                                docId, fullContent.length(), System.currentTimeMillis() - llmStart);
+                    }
+                    @Override
+                    public void onError(Throwable error) {
+                        log.error("流式笔记 LLM 错误: docId={}, error={}", docId, error.getMessage());
+                    }
+                });
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("流式笔记生成异常: docId={}, error={}", docId, e.getMessage(), e);
+            return StudyNoteResult.empty();
+        }
+
+        String content = cleanMarkdown(fullContent.toString());
+        if (content.isBlank()) return StudyNoteResult.empty();
+
+        String title = extractTitle(content);
+        String sourceSummary = buildSourceSummary(matches);
+        return StudyNoteResult.success(title, content, sourceSummary, requirements);
+    }
+
+    /** 构建笔记生成的消息列表 (同步/流式共用) */
+    private List<ChatMessage> buildNoteMessages(String context, String requirements,
+                                                  String sectionContext, String subjectRules) {
+        String systemTemplate = """
                 你是一个严谨的 AI 学习笔记助手。请基于文档片段，生成一份适合学生备考复习的 Markdown 学习笔记。
 
                 {COMMON_RULES}
@@ -86,26 +165,27 @@ public class AiNoteGenerator extends AiGeneratorBase {
                 - 内容面向备考学生，重点是"理解"和"会用"，不是罗列知识点
                 - 每个知识点都要说明"为什么"和"什么时候用"，不要只说"是什么"
                 - 不要引用片段编号作为正文标题
-
-                {REQUIREMENTS}
-                # 文档上下文
-                {CONTEXT}
                 """;
-
-        String reqSection = (requirements != null && !requirements.isBlank())
-                ? "# 用户个性化要求\n请特别注意用户的以下要求：" + requirements.strip() + "\n\n"
-                : "";
-        String sectionHint = (sectionContext != null && !sectionContext.isBlank())
-                ? "# 重点关注章节\n请重点围绕以下章节生成笔记，但保持整体结构完整：" + sectionContext.strip() + "\n\n"
-                : "";
-
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(new SystemMessage(template
+        messages.add(new SystemMessage(systemTemplate
                 .replace("{COMMON_RULES}", buildCommonRules())
-                .replace("{SUBJECT_RULES}", subjectRules)
-                .replace("{REQUIREMENTS}", reqSection + sectionHint)
-                .replace("{CONTEXT}", context)));
-        messages.add(new UserMessage("请基于以上文档内容生成一份结构化中文学习笔记。"));
+                .replace("{SUBJECT_RULES}", subjectRules)));
+
+        StringBuilder userSb = new StringBuilder();
+        if (requirements != null && !requirements.isBlank()) {
+            userSb.append("# 用户个性化要求\n请特别注意用户的以下要求：").append(requirements.strip()).append("\n\n");
+        }
+        if (sectionContext != null && !sectionContext.isBlank()) {
+            userSb.append("# 重点关注章节\n请重点围绕以下章节生成笔记，但保持整体结构完整：").append(sectionContext.strip()).append("\n\n");
+        }
+        userSb.append("# 文档上下文\n").append(context).append("\n");
+        userSb.append("请基于以上文档内容生成一份结构化中文学习笔记。");
+        messages.add(new UserMessage(userSb.toString()));
+        return messages;
+    }
+
+    private String callLLM(String context, String requirements, String sectionContext, String subjectRules) {
+        List<ChatMessage> messages = buildNoteMessages(context, requirements, sectionContext, subjectRules);
         ChatResponse response = chatContent(chatLanguageModel, messages);
         return response.aiMessage().text();
     }

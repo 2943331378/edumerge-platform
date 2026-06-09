@@ -3,12 +3,14 @@
 import { useEffect, useState, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import { toast } from "sonner";
 import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, X, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ExportBottomSheet } from "@/components/ui/export-bottom-sheet";
 import type { StudyNoteRecord } from "@/lib/api";
-import { generateStudyNote, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
+import { generateStudyNote, generateStudyNoteStream, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { printNote } from "@/lib/printExport";
 
@@ -83,7 +85,20 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
   const [activeVersionIdx, setActiveVersionIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [requirements, setRequirements] = useState("");
+  const [streamingContent, setStreamingContent] = useState<string | null>(null);
+  const [streamingError, setStreamingError] = useState<string | null>(null);
+  const [streamingProgress, setStreamingProgress] = useState(0);
+  const streamingContentRef = useRef("");
+  const rafIdRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup: abort in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    };
+  }, []);
 
   // 编辑模式状态
   const [editing, setEditing] = useState(false);
@@ -137,18 +152,62 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     if (!docId || generating) return;
     const controller = new AbortController();
     abortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 290_000); // P3: 290s 超时，略早于后端 300s
     onGeneratingChange?.(true);
+    streamingContentRef.current = "";
+    setStreamingContent("");
+    setStreamingError(null);
+    setStreamingProgress(0);
+
     try {
-      await generateStudyNote(docId, requirements.trim() || undefined, controller.signal, sectionContext || undefined, startChunk, endChunk);
-      const list = await listNoteHistory(docId);
-      loadHistory(list);
-      onGenerated?.();
-      toast.success("学习笔记生成成功");
+      await generateStudyNoteStream(docId, {
+        requirements: requirements.trim() || undefined,
+        sectionContext: sectionContext || undefined,
+        startChunk,
+        endChunk,
+        signal: controller.signal,
+        onToken: (token) => {
+          streamingContentRef.current += token;
+          if (rafIdRef.current === null) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              rafIdRef.current = null;
+              setStreamingContent(streamingContentRef.current);
+            });
+          }
+        },
+        onProgress: (progress) => setStreamingProgress(progress),
+        onDone: async () => {
+          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          setStreamingContent(null);
+          setStreamingError(null);
+          setStreamingProgress(0);
+          streamingContentRef.current = "";
+          if (controller.signal.aborted) return;
+          const list = await listNoteHistory(docId);
+          loadHistory(list);
+          onGenerated?.();
+          toast.success("学习笔记生成成功");
+        },
+        onError: (msg) => {
+          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          // 保留已生成内容，仅标记错误状态
+          setStreamingError(msg || "生成中断");
+          onGeneratingChange?.(false);
+        },
+      });
     } catch (err) {
+      if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
       if ((err as Error).name !== "AbortError") {
+        setStreamingError(err instanceof Error ? err.message : "生成中断");
         toast.error(err instanceof Error ? err.message : "学习笔记生成失败");
+      } else {
+        // 用户主动取消 → 清除流式内容
+        setStreamingContent(null);
+        streamingContentRef.current = "";
       }
+      onGeneratingChange?.(false);
     }
+    clearTimeout(timeoutId);
     abortRef.current = null;
     onGeneratingChange?.(false);
   };
@@ -169,6 +228,9 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
+      setStreamingContent(null);
+      setStreamingError(null);
+      streamingContentRef.current = "";
       onGeneratingChange?.(false);
       toast.info("已取消生成");
     }
@@ -183,7 +245,18 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
 
   const handleCopy = async () => {
     if (!note?.content) return;
-    await navigator.clipboard.writeText(note.content);
+    try {
+      await navigator.clipboard.writeText(note.content);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = note.content;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
     toast.success("已复制 Markdown");
   };
 
@@ -353,6 +426,40 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
       <div className="flex-1 overflow-y-auto p-6">
         {!isReady ? (
           <EmptyState title="文档仍在处理中" description="向量化完成后才能基于文档内容生成学习笔记。" />
+        ) : streamingContent !== null ? (
+          /* 流式生成中（或中断后保留内容） — 实时渲染 */
+          <div className="mx-auto max-w-4xl">
+            <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
+              <CardContent className="p-6 sm:p-8">
+                {streamingError ? (
+                  <div className="mb-4 flex items-center justify-between rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    <span>{streamingError} — 内容为已生成的部分</span>
+                    <Button size="sm" variant="outline" className="h-6 rounded-md gap-1 text-xs border-destructive/30 text-destructive hover:bg-destructive/10" onClick={handleGenerate}>
+                      <RotateCw className="h-3 w-3" />重试
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mb-4 space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-primary/70">
+                      <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                      正在生成笔记...
+                      {streamingProgress > 0 && <span className="text-muted-foreground/50">{streamingProgress}%</span>}
+                    </div>
+                    {streamingProgress > 0 && (
+                      <div className="h-1 w-full overflow-hidden rounded-full bg-muted/50">
+                        <div className="h-full rounded-full bg-primary/50 transition-all duration-300" style={{ width: `${streamingProgress}%` }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <article className="max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
+                    {streamingContent}
+                  </ReactMarkdown>
+                </article>
+              </CardContent>
+            </Card>
+          </div>
         ) : !note?.content ? (
           <EmptyState title="尚无学习笔记" description="一键生成后，系统会提炼中文概述、核心知识点、易混淆点和复习问题。" onGenerate={handleGenerate} generating={generating} onCancelGeneration={cancelGeneration} requirements={requirements} onRequirementsChange={setRequirements} />
         ) : (
@@ -370,7 +477,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                   />
                 ) : (
                   <article className="max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
                       {note.content}
                     </ReactMarkdown>
                   </article>
@@ -408,57 +515,15 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
         )}
       </div>
 
-      {/* Export format bottom sheet */}
-      {showExportSheet && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowExportSheet(false)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div
-            className="relative w-full max-w-md rounded-t-2xl bg-background p-4 pb-8 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/20" />
-            <p className="text-sm font-medium text-foreground/80 mb-3">选择导出格式</p>
-            <div className="space-y-2">
-              <button
-                onClick={() => { handleCopy(); setShowExportSheet(false); }}
-                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-              >
-                <Clipboard className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground/85">复制 Markdown</p>
-                  <p className="text-[11px] text-muted-foreground/60">复制纯文本到剪贴板</p>
-                </div>
-              </button>
-              <button
-                onClick={() => { handleDownload(); setShowExportSheet(false); }}
-                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-              >
-                <Download className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground/85">导出 Markdown 文件</p>
-                  <p className="text-[11px] text-muted-foreground/60">下载 .md 文件</p>
-                </div>
-              </button>
-              <button
-                onClick={handleExportPDF}
-                className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-4 py-3.5 text-left text-sm hover:bg-muted/40 active:bg-muted/60 transition-colors min-h-[44px]"
-              >
-                <Download className="h-4 w-4 text-primary shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground/85">导出为 PDF</p>
-                  <p className="text-[11px] text-muted-foreground/60">通过浏览器打印保存为 PDF</p>
-                </div>
-              </button>
-            </div>
-            <button
-              onClick={() => setShowExportSheet(false)}
-              className="mt-3 w-full rounded-xl border border-border/60 py-2.5 text-sm text-muted-foreground hover:bg-muted/40 transition-colors min-h-[44px]"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      )}
+      <ExportBottomSheet
+        open={showExportSheet}
+        onClose={() => setShowExportSheet(false)}
+        options={[
+          { icon: Clipboard, title: "复制 Markdown", description: "复制纯文本到剪贴板", onClick: handleCopy },
+          { icon: Download, title: "导出 Markdown 文件", description: "下载 .md 文件", onClick: handleDownload },
+          { icon: Download, iconColor: "text-primary", title: "导出为 PDF", description: "通过浏览器打印保存为 PDF", onClick: handleExportPDF },
+        ]}
+      />
     </div>
   );
 }
