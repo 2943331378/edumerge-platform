@@ -4,13 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edumerge.ai.AiOutlineGenerator;
 import com.edumerge.dto.OutlineResponse;
-import com.edumerge.entity.Document;
-import com.edumerge.entity.DocumentChunk;
-import com.edumerge.entity.DocumentOutline;
-import com.edumerge.entity.Session;
-import com.edumerge.mapper.DocumentChunkMapper;
-import com.edumerge.mapper.DocumentMapper;
-import com.edumerge.mapper.SessionMapper;
+import com.edumerge.entity.*;
+import com.edumerge.mapper.*;
 import com.edumerge.mq.producer.EmbeddingProducer;
 import com.edumerge.security.SecurityUtils;
 import com.edumerge.common.util.FileMagicValidator;
@@ -49,6 +44,16 @@ public class DocumentService {
     private final AiOutlineGenerator outlineGenerator;
     private final ObjectMapper objectMapper;
     private final String uploadDir;
+    private final FlashcardMapper flashcardMapper;
+    private final FlashcardReviewLogMapper flashcardReviewLogMapper;
+    private final QuizMapper quizMapper;
+    private final QuizAttemptMapper quizAttemptMapper;
+    private final StudyNoteMapper studyNoteMapper;
+    private final MindMapMapper mindMapMapper;
+    private final FlowNoteMapper flowNoteMapper;
+    private final CardDeckMapper cardDeckMapper;
+    private final ConversationMapper conversationMapper;
+    private final ChatHistoryMapper chatHistoryMapper;
 
     @Autowired
     public DocumentService(DocumentMapper documentMapper, DocumentChunkMapper documentChunkMapper,
@@ -56,7 +61,12 @@ public class DocumentService {
                            DocumentOutlineService outlineService, SessionService sessionService,
                            EmbeddingProducer embeddingProducer, AiOutlineGenerator outlineGenerator,
                            ObjectMapper objectMapper,
-                           @Value("${app.document.upload-dir:./uploads}") String uploadDir) {
+                           @Value("${app.document.upload-dir:./uploads}") String uploadDir,
+                           FlashcardMapper flashcardMapper, FlashcardReviewLogMapper flashcardReviewLogMapper,
+                           QuizMapper quizMapper, QuizAttemptMapper quizAttemptMapper,
+                           StudyNoteMapper studyNoteMapper, MindMapMapper mindMapMapper,
+                           FlowNoteMapper flowNoteMapper, CardDeckMapper cardDeckMapper,
+                           ConversationMapper conversationMapper, ChatHistoryMapper chatHistoryMapper) {
         this.documentMapper = documentMapper;
         this.documentChunkMapper = documentChunkMapper;
         this.sessionMapper = sessionMapper;
@@ -67,6 +77,16 @@ public class DocumentService {
         this.outlineGenerator = outlineGenerator;
         this.objectMapper = objectMapper;
         this.uploadDir = uploadDir;
+        this.flashcardMapper = flashcardMapper;
+        this.flashcardReviewLogMapper = flashcardReviewLogMapper;
+        this.quizMapper = quizMapper;
+        this.quizAttemptMapper = quizAttemptMapper;
+        this.studyNoteMapper = studyNoteMapper;
+        this.mindMapMapper = mindMapMapper;
+        this.flowNoteMapper = flowNoteMapper;
+        this.cardDeckMapper = cardDeckMapper;
+        this.conversationMapper = conversationMapper;
+        this.chatHistoryMapper = chatHistoryMapper;
     }
 
     // ═══════ CRUD ═══════
@@ -169,11 +189,68 @@ public class DocumentService {
             throw new IllegalArgumentException("文档不存在: " + id);
         }
 
-        // 1. 删除关联会话
+        // 1. 级联清理所有关联数据（子表优先）
+
+        // 1.1 闪卡复习记录（依赖 flashcards）
+        List<Flashcard> fCards = flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>().eq(Flashcard::getDocId, id));
+        if (!fCards.isEmpty()) {
+            List<Long> fIds = fCards.stream().map(Flashcard::getId).toList();
+            flashcardReviewLogMapper.delete(new LambdaQueryWrapper<FlashcardReviewLog>()
+                    .in(FlashcardReviewLog::getFlashcardId, fIds));
+        }
+
+        // 1.2 闪卡
+        flashcardMapper.delete(new LambdaQueryWrapper<Flashcard>()
+                .eq(Flashcard::getDocId, id));
+
+        // 1.3 答题记录
+        quizAttemptMapper.delete(new LambdaQueryWrapper<QuizAttempt>()
+                .eq(QuizAttempt::getDocId, id));
+
+        // 1.4 测验题
+        quizMapper.delete(new LambdaQueryWrapper<Quiz>()
+                .eq(Quiz::getDocId, id));
+
+        // 1.5 学习笔记
+        studyNoteMapper.delete(new LambdaQueryWrapper<StudyNote>()
+                .eq(StudyNote::getDocId, id));
+
+        // 1.6 思维导图
+        mindMapMapper.delete(new LambdaQueryWrapper<MindMap>()
+                .eq(MindMap::getDocId, id));
+
+        // 1.7 FlowNote
+        flowNoteMapper.delete(new LambdaQueryWrapper<FlowNote>()
+                .eq(FlowNote::getDocId, id));
+
+        // 1.8 卡片组
+        cardDeckMapper.delete(new LambdaQueryWrapper<CardDeck>()
+                .eq(CardDeck::getDocId, id));
+
+        // 1.9 对话消息（依赖 conversations 的 sessionId）
+        List<Conversation> convs = conversationMapper.selectList(
+                new LambdaQueryWrapper<Conversation>().eq(Conversation::getDocId, id));
+        if (!convs.isEmpty()) {
+            List<String> sessionIds = convs.stream()
+                    .map(Conversation::getSessionId)
+                    .filter(s -> s != null && !s.isBlank())
+                    .toList();
+            if (!sessionIds.isEmpty()) {
+                chatHistoryMapper.delete(new LambdaQueryWrapper<ChatHistory>()
+                        .in(ChatHistory::getSessionId, sessionIds));
+            }
+        }
+
+        // 1.10 对话线程
+        conversationMapper.delete(new LambdaQueryWrapper<Conversation>()
+                .eq(Conversation::getDocId, id));
+
+        // 1.11 删除关联会话
         sessionMapper.delete(new LambdaQueryWrapper<Session>()
                 .eq(Session::getDocId, id));
 
-        // 1.5 删除文档大纲
+        // 1.12 删除文档大纲
         outlineService.deleteByDocId(id);
 
         // 2. 删除 Milvus 向量

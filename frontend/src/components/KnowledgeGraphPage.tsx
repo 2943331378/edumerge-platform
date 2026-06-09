@@ -152,13 +152,16 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
       nodes = nodes.filter((n) => docFilteredNodeIds.has(n.id));
     }
 
-    const links: GraphLink[] = graphData.relationships.map((r) => ({
-      source: r.sourceConceptId,
-      target: r.targetConceptId,
-      color: getLinkColor(r.relationshipType),
-      label: r.relationshipType,
-      strength: r.strength,
-    }));
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const links: GraphLink[] = graphData.relationships
+      .filter(r => nodeIds.has(r.sourceConceptId) && nodeIds.has(r.targetConceptId))
+      .map((r) => ({
+        source: r.sourceConceptId,
+        target: r.targetConceptId,
+        color: getLinkColor(r.relationshipType),
+        label: r.relationshipType,
+        strength: r.strength,
+      }));
 
     return { nodes, links };
   }, [graphData, searchQuery, docFilteredNodeIds, isDark]);

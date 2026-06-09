@@ -31,9 +31,11 @@ async function tryRefreshToken(): Promise<boolean> {
       });
       const json = await res.json().catch(() => null);
       if (json?.code !== 0 || !json?.data?.token) return false;
-      localStorage.setItem("edumerge_token", json.data.token);
-      if (json.data.refreshToken) localStorage.setItem("edumerge_refresh_token", json.data.refreshToken);
-      localStorage.setItem("edumerge_user", JSON.stringify(json.data.user));
+      const useLocal = !!localStorage.getItem("edumerge_token");
+      const store = useLocal ? localStorage : sessionStorage;
+      store.setItem("edumerge_token", json.data.token);
+      if (json.data.refreshToken) store.setItem("edumerge_refresh_token", json.data.refreshToken);
+      store.setItem("edumerge_user", JSON.stringify(json.data.user));
       document.cookie = `edumerge_token=${encodeURIComponent(json.data.token)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax${typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : ""}`;
       return true;
     } catch {
@@ -465,7 +467,7 @@ export async function generateMindMapStream(
           if (json.token) opts.onToken(json.token);
           if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
           if (json.done) {
-            try { opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
+            try { await opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
             return;
           }
           if (json.error) { opts.onError(json.error); return; }
@@ -557,7 +559,7 @@ export async function generateStudyNoteStream(
           if (json.token) opts.onToken(json.token);
           if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
           if (json.done) {
-            try { opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
+            try { await opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
             return;
           }
           if (json.error) { opts.onError(json.error); return; }

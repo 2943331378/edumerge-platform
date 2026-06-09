@@ -38,6 +38,7 @@ public class QuizController {
 
     @PostMapping("/generate")
     public Result<List<QuizResponse>> generate(@RequestBody GenerateRequest body) {
+        documentService.verifyOwnership(Long.parseLong(body.getDocId()));
         Integer startChunk = body.getStartChunk() != null ? Integer.parseInt(body.getStartChunk()) : null;
         Integer endChunk = body.getEndChunk() != null ? Integer.parseInt(body.getEndChunk()) : null;
         List<Quiz> quizzes = quizService.generate(

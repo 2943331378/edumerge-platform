@@ -2,6 +2,7 @@ package com.edumerge.ai;
 
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -23,6 +24,7 @@ public class CircuitBreaker {
     private final AtomicReference<State> state = new AtomicReference<>(State.CLOSED);
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private final AtomicLong lastFailureTime = new AtomicLong(0);
+    private final AtomicBoolean probeActive = new AtomicBoolean(false);
 
     public CircuitBreaker(String name, int failureThreshold, long cooldownMs) {
         this.name = name;
@@ -44,9 +46,13 @@ public class CircuitBreaker {
                     if (currentState == State.OPEN) {
                         throw new CircuitBreakerOpenException(name + " 熔断器开启中，请稍后重试");
                     }
-                    // currentState 为 HALF_OPEN 或 CLOSED，放行
+                    // currentState 为 HALF_OPEN 或 CLOSED
+                    if (currentState == State.HALF_OPEN && !probeActive.compareAndSet(false, true)) {
+                        throw new CircuitBreakerOpenException(name + " 熔断器半开状态，已有探测请求进行中");
+                    }
                 } else {
                     log.info("[{}] 熔断器进入半开状态，尝试放行请求", name);
+                    probeActive.set(true);
                 }
             } else {
                 throw new CircuitBreakerOpenException(name + " 熔断器开启中，请稍后重试");
@@ -66,6 +72,7 @@ public class CircuitBreaker {
     private void onSuccess() {
         consecutiveFailures.set(0);
         State prev = state.getAndSet(State.CLOSED);
+        probeActive.set(false);
         if (prev != State.CLOSED) {
             log.info("[{}] 熔断器恢复正常 (CLOSED)", name);
         }
@@ -76,6 +83,7 @@ public class CircuitBreaker {
         lastFailureTime.set(System.currentTimeMillis());
         if (failures >= failureThreshold) {
             state.set(State.OPEN);
+            probeActive.set(false);
             log.warn("[{}] 连续失败 {} 次，熔断器开启，冷却 {}s", name, failures, cooldownMs / 1000);
         }
     }

@@ -103,7 +103,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
           setMessages([]);
           return;
         }
-      } catch (e) { console.warn("加载对话列表失败:", e); }
+      } catch (e) { console.warn("加载对话列表失败:", e); toast.error("对话列表加载失败，请刷新重试"); }
       if (cancelled) return;
 
       const newId = randomId();

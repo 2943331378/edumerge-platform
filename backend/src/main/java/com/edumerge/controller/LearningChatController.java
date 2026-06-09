@@ -90,7 +90,7 @@ public class LearningChatController {
         }
 
         SseEmitter emitter = new SseEmitter(600_000L);
-        log.info("流式对话请求: message='{}', documentId='{}'", message, finalDocId);
+        log.info("流式对话请求: msgLen={}, documentId='{}'", message.length(), finalDocId);
 
         AtomicBoolean cancelled = new AtomicBoolean(false);
         AtomicBoolean completed = new AtomicBoolean(false); // 防止 sendDoneAndComplete 重入
@@ -188,7 +188,10 @@ public class LearningChatController {
             log.debug("SSE flush 失败: {}", e.getMessage());
         }
         // 内联延迟 complete，避免嵌套 CompletableFuture 持有已返回的 Servlet 资源引用
-        try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+        try { Thread.sleep(200); } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.debug("SSE delay interrupted");
+        }
         try { emitter.complete(); } catch (Exception e) {
             log.debug("SSE complete 失败: {}", e.getMessage());
         }

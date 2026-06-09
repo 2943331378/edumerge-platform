@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edumerge.ai.AiKnowledgeGraphGenerator;
 import com.edumerge.entity.*;
 import com.edumerge.mapper.*;
+import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -93,6 +94,10 @@ public class KnowledgeGraphService {
     public Map<String, Object> getConceptDetail(Long conceptId) {
         KnowledgeConcept concept = conceptMapper.selectById(conceptId);
         if (concept == null) return null;
+        if (!concept.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权访问此概念");
+        }
 
         // 关联概念（从关系表中查找）
         List<ConceptRelationship> allRels = relationMapper.selectList(
@@ -142,6 +147,13 @@ public class KnowledgeGraphService {
     /** 获取概念在各文档中的来源 */
     @Transactional(readOnly = true)
     public List<Map<String, Object>> getConceptDocuments(Long conceptId) {
+        KnowledgeConcept concept = conceptMapper.selectById(conceptId);
+        if (concept == null) return List.of();
+        if (!concept.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权访问此概念");
+        }
+
         List<ConceptDocument> docs = conceptDocMapper.selectList(
                 new LambdaQueryWrapper<ConceptDocument>().eq(ConceptDocument::getConceptId, conceptId));
 

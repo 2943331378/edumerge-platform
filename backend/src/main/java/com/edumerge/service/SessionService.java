@@ -56,6 +56,10 @@ public class SessionService {
     public Long resolveDocId(Long sessionId) {
         Session session = sessionMapper.selectById(sessionId);
         if (session == null) throw new IllegalArgumentException("会话不存在: " + sessionId);
+        if (!session.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权访问此会话");
+        }
         return session.getDocId();
     }
 
@@ -63,6 +67,10 @@ public class SessionService {
     public String resolveDocUuid(Long sessionId) {
         Session session = sessionMapper.selectById(sessionId);
         if (session == null) throw new IllegalArgumentException("会话不存在: " + sessionId);
+        if (!session.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权访问此会话");
+        }
         Document doc = documentMapper.selectById(session.getDocId());
         if (doc == null) throw new IllegalArgumentException("关联文档不存在: " + session.getDocId());
         return doc.getDocumentId();

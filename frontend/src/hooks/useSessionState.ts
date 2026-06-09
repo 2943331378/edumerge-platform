@@ -37,13 +37,14 @@ export function useSessionState(onSessionChange?: () => void) {
     } catch { toast.error("加载会话列表失败"); }
   }, []);
 
-  const updateSessionCache = useCallback((updates: Partial<SessionCacheEntry>) => {
+  const updateSessionCache = useCallback((updates: Partial<SessionCacheEntry> | ((prev: SessionCacheEntry) => Partial<SessionCacheEntry>)) => {
     setActiveSession((curSession) => {
       if (!curSession) return curSession;
       setSessionCache((prev) => {
         const next = new Map(prev);
         const existing = next.get(curSession.id) ?? {};
-        next.set(curSession.id, { ...existing, ...updates });
+        const resolved = typeof updates === "function" ? updates(existing) : updates;
+        next.set(curSession.id, { ...existing, ...resolved });
         return next;
       });
       return curSession; // don't change activeSession

@@ -55,7 +55,7 @@ public class RagChatController {
             }
         }
 
-        log.info("RAG 对话请求: message='{}', documentId='{}'", req.getMessage(), documentId);
+        log.info("RAG 对话请求: msgLen={}, documentId='{}'", req.getMessage().length(), documentId);
 
         AiRagService.AiRagResult result = aiRagService.chat(req.getMessage(), documentId, sessionIdStr, docId, req.getActivityType(), req.getContextHint());
 

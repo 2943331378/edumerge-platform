@@ -85,6 +85,7 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
     }
 
     /** 主入口: 为用户的所有文档生成知识图谱 */
+    @Transactional
     public KnowledgeGraphResult generate(Long userId) {
         // 1. 获取所有已完成文档
         List<Document> docs = documentService.listByUserId(userId);
@@ -254,7 +255,6 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
         return response.aiMessage().text();
     }
 
-    @Transactional
     public void clearExisting(Long userId) {
         List<KnowledgeConcept> existing = conceptMapper.selectList(
                 new LambdaQueryWrapper<KnowledgeConcept>()

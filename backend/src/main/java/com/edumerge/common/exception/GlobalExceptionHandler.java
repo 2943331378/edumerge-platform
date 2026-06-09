@@ -19,6 +19,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
+import java.io.IOException;
 import java.util.stream.Collectors;
 
 /**
@@ -182,6 +183,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.PAYLOAD_TOO_LARGE)
                 .body(Result.fail("文件大小超过限制（最大 50MB），请压缩后重试"));
+    }
+
+    /**
+     * 处理 IO 异常 (IOException)
+     * 文件上传、下载等操作失败时触发
+     */
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<Result<?>> handleIOException(IOException e) {
+        log.error("IO 异常: {}", e.getMessage(), e);
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Result.fail("文件处理失败，请重试"));
     }
 
     /**

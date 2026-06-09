@@ -687,7 +687,7 @@ export default function HomePage() {
             generateTrigger={activeCache?.outlineGenerateTrigger}
             generating={activeCache?.flashcardGenerating}
             onGeneratingChange={(v) => updateSessionCache({ flashcardGenerating: v })}
-            onGenerated={() => updateSessionCache({ completedSteps: new Set([...completedSteps, 4]) })}
+            onGenerated={() => updateSessionCache((prev) => ({ completedSteps: new Set([...(prev.completedSteps ?? EMPTY_STEPS), 4]) }))}
           />
         );
 
@@ -705,7 +705,7 @@ export default function HomePage() {
             generateTrigger={activeCache?.outlineGenerateTrigger}
             generating={activeCache?.quizGenerating}
             onGeneratingChange={(v) => updateSessionCache({ quizGenerating: v })}
-            onGenerated={() => updateSessionCache({ completedSteps: new Set([...completedSteps, 5]) })}
+            onGenerated={() => updateSessionCache((prev) => ({ completedSteps: new Set([...(prev.completedSteps ?? EMPTY_STEPS), 5]) }))}
           />
         );
 

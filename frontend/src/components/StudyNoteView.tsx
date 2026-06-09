@@ -178,12 +178,12 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
         onProgress: (progress) => setStreamingProgress(progress),
         onDone: async () => {
           if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          if (controller.signal.aborted) return;
+          const list = await listNoteHistory(docId);
           setStreamingContent(null);
           setStreamingError(null);
           setStreamingProgress(0);
           streamingContentRef.current = "";
-          if (controller.signal.aborted) return;
-          const list = await listNoteHistory(docId);
           loadHistory(list);
           onGenerated?.();
           toast.success("学习笔记生成成功");

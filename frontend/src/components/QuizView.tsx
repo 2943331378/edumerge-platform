@@ -790,11 +790,11 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                           } catch { optionsStr = String((quiz as unknown as Record<string, unknown>).options ?? ""); }
                           setEditQuizForm({ question: quiz.question, options: optionsStr, answer: quiz.answer, explanation: quiz.explanation ?? "" });
                         }}
-                          className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button type="button" onClick={() => { if (confirm("确定删除这道题目？")) { deleteQuiz(quiz.id).then(() => { setQuizzes(prev => prev.filter(q => q.id !== quiz.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
-                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
                           <X className="h-3 w-3" />
                         </button>
                       </div>

@@ -37,6 +37,7 @@ public class FlashcardController {
 
     @PostMapping("/generate")
     public Result<List<FlashcardResponse>> generate(@RequestBody GenerateRequest body) {
+        documentService.verifyOwnership(Long.parseLong(body.getDocId()));
         Integer startChunk = body.getStartChunk() != null ? Integer.parseInt(body.getStartChunk()) : null;
         Integer endChunk = body.getEndChunk() != null ? Integer.parseInt(body.getEndChunk()) : null;
         List<Flashcard> cards = flashcardService.generate(

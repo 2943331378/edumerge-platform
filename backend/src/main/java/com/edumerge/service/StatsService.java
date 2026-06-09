@@ -85,7 +85,6 @@ public class StatsService {
      * 接收评测脚本推送的 RAG 质量指标
      * Hit Rate 基于语义空间向量对齐 (Embedding Cosine Similarity) 计算
      */
-    @Transactional
     public void updateEvalMetrics(double hitRate, double avgFaithfulness,
                                   double avgCorrectness, double compositeScore,
                                   int totalQuestions) {
@@ -97,8 +96,11 @@ public class StatsService {
                 .totalQuestions(totalQuestions)
                 .build();
         evalMetricsRef.set(metrics);
-        log.info("[数据看板] 评测指标已更新: HR={:.1%}, Faith={:.1f}/5, Corr={:.1f}/5, Composite={:.2%}",
-                hitRate, avgFaithfulness, avgCorrectness, compositeScore);
+        log.info("[数据看板] 评测指标已更新: HR={}, Faith={}/5, Corr={}/5, Composite={}",
+                String.format("%.1f%%", hitRate * 100),
+                String.format("%.1f", avgFaithfulness),
+                String.format("%.1f", avgCorrectness),
+                String.format("%.2f%%", compositeScore * 100));
     }
 
     /**
@@ -168,9 +170,10 @@ public class StatsService {
         resp.setGovernanceMetrics(govMetrics);
         resp.setEvalMetrics(evalMetricsRef.get());  // 实时 RAG 评测指标 (语义空间向量对齐)
 
-        log.info("[数据资产统计] 文档={}, 非结构化数据={}字, 卡片={}, 测验={}, 覆盖率={:.1%}",
+        log.info("[数据资产统计] 文档={}, 非结构化数据={}字, 卡片={}, 测验={}, 覆盖率={}",
                 completedDocs, totalChars, dataMetrics.getTotalFlashcards(),
-                dataMetrics.getTotalQuizzes(), dataMetrics.getVectorCoverageRate());
+                dataMetrics.getTotalQuizzes(),
+                String.format("%.1f%%", dataMetrics.getVectorCoverageRate() * 100));
 
         return resp;
     }

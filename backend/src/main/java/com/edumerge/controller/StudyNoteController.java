@@ -87,6 +87,7 @@ public class StudyNoteController {
             return Result.fail("docId 不能为空");
         }
         Long docId = Long.parseLong(docIdStr);
+        documentService.verifyOwnership(docId);
         Integer startChunk = body.get("startChunk") != null ? Integer.parseInt(body.get("startChunk")) : null;
         Integer endChunk = body.get("endChunk") != null ? Integer.parseInt(body.get("endChunk")) : null;
         Map<String, Object> data = studyNoteService.generate(docId, body.get("requirements"), body.get("sectionContext"), startChunk, endChunk);
@@ -198,6 +199,9 @@ public class StudyNoteController {
             emitter.send(SseEmitter.event().data("[DONE]"));
             if (response != null) response.flushBuffer();
         } catch (Exception ignored) {}
+        try { Thread.sleep(200); } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         try { emitter.complete(); } catch (Exception ignored) {}
     }
 }

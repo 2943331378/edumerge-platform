@@ -173,6 +173,9 @@ public class MindMapController {
             emitter.send(SseEmitter.event().data("[DONE]"));
             if (response != null) response.flushBuffer();
         } catch (Exception ignored) {}
+        try { Thread.sleep(200); } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         try { emitter.complete(); } catch (Exception ignored) {}
     }
 }
