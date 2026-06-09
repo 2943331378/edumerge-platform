@@ -193,7 +193,7 @@ export default function RegisterPage() {
                     <div className="relative">
                       <Lock className={cn("absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors duration-200", focused === "password" ? "text-primary" : "text-muted-foreground/40")} />
                       <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} onFocus={() => setFocused("password")} onBlur={() => setFocused(null)} placeholder="至少 6 个字符" className={cn(inputCls, "pl-10 pr-10")} autoFocus />
-                      <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/30 hover:text-foreground transition-colors">
+                      <button type="button" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/30 hover:text-foreground transition-colors">
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>

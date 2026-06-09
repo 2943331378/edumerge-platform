@@ -2,12 +2,14 @@
  * API 抽象层 — 所有后端请求集中管理
  */
 
+import { getStoredToken } from "./auth-context";
+
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (typeof window !== "undefined") {
-    const token = localStorage.getItem("edumerge_token");
+    const token = getStoredToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
   return headers;
@@ -20,7 +22,7 @@ async function tryRefreshToken(): Promise<boolean> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     try {
-      const rt = localStorage.getItem("edumerge_refresh_token");
+      const rt = localStorage.getItem("edumerge_refresh_token") ?? sessionStorage.getItem("edumerge_refresh_token");
       if (!rt) return false;
       const res = await fetch(`${BASE}/auth/refresh`, {
         method: "POST",
@@ -50,6 +52,9 @@ function clearAuthAndRedirect() {
   localStorage.removeItem("edumerge_token");
   localStorage.removeItem("edumerge_refresh_token");
   localStorage.removeItem("edumerge_user");
+  sessionStorage.removeItem("edumerge_token");
+  sessionStorage.removeItem("edumerge_refresh_token");
+  sessionStorage.removeItem("edumerge_user");
   document.cookie = "edumerge_token=; path=/; max-age=0";
   window.location.href = "/login";
 }
@@ -295,7 +300,7 @@ export async function uploadDocument(
   file: File,
   onProgress?: (percent: number) => void,
 ): Promise<UploadResult> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("edumerge_token") : null;
+  const token = typeof window !== "undefined" ? getStoredToken() : null;
   try {
     return await uploadWithToken(file, token, onProgress);
   } catch (err: unknown) {
@@ -304,7 +309,7 @@ export async function uploadDocument(
     if (msg.includes("401")) {
       const refreshed = await tryRefreshToken();
       if (refreshed) {
-        const newToken = localStorage.getItem("edumerge_token");
+        const newToken = getStoredToken();
         return uploadWithToken(file, newToken, onProgress);
       }
       clearAuthAndRedirect();

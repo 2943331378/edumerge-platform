@@ -214,7 +214,14 @@ public class DocumentTextExtractor {
     // ═══════ PDF + Vision OCR ═══════
 
     private ExtractionResult extractPdfText(Path pdfPath) throws IOException {
-        try (PDDocument pdfDoc = Loader.loadPDF(pdfPath.toFile())) {
+        PDDocument pdfDoc;
+        try {
+            pdfDoc = Loader.loadPDF(pdfPath.toFile());
+        } catch (org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException e) {
+            log.warn("PDF 加密无法读取: {}", pdfPath.getFileName());
+            throw new IOException("该 PDF 文件已加密，请上传未加密版本", e);
+        }
+        try (pdfDoc) {
             int pageCount = pdfDoc.getNumberOfPages();
             log.info("PDF 加载成功: 页数={}, 文件={}", pageCount, pdfPath.getFileName());
 

@@ -141,12 +141,14 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const [mindMapTextIdx, setMindMapTextIdx] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const mindMapAbortRef = useRef<AbortController | null>(null);
+  const generatingRef = useRef(false);
 
   // Cleanup: abort in-flight requests on unmount
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
       mindMapAbortRef.current?.abort();
+      generatingRef.current = false;
     };
   }, []);
 
@@ -317,8 +319,9 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
 
   /** 生成后自动加载列表并进入最新 Deck */
   const handleGenerate = async () => {
-    if (!sessionId || generating) return;
+    if (!sessionId || generating || generatingRef.current) return;
     if (!docId) { toast.error("文档尚未处理完成，请稍后再试"); return; }
+    generatingRef.current = true;
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
@@ -336,6 +339,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
       if ((err as Error).name !== "AbortError") {
         toast.error("测试题生成失败");
       }
+    } finally {
+      generatingRef.current = false;
     }
     abortRef.current = null;
     setLoading(false);
@@ -513,7 +518,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                     <button
                       type="button"
                       onClick={(e) => handleDeleteDeck(e, deck.id)}
-                      className="absolute top-3 right-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded-md p-1 transition-opacity z-10"
+                      className="absolute top-3 right-3 opacity-0 max-md:opacity-100 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded-md min-w-[44px] min-h-[44px] p-2 transition-opacity z-10"
                       title="删除此测试题组"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -695,17 +700,21 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
 
       {/* 折叠态 — 悬浮小药丸 */}
       {navCollapsed && (
-        <div className="shrink-0 px-3 py-1.5">
+        <div className="shrink-0 px-3 py-1.5 inline-flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => { if (reviewMode) { endReview(); } else { setView("decks"); reloadDecks(); } }}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-muted/40 hover:bg-muted/70 backdrop-blur-sm border border-border/30 transition-all duration-200"
+            title={reviewMode ? "返回成绩" : "返回测试题组"}
+          >
+            <ArrowLeft className="h-3 w-3 text-muted-foreground/50 hover:text-foreground transition-colors" />
+          </button>
           <button
             type="button"
             onClick={() => setNavCollapsed(false)}
             className="group inline-flex items-center gap-1.5 rounded-full bg-muted/40 hover:bg-muted/70 backdrop-blur-sm border border-border/30 px-3 py-1 transition-all duration-200"
             title="展开导航栏"
           >
-            <ArrowLeft
-              className="h-3 w-3 text-muted-foreground/50 group-hover:text-foreground transition-colors cursor-pointer"
-              onClick={(e) => { e.stopPropagation(); if (reviewMode) { endReview(); } else { setView("decks"); reloadDecks(); } }}
-            />
             <span className="text-[11px] text-muted-foreground/60 group-hover:text-foreground/80 truncate max-w-[180px] transition-colors">
               {reviewMode ? "错题回顾" : (currentDeck?.title ?? "")}
             </span>

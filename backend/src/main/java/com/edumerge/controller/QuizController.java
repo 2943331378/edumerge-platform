@@ -2,8 +2,10 @@ package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
 import com.edumerge.dto.*;
+import com.edumerge.entity.CardDeck;
 import com.edumerge.entity.Quiz;
 import com.edumerge.entity.QuizAttempt;
+import com.edumerge.service.CardDeckService;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.QuizService;
 import jakarta.validation.Valid;
@@ -24,11 +26,14 @@ public class QuizController {
 
     private final QuizService quizService;
     private final DocumentService documentService;
+    private final CardDeckService cardDeckService;
 
     @Autowired
-    public QuizController(QuizService quizService, DocumentService documentService) {
+    public QuizController(QuizService quizService, DocumentService documentService,
+                          CardDeckService cardDeckService) {
         this.quizService = quizService;
         this.documentService = documentService;
+        this.cardDeckService = cardDeckService;
     }
 
     @PostMapping("/generate")
@@ -45,7 +50,12 @@ public class QuizController {
                                             @RequestParam(required = false) Long sessionId,
                                             @RequestParam(required = false) Long deckId) {
         List<Quiz> quizzes;
-        if (deckId != null) quizzes = quizService.listByDeckId(deckId);
+        if (deckId != null) {
+            CardDeck deck = cardDeckService.getById(deckId);
+            if (deck == null) throw new IllegalArgumentException("卡片组不存在: " + deckId);
+            documentService.verifyOwnership(deck.getDocId());
+            quizzes = quizService.listByDeckId(deckId);
+        }
         else {
             if (sessionId != null) docId = quizService.resolveDocId(sessionId);
             if (docId != null) documentService.verifyOwnership(docId);
@@ -56,6 +66,7 @@ public class QuizController {
 
     @PostMapping("/attempts")
     public Result<QuizAttemptResponse> saveAttempt(@RequestBody QuizAttempt attempt) {
+        documentService.verifyOwnership(attempt.getDocId());
         return Result.success("答题记录已保存", DtoMapper.toResponse(quizService.saveAttempt(attempt)));
     }
 

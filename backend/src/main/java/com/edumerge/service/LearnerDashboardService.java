@@ -245,7 +245,8 @@ public class LearnerDashboardService {
                 new LambdaQueryWrapper<QuizAttempt>()
                         .select(QuizAttempt::getAnswerDetails, QuizAttempt::getDocId,
                                 QuizAttempt::getTotalQuestions, QuizAttempt::getCorrectCount)
-                        .eq(QuizAttempt::getUserId, userId));
+                        .eq(QuizAttempt::getUserId, userId)
+                        .ge(QuizAttempt::getCreatedAt, LocalDateTime.now().minusDays(90)));
         for (QuizAttempt a : attempts) {
             // 文档测验统计
             if (a.getDocId() != null) {

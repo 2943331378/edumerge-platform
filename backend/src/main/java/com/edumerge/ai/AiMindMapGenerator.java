@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -114,6 +115,7 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectRules);
 
         StringBuilder fullContent = new StringBuilder();
+        AtomicReference<Throwable> errorRef = new AtomicReference<>();
         long llmStart = System.currentTimeMillis();
         try {
             AI_CIRCUIT_BREAKER.execute(() -> {
@@ -130,13 +132,18 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                     }
                     @Override
                     public void onError(Throwable error) {
-                        log.error("流式思维导图 LLM 错误: docId={}, error={}", docId, error.getMessage());
+                        errorRef.set(error);
+                        log.error("流式思维导图 LLM 错误: docId={}, error={}", docId, error.getMessage(), error);
                     }
                 });
                 return null;
             });
         } catch (Exception e) {
             log.error("流式思维导图生成异常: docId={}, error={}", docId, e.getMessage(), e);
+            return MindMapResult.empty();
+        }
+        if (errorRef.get() != null) {
+            log.error("流式思维导图 LLM 回调报错, 视为失败: docId={}", docId);
             return MindMapResult.empty();
         }
 

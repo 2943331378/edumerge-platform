@@ -2,8 +2,10 @@ package com.edumerge.controller;
 
 import com.edumerge.common.result.Result;
 import com.edumerge.dto.*;
+import com.edumerge.entity.CardDeck;
 import com.edumerge.entity.Flashcard;
 import com.edumerge.security.SecurityUtils;
+import com.edumerge.service.CardDeckService;
 import com.edumerge.service.DocumentService;
 import com.edumerge.service.FlashcardService;
 import jakarta.validation.Valid;
@@ -23,11 +25,14 @@ public class FlashcardController {
 
     private final FlashcardService flashcardService;
     private final DocumentService documentService;
+    private final CardDeckService cardDeckService;
 
     @Autowired
-    public FlashcardController(FlashcardService flashcardService, DocumentService documentService) {
+    public FlashcardController(FlashcardService flashcardService, DocumentService documentService,
+                               CardDeckService cardDeckService) {
         this.flashcardService = flashcardService;
         this.documentService = documentService;
+        this.cardDeckService = cardDeckService;
     }
 
     @PostMapping("/generate")
@@ -46,6 +51,9 @@ public class FlashcardController {
                                                 @RequestParam(required = false) Boolean important) {
         List<Flashcard> cards;
         if (deckId != null) {
+            CardDeck deck = cardDeckService.getById(deckId);
+            if (deck == null) throw new IllegalArgumentException("卡片组不存在: " + deckId);
+            documentService.verifyOwnership(deck.getDocId());
             cards = Boolean.TRUE.equals(important)
                     ? flashcardService.listImportantByDeckId(deckId)
                     : flashcardService.listByDeckId(deckId);

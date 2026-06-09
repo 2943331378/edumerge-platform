@@ -50,7 +50,8 @@ public class FlashcardService {
         return flashcardMapper.selectList(
                 new LambdaQueryWrapper<Flashcard>()
                         .eq(Flashcard::getDocId, docId)
-                        .orderByAsc(Flashcard::getId));
+                        .orderByAsc(Flashcard::getId)
+                        .last("LIMIT 500"));
     }
 
     @Transactional

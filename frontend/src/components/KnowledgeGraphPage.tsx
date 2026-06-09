@@ -91,6 +91,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
   const dragOffsetRef = useRef(0);
   const dragStartY = useRef(0);
   const isDragging = useRef(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
 
   // Load existing graph
   useEffect(() => {
@@ -160,7 +161,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
     }));
 
     return { nodes, links };
-  }, [graphData, searchQuery, docFilteredNodeIds, selectedDocs, isDark]);
+  }, [graphData, searchQuery, docFilteredNodeIds, isDark]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -195,10 +196,45 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
     }
   };
 
+  // Focus trap + Escape for mobile drawer
+  useEffect(() => {
+    if (!selectedNode || !drawerRef.current) return;
+    const panel = drawerRef.current;
+    const focusable = panel.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length > 0) focusable[0].focus();
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSelectedNode(null);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const els = panel.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [selectedNode]);
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="加载中" />
+        <span className="sr-only">加载中...</span>
       </div>
     );
   }
@@ -329,11 +365,15 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
             {/* Mobile backdrop */}
             <div className="md:hidden fixed inset-0 z-40 bg-black/30" onClick={() => setSelectedNode(null)} />
             <div
+              ref={drawerRef}
               className={cn(
                 "flex flex-col border-border bg-card/95 backdrop-blur",
                 "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:z-50 max-md:max-h-[70vh] max-md:rounded-t-2xl max-md:border-t max-md:shadow-2xl",
                 "md:w-[320px] md:shrink-0 md:border-l md:bg-card/50",
               )}
+              role="dialog"
+              aria-modal="true"
+              aria-label={`概念详情: ${selectedNode.name}`}
               style={{
                 transform: dragOffset > 0 ? `translateY(${dragOffset}px)` : undefined,
                 transition: isDragging.current ? "none" : "transform 300ms ease-out",

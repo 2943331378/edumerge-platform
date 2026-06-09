@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -106,6 +107,7 @@ public class AiNoteGenerator extends AiGeneratorBase {
 
         // 流式调用 LLM (带熔断保护)
         StringBuilder fullContent = new StringBuilder();
+        AtomicReference<Throwable> errorRef = new AtomicReference<>();
         long llmStart = System.currentTimeMillis();
         try {
             AI_CIRCUIT_BREAKER.execute(() -> {
@@ -122,13 +124,18 @@ public class AiNoteGenerator extends AiGeneratorBase {
                     }
                     @Override
                     public void onError(Throwable error) {
-                        log.error("流式笔记 LLM 错误: docId={}, error={}", docId, error.getMessage());
+                        errorRef.set(error);
+                        log.error("流式笔记 LLM 错误: docId={}, error={}", docId, error.getMessage(), error);
                     }
                 });
                 return null;
             });
         } catch (Exception e) {
             log.error("流式笔记生成异常: docId={}, error={}", docId, e.getMessage(), e);
+            return StudyNoteResult.empty();
+        }
+        if (errorRef.get() != null) {
+            log.error("流式笔记 LLM 回调报错, 视为失败: docId={}", docId);
             return StudyNoteResult.empty();
         }
 

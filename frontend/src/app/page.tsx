@@ -54,6 +54,8 @@ const STEP_ACTIVITY_MAP: Record<number, string | null> = {
   6: "flownote",
 };
 
+const EMPTY_STEPS = new Set<number>();
+
 /** 大纲生成类型 → 目标步骤映射 */
 const OUTLINE_STEP_MAP: Record<string, number> = {
   note: 2,
@@ -324,7 +326,7 @@ export default function HomePage() {
   // Derive current session's state from cache
   const activeCache = activeSession ? sessionCache.get(activeSession.id) : undefined;
   const note = activeCache?.note ?? null;
-  const completedSteps = activeCache?.completedSteps ?? new Set<number>();
+  const completedSteps = activeCache?.completedSteps ?? EMPTY_STEPS;
 
   // Step hints — show contextual hint on first visit to each step
   const [stepHintVisible, setStepHintVisible] = useState(false);
@@ -347,13 +349,14 @@ export default function HomePage() {
   };
 
   // 大纲底部工具栏 → 导航到目标步骤并传递选中章节
+  const outlineCounterRef = useRef(0);
   const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string, startChunk?: number, endChunk?: number) => {
-    const prev = activeCache?.outlineGenerateTrigger?.counter ?? 0;
+    outlineCounterRef.current++;
     updateSessionCache({
       sectionContext,
       startChunk,
       endChunk,
-      outlineGenerateTrigger: { type, counter: prev + 1 },
+      outlineGenerateTrigger: { type, counter: outlineCounterRef.current },
     });
     const targetStep = OUTLINE_STEP_MAP[type];
     if (targetStep) setCurrentStep(targetStep);
@@ -373,6 +376,7 @@ export default function HomePage() {
 
   // 处理从看板页面带回的待执行操作
   useEffect(() => {
+    if (sessions.length === 0) return;
     const pending = sessionStorage.getItem("edumerge_pending_action");
     if (!pending) return;
     sessionStorage.removeItem("edumerge_pending_action");
@@ -399,7 +403,6 @@ export default function HomePage() {
     const hasPending = sessions.some(
       (s) => s.docStatus && s.docStatus !== "COMPLETED" && s.docStatus !== "FAILED",
     );
-    if (!hasPending) return;
     const interval = hasPending ? 2000 : 10000;
     const timer = setInterval(loadSessions, interval);
     return () => clearInterval(timer);
@@ -548,7 +551,7 @@ export default function HomePage() {
                   </span>
                   <span className="text-xs text-muted-foreground">{uploadProgress}%</span>
                 </div>
-                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={uploadProgress} aria-valuemin={0} aria-valuemax={100} aria-label="文件上传进度">
                   <div
                     className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
                     style={{ width: `${uploadProgress}%` }}
@@ -761,6 +764,7 @@ export default function HomePage() {
               className="md:hidden h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
               onClick={() => setSidebarCollapsed((v) => !v)}
               title="菜单"
+              aria-label="打开侧边栏菜单"
             >
               <Menu className="h-4 w-4" />
             </button>
@@ -782,6 +786,7 @@ export default function HomePage() {
               className={cn("h-8 w-8 rounded-lg", userMenuOpen && "bg-primary/10 text-primary")}
               onClick={openDashboard}
               title="个人中心"
+              aria-label="个人中心"
             >
               <BarChart3 className="h-4 w-4" />
             </Button>
@@ -791,6 +796,7 @@ export default function HomePage() {
               className={cn("h-8 w-8 rounded-lg", showKnowledgeGraph && "bg-primary/10 text-primary")}
               onClick={() => { setShowKnowledgeGraph((v) => !v); setUserMenuOpen(false); }}
               title="知识图谱"
+              aria-label="知识图谱"
             >
               <GitBranch className="h-4 w-4" />
             </Button>
@@ -800,6 +806,7 @@ export default function HomePage() {
               className="h-8 w-8 rounded-lg"
               onClick={() => setChatOpen(true)}
               title="AI 对话助手"
+              aria-label="AI 对话助手"
             >
               <MessageSquare className="h-4 w-4" />
             </Button>

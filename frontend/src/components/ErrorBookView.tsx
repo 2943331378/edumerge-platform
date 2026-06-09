@@ -227,7 +227,8 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="加载中" />
+        <span className="sr-only">加载中...</span>
       </div>
     );
   }

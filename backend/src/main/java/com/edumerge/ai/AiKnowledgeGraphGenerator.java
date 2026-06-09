@@ -21,6 +21,7 @@ import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -142,7 +143,7 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
             return KnowledgeGraphResult.empty("AI 未提取到概念，请尝试添加不同类型的学习资料");
         }
 
-        // 5. 清除旧图谱 → 批量持久化
+        // 5. 先清除旧图谱 (在 JSON 验证通过之后，防止 LLM 返回畸形数据时丢失旧图谱)
         clearExisting(userId);
 
         // 概念持久化 + 名称→ID 映射
@@ -253,22 +254,19 @@ public class AiKnowledgeGraphGenerator extends AiGeneratorBase {
         return response.aiMessage().text();
     }
 
-    private void clearExisting(Long userId) {
+    @Transactional
+    public void clearExisting(Long userId) {
         List<KnowledgeConcept> existing = conceptMapper.selectList(
                 new LambdaQueryWrapper<KnowledgeConcept>()
                         .eq(KnowledgeConcept::getUserId, userId));
-        for (KnowledgeConcept kc : existing) {
-            // 级联删除关联数据
-            conceptDocMapper.delete(
-                    new LambdaQueryWrapper<ConceptDocument>()
-                            .eq(ConceptDocument::getConceptId, kc.getId()));
-            relationMapper.delete(
-                    new LambdaQueryWrapper<ConceptRelationship>()
-                            .eq(ConceptRelationship::getConceptIdA, kc.getId())
-                            .or()
-                            .eq(ConceptRelationship::getConceptIdB, kc.getId()));
-            conceptMapper.deleteById(kc.getId());
-        }
+        if (existing.isEmpty()) return;
+        List<Long> ids = existing.stream().map(KnowledgeConcept::getId).toList();
+        conceptDocMapper.delete(new LambdaQueryWrapper<ConceptDocument>()
+                .in(ConceptDocument::getConceptId, ids));
+        relationMapper.delete(new LambdaQueryWrapper<ConceptRelationship>()
+                .in(ConceptRelationship::getConceptIdA, ids)
+                .or().in(ConceptRelationship::getConceptIdB, ids));
+        conceptMapper.deleteBatchIds(ids);
     }
 
     private static class DocMeta {

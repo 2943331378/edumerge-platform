@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -164,7 +164,6 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
   const [weeklyGoal, setWeeklyGoal] = useState(() => getGoal(WEEKLY_GOAL_KEY, WEEKLY_GOAL_DEFAULT));
   const [monthlyGoal, setMonthlyGoal] = useState(() => getGoal(MONTHLY_GOAL_KEY, MONTHLY_GOAL_DEFAULT));
   const [editingGoal, setEditingGoal] = useState(false);
-  const stableToday = useMemo(() => new Date(), []);
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -420,7 +419,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
             const maxActivity = Math.max(...monthly.map(d => d.reviews + d.quizzes), 1);
             const dayLabels = ["日", "一", "二", "三", "四", "五", "六"];
             // 让最后一列对齐到今天（今天在最右下角）
-            const today = stableToday;
+            const today = new Date();
             const todayDow = today.getDay(); // 0=Sun
             // 补齐到完整的周：从 30 天前的周日开始
             const firstDate = new Date(today);
@@ -483,6 +482,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                               key={col}
                               type="button"
                               title={`${day.date}: ${day.reviews}张卡片, ${day.quizzes}次测验`}
+                              aria-label={`${day.date}: ${day.reviews}张卡片, ${day.quizzes}次测验`}
                               onClick={() => setSelectedHeatDay(isSelected ? null : day)}
                               className="flex items-center justify-center min-w-[44px] min-h-[44px] cursor-pointer border-0 bg-transparent p-0"
                             >
@@ -931,7 +931,7 @@ function ProgressRing({ value, max, size = 72, strokeWidth = 6 }: { value: numbe
   const offset = circ * (1 - pct);
   const color = pct >= 1 ? "text-emerald-500" : pct >= 0.5 ? "text-primary" : "text-amber-500";
   return (
-    <div className="relative" style={{ width: size, height: size }}>
+    <div className="relative" style={{ width: size, height: size }} role="img" aria-label={`今日复习进度 ${Math.round(pct * 100)}%`}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={strokeWidth}
           className="stroke-muted/30" />

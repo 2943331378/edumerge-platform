@@ -115,16 +115,8 @@ public class StatsService {
                 new LambdaQueryWrapper<Document>().eq(Document::getStatus, "COMPLETED"));
         dataMetrics.setTotalDocuments(completedDocs);
 
-        // 累计切片数及非结构化数据字数
-        List<DocumentChunk> allChunks = documentChunkMapper.selectList(
-                new LambdaQueryWrapper<DocumentChunk>()
-                        .eq(DocumentChunk::getEmbeddingStatus, "COMPLETED"));
-        long totalChars = 0;
-        for (DocumentChunk chunk : allChunks) {
-            if (chunk.getContent() != null) {
-                totalChars += chunk.getContent().length();
-            }
-        }
+        // 累计切片数及非结构化数据字数 — 使用 SQL 聚合避免 OOM
+        long totalChars = documentChunkMapper.sumContentLength();
         dataMetrics.setTotalCharsProcessed(totalChars);
 
         // 结构化知识资产统计 — 非结构化数据→生产要素的转化成果
@@ -137,10 +129,13 @@ public class StatsService {
 
         // 平均切片数与向量覆盖率
         long totalChunksAll = documentChunkMapper.selectCount(null);
+        long completedChunks = documentChunkMapper.selectCount(
+                new LambdaQueryWrapper<DocumentChunk>()
+                        .eq(DocumentChunk::getEmbeddingStatus, "COMPLETED"));
         dataMetrics.setAvgChunksPerDocument(
                 completedDocs > 0 ? (double) totalChunksAll / completedDocs : 0.0);
         dataMetrics.setVectorCoverageRate(
-                totalChunksAll > 0 ? (double) allChunks.size() / totalChunksAll : 0.0);
+                totalChunksAll > 0 ? (double) completedChunks / totalChunksAll : 0.0);
 
         // ===== 效率提升指标 =====
         StatsResponse.EfficiencyMetrics effMetrics = new StatsResponse.EfficiencyMetrics();

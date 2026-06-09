@@ -399,11 +399,13 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
 
       {/* Version history tabs */}
       {hasHistory && (
-        <div className="shrink-0 flex items-center gap-1 px-6 pb-2">
+        <div className="shrink-0 flex items-center gap-1 px-6 pb-2 overflow-x-auto" role="tablist" aria-label="笔记版本历史">
           <span className="text-[10px] text-muted-foreground/40 mr-1">历史:</span>
           {history.map((h, i) => (
             <button
               key={h.id ?? i}
+              role="tab"
+              aria-selected={i === activeVersionIdx}
               onClick={() => switchVersion(i)}
               className={cn(
                 "text-[11px] rounded-md px-2 py-0.5 transition-all",
@@ -428,7 +430,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
           <EmptyState title="文档仍在处理中" description="向量化完成后才能基于文档内容生成学习笔记。" />
         ) : streamingContent !== null ? (
           /* 流式生成中（或中断后保留内容） — 实时渲染 */
-          <div className="mx-auto max-w-4xl">
+          <div className="mx-auto max-w-4xl" aria-live="polite" aria-label="正在生成学习笔记">
             <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
               <CardContent className="p-6 sm:p-8">
                 {streamingError ? (

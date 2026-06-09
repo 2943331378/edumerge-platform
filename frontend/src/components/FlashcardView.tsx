@@ -112,12 +112,14 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [expanded, setExpanded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const mindMapAbortRef = useRef<AbortController | null>(null);
+  const generatingRef = useRef(false);
 
   // Cleanup: abort in-flight requests on unmount
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
       mindMapAbortRef.current?.abort();
+      generatingRef.current = false;
     };
   }, []);
 
@@ -210,18 +212,19 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   };
 
   // SM-2 自评处理
-  const handleSelfAssess = async (quality: number) => {
-    if (!card || selfAssessed) return;
+  const handleSelfAssess = useCallback(async (quality: number) => {
+    const c = displayCards[currentIdx];
+    if (!c || selfAssessed) return;
     setSelfAssessed(true);
     try {
-      await reviewFlashcard(card.id, quality);
+      await reviewFlashcard(c.id, quality);
       const labels = ["", "已标记「忘了」", "已标记「模糊」", "已标记「记住」", "已标记「秒答」"];
       toast.success(labels[quality]);
     } catch {
       toast.error("保存复习记录失败");
       setSelfAssessed(false);
     }
-  };
+  }, [displayCards, currentIdx, selfAssessed]);
 
   // 切换卡片重要标记
   const handleToggleImportant = async (cardId: number) => {
@@ -240,12 +243,12 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     listDueFlashcards(docId).then((due) => setDueCount(due.length)).catch(() => {});
   }, [docId, view]);
 
-  const goTo = (i: number) => {
+  const goTo = useCallback((i: number) => {
     setFlipped(false);
     setSelfAssessed(false);
     setExpanded(false);
     setCurrentIdx(Math.max(0, Math.min(i, displayCards.length - 1)));
-  };
+  }, [displayCards.length]);
 
   // 键盘快捷键: Space 翻转, ←→ 切换, 1-4 自评 (仅在 cards 视图)
   // 必须在条件 return 之前调用，遵守 React Hooks 规则
@@ -278,7 +281,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
         }
         break;
     }
-  }, [view, currentIdx, flipped, selfAssessed, goTo]);
+  }, [view, currentIdx, flipped, selfAssessed, goTo, handleSelfAssess]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleCardKeyboard);
@@ -394,8 +397,9 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
   /** 生成后进入预览模式 */
   const handleGenerate = async () => {
-    if (!sessionId || generating) return;
+    if (!sessionId || generating || generatingRef.current) return;
     if (!docId) { toast.error("文档尚未处理完成，请稍后再试"); return; }
+    generatingRef.current = true;
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
@@ -415,6 +419,8 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
       if ((err as Error).name !== "AbortError") {
         toast.error("卡片生成失败");
       }
+    } finally {
+      generatingRef.current = false;
     }
     abortRef.current = null;
     setLoading(false);
@@ -562,7 +568,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                   {/* 删除按钮 — 悬停显示 */}
                   <button
                     onClick={(e) => handleDeleteDeck(e, deck.id)}
-                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded-md p-1 transition-opacity z-10"
+                    className="absolute top-3 right-3 opacity-0 max-md:opacity-100 group-hover:opacity-60 hover:!opacity-100 hover:text-destructive rounded-md min-w-[44px] min-h-[44px] p-2 transition-opacity z-10"
                     title="删除此卡片组"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -803,7 +809,16 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
         <div
           className="w-full max-w-[800px] cursor-pointer [perspective:1200px] animate-card-enter"
           key={currentIdx}
+          tabIndex={0}
+          role="button"
+          aria-label={flipped ? "翻回问题面" : "翻转查看答案"}
           onClick={() => setFlipped((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setFlipped((v) => !v);
+            }
+          }}
         >
           <div
             className="relative w-full min-h-[260px] sm:min-h-[450px] transition-transform duration-300 [transform-style:preserve-3d]"

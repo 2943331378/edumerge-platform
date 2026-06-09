@@ -38,8 +38,16 @@ public class CircuitBreaker {
 
         if (currentState == State.OPEN) {
             if (System.currentTimeMillis() - lastFailureTime.get() >= cooldownMs) {
-                state.compareAndSet(State.OPEN, State.HALF_OPEN);
-                log.info("[{}] 熔断器进入半开状态，尝试放行请求", name);
+                if (!state.compareAndSet(State.OPEN, State.HALF_OPEN)) {
+                    // CAS 失败: 另一个线程已转换状态，重新读取
+                    currentState = state.get();
+                    if (currentState == State.OPEN) {
+                        throw new CircuitBreakerOpenException(name + " 熔断器开启中，请稍后重试");
+                    }
+                    // currentState 为 HALF_OPEN 或 CLOSED，放行
+                } else {
+                    log.info("[{}] 熔断器进入半开状态，尝试放行请求", name);
+                }
             } else {
                 throw new CircuitBreakerOpenException(name + " 熔断器开启中，请稍后重试");
             }

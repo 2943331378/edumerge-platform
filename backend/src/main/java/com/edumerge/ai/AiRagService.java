@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
@@ -184,6 +185,16 @@ public class AiRagService {
                                                          Long docId, String activityType,
                                                          String contextHint,
                                                          StreamingChatResponseHandler handler) {
+        return chatStream(userMessage, documentId, sessionId, docId, activityType, contextHint, handler, null);
+    }
+
+    /** 流式 RAG 对话 — 带上下文记忆 + 活动上下文 + 步骤上下文 + matches 回传 */
+    public List<EmbeddingMatch<TextSegment>> chatStream(String userMessage, String documentId,
+                                                         String sessionId,
+                                                         Long docId, String activityType,
+                                                         String contextHint,
+                                                         StreamingChatResponseHandler handler,
+                                                         AtomicReference<List<EmbeddingMatch<TextSegment>>> matchesOut) {
         List<EmbeddingMatch<TextSegment>> matches;
         try {
             matches = retrieveMatches(userMessage, documentId);
@@ -196,6 +207,9 @@ public class AiRagService {
             return List.of();
         }
         log.info("流式 RAG: 检索到 {} 个块, activityType={}, contextHint={}", matches.size(), activityType, contextHint);
+
+        // 回传 matches 给调用方（在 handler 回调前设好，避免竞态）
+        if (matchesOut != null) matchesOut.set(matches);
 
         ChatMemory memory = chatMemoryProvider.apply(sessionId != null ? sessionId : "");
 
@@ -244,7 +258,7 @@ public class AiRagService {
             public void onError(Throwable error) {
                 SecurityContextHolder.setContext(securityContext);
                 try {
-                    log.error("流式生成错误: sessionId={}", sessionId, error.getMessage());
+                    log.error("流式生成错误: sessionId={}, error={}", sessionId, error.getMessage(), error);
                     handler.onError(error);
                     saveExchange(sessionId, finalDocId, finalDocId2, userMessage, "生成失败: " + error.getMessage(), finalActivityType, finalRetrievedCount, null);
                 } finally {

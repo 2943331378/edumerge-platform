@@ -5,6 +5,7 @@ import com.edumerge.entity.Document;
 import com.edumerge.entity.Session;
 import com.edumerge.mapper.DocumentMapper;
 import com.edumerge.mapper.SessionMapper;
+import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -69,6 +70,12 @@ public class SessionService {
 
     @Transactional
     public void deleteById(Long id) {
+        Session session = sessionMapper.selectById(id);
+        if (session == null) throw new IllegalArgumentException("会话不存在: " + id);
+        if (!session.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权删除此会话");
+        }
         sessionMapper.deleteById(id);
         log.info("会话已删除: id={}", id);
     }

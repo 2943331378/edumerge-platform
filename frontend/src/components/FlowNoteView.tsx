@@ -162,7 +162,8 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="加载中" />
+        <span className="sr-only">加载中...</span>
       </div>
     );
   }
@@ -195,9 +196,11 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
       )}
 
       {/* Category filter + stats bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 shrink-0 overflow-x-auto">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 shrink-0 overflow-x-auto" role="tablist" aria-label="学习日志分类">
         <button
           type="button"
+          role="tab"
+          aria-selected={!activeCategory}
           onClick={() => setActiveCategory(null)}
           className={cn(
             "rounded-full px-3 py-1 text-[11px] font-medium transition-all shrink-0",
@@ -210,6 +213,8 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
           <button
             key={cat.key}
             type="button"
+            role="tab"
+            aria-selected={activeCategory === cat.key}
             onClick={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
             className={cn(
               "flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-all shrink-0",

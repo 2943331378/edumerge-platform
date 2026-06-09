@@ -56,8 +56,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // 查找端点特定限流或使用全局默认
         RateLimit limit = ENDPOINT_LIMITS.getOrDefault(endpoint, GLOBAL_LIMIT);
 
-        WindowCounter counter = counters.computeIfAbsent(clientIp + ":" + getLimitKey(endpoint),
+        String counterKey = clientIp + ":" + getLimitKey(endpoint);
+        WindowCounter counter = counters.computeIfAbsent(counterKey,
                 k -> new WindowCounter(limit.windowMs));
+
+        // 防止内存泄漏: map 超过阈值时清理过期条目
+        if (counters.size() > 10_000) {
+            long now = System.currentTimeMillis();
+            counters.entrySet().removeIf(entry ->
+                    now - entry.getValue().windowStart > entry.getValue().windowMs * 2);
+        }
 
         if (!counter.tryAcquire(limit.maxRequests)) {
             log.warn("[限流] IP={} 触发限流: {} ({}次/{}秒)", clientIp, endpoint,

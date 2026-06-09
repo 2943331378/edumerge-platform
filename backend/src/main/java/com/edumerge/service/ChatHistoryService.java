@@ -51,14 +51,17 @@ public class ChatHistoryService {
     @Transactional
     public void markHelpful(Long id, int isHelpful, String reason) {
         ChatHistory record = chatHistoryMapper.selectById(id);
-        if (record != null) {
-            record.setIsHelpful(isHelpful);
-            if (reason != null && !reason.isBlank()) {
-                record.setFeedbackReason(reason.trim());
-            }
-            chatHistoryMapper.updateById(record);
-            log.info("对话反馈已记录: id={}, isHelpful={}, reason={}", id, isHelpful, reason);
+        if (record == null) return;
+        if (!record.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权操作此对话记录");
         }
+        record.setIsHelpful(isHelpful);
+        if (reason != null && !reason.isBlank()) {
+            record.setFeedbackReason(reason.trim());
+        }
+        chatHistoryMapper.updateById(record);
+        log.info("对话反馈已记录: id={}, isHelpful={}, reason={}", id, isHelpful, reason);
     }
 
     /** 按会话查询最近对话历史 */

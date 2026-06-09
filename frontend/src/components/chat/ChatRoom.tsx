@@ -155,6 +155,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     e.stopPropagation();
     if (!confirm("删除此对话？所有聊天记录将一并删除。")) return;
     const prev = conversations;
+    const previousActiveId = activeId;
     setConversations((curr) => {
       const remaining = curr.filter((c) => c.id !== id);
       if (id === activeId) {
@@ -170,8 +171,9 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
       return remaining;
     });
     deleteConversation(id).catch(() => {
-      toast.error("删除失败，正在恢复");
       setConversations(prev);
+      setActiveId(previousActiveId);
+      toast.error("删除对话失败");
     });
   };
 
@@ -237,6 +239,24 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Frontend timeout: abort if stream doesn't complete within 2 minutes
+    let streamTimeout: ReturnType<typeof setTimeout> | undefined;
+    const resetStreamTimeout = () => {
+      if (streamTimeout) clearTimeout(streamTimeout);
+      streamTimeout = setTimeout(() => {
+        controller.abort();
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId && !m.content
+              ? { ...m, content: "AI 响应超时，请重试", error: true, loading: false }
+              : m
+          )
+        );
+        toast.error("AI 响应超时，请重试");
+      }, 120_000);
+    };
+    resetStreamTimeout();
+
     try {
       const stream = await chatStream(text, docUuid ?? undefined, convId, docId ?? undefined, activityType ?? undefined, contextHint ?? undefined, controller.signal);
       if (!stream) {
@@ -277,6 +297,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
             // 仅在当前会话仍为目标会话时更新消息，防止切换会话后 token 写入错误会话
             if (activeIdRef.current !== convId) return;
             if (data.token) {
+              resetStreamTimeout();
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId ? { ...m, content: m.content + data.token } : m
@@ -336,6 +357,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
         toast.error("连接中断，但已收到的内容已保留", { duration: 3000 });
       }
     } finally {
+      if (streamTimeout) clearTimeout(streamTimeout);
       setLoading(false);
       abortRef.current = null;
     }
@@ -521,6 +543,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
               variant="secondary"
               className="min-w-[44px] min-h-[44px] rounded-full shadow-md"
               onClick={() => { scrollToBottom(true); setShowScrollBtn(false); }}
+              aria-label="滚动到底部"
             >
               <ArrowDown className="h-4 w-4" />
             </Button>

@@ -53,7 +53,8 @@ public class QuizService {
         return quizMapper.selectList(
                 new LambdaQueryWrapper<Quiz>()
                         .eq(Quiz::getDocId, docId)
-                        .orderByAsc(Quiz::getId));
+                        .orderByAsc(Quiz::getId)
+                        .last("LIMIT 500"));
     }
 
     @Transactional(readOnly = true)

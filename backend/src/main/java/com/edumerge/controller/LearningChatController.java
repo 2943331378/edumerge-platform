@@ -8,6 +8,8 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
+
+import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -104,11 +106,9 @@ public class LearningChatController {
             SecurityContextHolder.setContext(securityContext);
             try {
                 if (cancelled.get()) return;
-                List<EmbeddingMatch<TextSegment>> matches =
-                        aiRagService.retrieveMatches(message, finalDocId);
 
-                if (cancelled.get()) { sendDoneAndComplete(emitter, response, completed); return; }
-
+                // 通过 AtomicReference 回传 matches，避免双重 Milvus 检索
+                AtomicReference<List<EmbeddingMatch<TextSegment>>> matchesRef = new AtomicReference<>(List.of());
                 aiRagService.chatStream(message, finalDocId, finalSessionId,
                         finalDocId2, finalActivityType, finalContextHint,
                         new StreamingChatResponseHandler() {
@@ -121,9 +121,10 @@ public class LearningChatController {
                             public void onCompleteResponse(ChatResponse aiResponse) {
                                 try {
                                     if (cancelled.get()) { sendDoneAndComplete(emitter, response, completed); return; }
-                                    List<Map<String, Object>> sources = matches.stream()
+                                    List<EmbeddingMatch<TextSegment>> streamedMatches = matchesRef.get();
+                                    List<Map<String, Object>> sources = streamedMatches.stream()
                                             .map(m -> Map.<String, Object>of(
-                                                    "index", matches.indexOf(m) + 1,
+                                                    "index", streamedMatches.indexOf(m) + 1,
                                                     "content", m.embedded().text(),
                                                     "score", m.score()))
                                             .toList();
@@ -147,7 +148,7 @@ public class LearningChatController {
                                     sendDoneAndComplete(emitter, response, completed);
                                 }
                             }
-                        });
+                        }, matchesRef);
             } catch (Exception e) {
                 log.error("流式对话异常: {}", e.getMessage(), e);
                 if (!cancelled.get()) {

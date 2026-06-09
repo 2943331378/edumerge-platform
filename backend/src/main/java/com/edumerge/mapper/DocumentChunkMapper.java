@@ -22,4 +22,8 @@ public interface DocumentChunkMapper extends BaseMapper<DocumentChunk> {
             "</foreach>" +
             "</script>")
     void insertBatch(@Param("chunks") List<DocumentChunk> chunks);
+
+    /** 查询 embedding_status='COMPLETED' 的切片总字符数 — 避免加载全部 content 到内存 */
+    @org.apache.ibatis.annotations.Select("SELECT COALESCE(SUM(CHAR_LENGTH(content)), 0) FROM document_chunks WHERE embedding_status = 'COMPLETED'")
+    long sumContentLength();
 }
