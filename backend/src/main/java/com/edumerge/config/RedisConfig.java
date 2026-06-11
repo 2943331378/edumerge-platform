@@ -1,7 +1,10 @@
 package com.edumerge.config;
 
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CachingConfigurer;
 import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.interceptor.CacheErrorHandler;
+import org.springframework.cache.interceptor.SimpleCacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -12,6 +15,8 @@ import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSeriali
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
@@ -21,7 +26,34 @@ import java.util.concurrent.TimeUnit;
  */
 @Configuration
 @EnableCaching
-public class RedisConfig {
+@Slf4j
+public class RedisConfig implements CachingConfigurer {
+
+    /**
+     * 缓存错误处理器 — Redis 异常时仅记录日志，不阻断业务方法执行
+     * 防止 @CacheEvict/@Cacheable 在 Redis 不可用时导致生成等功能失败
+     */
+    @Override
+    public CacheErrorHandler errorHandler() {
+        return new SimpleCacheErrorHandler() {
+            @Override
+            public void handleCacheGetError(RuntimeException exception, org.springframework.cache.Cache cache, Object key) {
+                log.warn("Cache GET 异常 (已忽略): cache={}, key={}, error={}", cache.getName(), key, exception.getMessage());
+            }
+            @Override
+            public void handleCachePutError(RuntimeException exception, org.springframework.cache.Cache cache, Object key, Object value) {
+                log.warn("Cache PUT 异常 (已忽略): cache={}, key={}, error={}", cache.getName(), key, exception.getMessage());
+            }
+            @Override
+            public void handleCacheEvictError(RuntimeException exception, org.springframework.cache.Cache cache, Object key) {
+                log.warn("Cache EVICT 异常 (已忽略): cache={}, key={}, error={}", cache.getName(), key, exception.getMessage());
+            }
+            @Override
+            public void handleCacheClearError(RuntimeException exception, org.springframework.cache.Cache cache) {
+                log.warn("Cache CLEAR 异常 (已忽略): cache={}, error={}", cache.getName(), exception.getMessage());
+            }
+        };
+    }
 
     /**
      * 配置 RedisTemplate
@@ -67,10 +99,16 @@ public class RedisConfig {
 
         // dashboard 缓存 TTL = 5 分钟（学习数据变化频繁）
         RedisCacheConfiguration dashboardConfig = defaultConfig.entryTtl(Duration.ofMinutes(5));
+        // stats 缓存 TTL = 10 分钟（全局统计数据，变化频率较低）
+        RedisCacheConfiguration statsConfig = defaultConfig.entryTtl(Duration.ofMinutes(10));
+        // learningStats 缓存 TTL = 5 分钟（个人学习统计）
+        RedisCacheConfiguration learningStatsConfig = defaultConfig.entryTtl(Duration.ofMinutes(5));
 
         return RedisCacheManager.builder(factory)
                 .cacheDefaults(defaultConfig)
                 .withCacheConfiguration("dashboard", dashboardConfig)
+                .withCacheConfiguration("stats", statsConfig)
+                .withCacheConfiguration("learningStats", learningStatsConfig)
                 .build();
     }
 

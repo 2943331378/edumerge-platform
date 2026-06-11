@@ -114,8 +114,10 @@ public class AiMindMapGenerator extends AiGeneratorBase {
 
         List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectRules);
 
+        // 流式调用 LLM (DeepSeek 支持真正的流式回调)
         StringBuilder fullContent = new StringBuilder();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
         long llmStart = System.currentTimeMillis();
         try {
             AI_CIRCUIT_BREAKER.execute(() -> {
@@ -129,27 +131,41 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                     public void onCompleteResponse(ChatResponse response) {
                         log.info("流式思维导图 LLM 完成: docId={}, 长度={}, 耗时={}ms",
                                 docId, fullContent.length(), System.currentTimeMillis() - llmStart);
+                        latch.countDown();
                     }
                     @Override
                     public void onError(Throwable error) {
                         errorRef.set(error);
                         log.error("流式思维导图 LLM 错误: docId={}, error={}", docId, error.getMessage(), error);
+                        latch.countDown();
                     }
                 });
+                try {
+                    if (!latch.await(5, java.util.concurrent.TimeUnit.MINUTES)) {
+                        log.error("流式思维导图 LLM 超时: docId={}", docId);
+                        errorRef.set(new RuntimeException("LLM 调用超时"));
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    errorRef.set(e);
+                }
+                if (errorRef.get() != null) throw new RuntimeException(errorRef.get());
                 return null;
             });
         } catch (Exception e) {
             log.error("流式思维导图生成异常: docId={}, error={}", docId, e.getMessage(), e);
-            return MindMapResult.empty();
-        }
-        if (errorRef.get() != null) {
-            log.error("流式思维导图 LLM 回调报错, 视为失败: docId={}", docId);
+            String partial = cleanMarkdown(fullContent.toString());
+            if (!partial.isBlank()) {
+                String title = extractTitle(partial);
+                return MindMapResult.success(title, partial);
+            }
             return MindMapResult.empty();
         }
 
         String markdown = cleanMarkdown(fullContent.toString());
         if (!isValidMindMap(markdown)) {
-            log.error("流式思维导图格式验证失败: docId={}", docId);
+            log.error("思维导图格式验证失败: docId={}, contentPreview={}", docId,
+                    markdown.substring(0, Math.min(300, markdown.length())));
             return MindMapResult.empty();
         }
         String title = extractTitle(markdown);
@@ -222,9 +238,13 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         return trimmed;
     }
 
-    /** 验证: 必须至少包含一个 # 标题 */
+    /** 验证: 必须至少包含一个 Markdown 标题 (# 或 ## 等) */
     private boolean isValidMindMap(String markdown) {
-        return markdown != null && !markdown.isBlank() && markdown.contains("# ");
+        if (markdown == null || markdown.isBlank()) return false;
+        for (String line : markdown.split("\\n")) {
+            if (line.trim().matches("^#{1,6}\\s.+")) return true;
+        }
+        return false;
     }
 
     /** 从 Markdown 提取第一个 # 标题 */

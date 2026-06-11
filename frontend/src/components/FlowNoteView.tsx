@@ -26,6 +26,7 @@ interface Props {
   docUuid?: string | null;
   embedded?: boolean;
   onContextChange?: (hint: string) => void;
+  onGenerated?: () => void;
 }
 
 const CATEGORIES = [
@@ -56,7 +57,7 @@ const HEADER_BG_MAP: Record<string, string> = {
   REVIEW: "bg-rose-50/50 dark:bg-rose-950/10",
 };
 
-export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Props) {
+export function FlowNoteView({ docId, docStatus, embedded, onContextChange, onGenerated }: Props) {
   const [entries, setEntries] = useState<FlowNoteItem[]>([]);
   const [stats, setStats] = useState<FlowNoteStats | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -110,6 +111,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
       } else {
         toast.success(`已从对话中提取 ${result.length} 条笔记`);
         await load();
+        onGenerated?.();
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "提取失败");
@@ -125,6 +127,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
       setNewTitle(""); setNewContent(""); setNewCategory("KEY_POINT");
       setShowAddForm(false);
       await load();
+      onGenerated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "添加失败");
     }
@@ -189,7 +192,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
                 {extracting ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                 {extracting ? "提取中..." : "从对话提取"}
               </Button>
-              <span className="text-[9px] text-muted-foreground/40 leading-none">需至少 5 轮对话后可提取</span>
+              <span className="text-[11px] text-muted-foreground/40 leading-none">需至少 5 轮对话后可提取</span>
             </div>
           </div>
         </div>
@@ -227,7 +230,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
           </button>
         ))}
         {stats && (
-          <span className="ml-auto text-[10px] text-muted-foreground/50 shrink-0">
+          <span className="ml-auto text-[11px] text-muted-foreground/50 shrink-0">
             复习 {stats.reviewed}/{stats.total} · {Math.round(stats.reviewRate * 100)}%
           </span>
         )}
@@ -312,24 +315,24 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange }: Pr
                     {/* 头部: 分类标签 + 来源 + 日期 */}
                     <div className="flex items-center gap-2.5 mb-3.5">
                       <span className={cn(
-                        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase",
+                        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase",
                         cat?.color,
                       )}>
                         <Icon className="h-3 w-3" />
                         {cat?.label}
                       </span>
                       {entry.sourceType === "CHAT_EXTRACTED" && (
-                        <span className="inline-flex items-center gap-1 text-[9px] text-muted-foreground/50 bg-muted/40 rounded-md px-1.5 py-0.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/50 bg-muted/40 rounded-md px-1.5 py-0.5">
                           <Sparkles className="h-2.5 w-2.5" />
                           AI 提取
                         </span>
                       )}
                       {entry.sourceType === "USER_WRITTEN" && (
-                        <span className="inline-flex items-center gap-1 text-[9px] text-muted-foreground/50 bg-muted/40 rounded-md px-1.5 py-0.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/50 bg-muted/40 rounded-md px-1.5 py-0.5">
                           手动记录
                         </span>
                       )}
-                      <span className="text-[10px] text-muted-foreground/40 ml-auto font-medium tabular-nums">
+                      <span className="text-[11px] text-muted-foreground/40 ml-auto font-medium tabular-nums">
                         {new Date(entry.createdAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}
                       </span>
                     </div>

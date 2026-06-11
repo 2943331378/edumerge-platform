@@ -136,7 +136,7 @@ export default function LoginPage() {
           <div className="flex items-center gap-3 pt-1">
             <div className="flex -space-x-2">
               {["bg-primary", "bg-amber-600", "bg-rose-500", "bg-stone-500"].map((c, i) => (
-                <div key={i} className={cn("h-7 w-7 rounded-full border-2 border-background flex items-center justify-center text-[10px] font-bold text-white", c)}>
+                <div key={i} className={cn("h-7 w-7 rounded-full border-2 border-background flex items-center justify-center text-[11px] font-bold text-white", c)}>
                   {["L", "Y", "M", "K"][i]}
                 </div>
               ))}

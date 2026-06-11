@@ -8,6 +8,7 @@ import com.edumerge.mapper.*;
 import com.edumerge.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -108,6 +109,7 @@ public class StatsService {
      * 统计口径: 所有软删除字段为 0 的有效记录
      */
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "stats", key = "'global'")
     public StatsResponse calculate() {
         // ===== 数据资产指标 =====
         StatsResponse.DataAssetMetrics dataMetrics = new StatsResponse.DataAssetMetrics();
@@ -313,6 +315,7 @@ public class StatsService {
      * 数据来源: flashcard_review_logs (闪卡复习) + quiz_attempts (测验答题)
      */
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "learningStats", key = "T(com.edumerge.security.SecurityUtils).getCurrentUserId()")
     public LearningStatsResponse calculateLearningStats() {
         Long userId = SecurityUtils.getCurrentUserId();
         LocalDateTime todayStart = LocalDateTime.of(LocalDate.now(), LocalTime.MIN);

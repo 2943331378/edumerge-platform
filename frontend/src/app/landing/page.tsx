@@ -49,8 +49,8 @@ function TypeWriter({ texts, className }: { texts: string[]; className?: string 
 function FloatingOrbs() {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      <div className="orb-blue" />
-      <div className="orb-purple" />
+      <div className="orb-warm" />
+      <div className="orb-earth" />
       <div
         className="absolute inset-0 opacity-[0.03] dark:opacity-[0.05]"
         style={{
@@ -63,17 +63,17 @@ function FloatingOrbs() {
   );
 }
 
-/* ─── 流程步骤可视化 ─── */
+/* ─── 流程步骤可视化（赤陶色系辅色） ─── */
 const FLOW_STEPS = [
   { icon: FileText, label: "上传文档", color: "text-primary", bg: "bg-primary/10" },
-  { icon: NotebookText, label: "生成笔记", color: "text-amber-600", bg: "bg-amber-500/10" },
-  { icon: GitFork, label: "思维导图", color: "text-rose-500", bg: "bg-rose-500/10" },
-  { icon: Layers, label: "闪卡记忆", color: "text-orange-500", bg: "bg-orange-500/10" },
-  { icon: HelpCircle, label: "测验巩固", color: "text-stone-500", bg: "bg-stone-500/10" },
-  { icon: BookOpen, label: "学习日志", color: "text-amber-500", bg: "bg-amber-500/10" },
+  { icon: NotebookText, label: "生成笔记", color: "text-amber-700 dark:text-amber-400", bg: "bg-amber-500/10" },
+  { icon: GitFork, label: "思维导图", color: "text-rose-600 dark:text-rose-400", bg: "bg-rose-500/10" },
+  { icon: Layers, label: "闪卡记忆", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10" },
+  { icon: HelpCircle, label: "测验巩固", color: "text-teal-600 dark:text-teal-400", bg: "bg-teal-500/10" },
+  { icon: BookOpen, label: "学习日志", color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10" },
 ];
 
-/* ─── 特性卡片数据 ─── */
+/* ─── 特性卡片数据（赤陶色系辅色） ─── */
 const FEATURES = [
   {
     icon: FileText,
@@ -97,19 +97,19 @@ const FEATURES = [
     icon: Layers,
     title: "闪卡记忆",
     desc: "AI 生成正反面闪卡，基于 SM-2 算法间隔重复",
-    color: "from-orange-500 to-orange-600",
+    color: "from-amber-600 to-amber-700",
   },
   {
     icon: HelpCircle,
     title: "测验巩固",
     desc: "自动出题检验掌握程度，错题收录到全局错题本",
-    color: "from-stone-500 to-stone-600",
+    color: "from-teal-500 to-teal-600",
   },
   {
     icon: Sparkles,
     title: "AI 对话助手",
     desc: "基于文档内容的 RAG 问答，回答可追溯到原文",
-    color: "from-amber-600 to-amber-700",
+    color: "from-violet-500 to-violet-600",
   },
 ];
 

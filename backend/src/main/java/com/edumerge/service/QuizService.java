@@ -79,6 +79,7 @@ public class QuizService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats"}, allEntries = true)
     public void batchCreate(List<Quiz> quizzes) {
         quizMapper.insert(quizzes, 50);
         log.info("批量创建测试题完成: 数量={}", quizzes.size());
@@ -100,6 +101,7 @@ public class QuizService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats"}, allEntries = true)
     public int deleteById(Long id) {
         verifyOwnership(id);
         int rows = quizMapper.deleteById(id);
@@ -137,6 +139,7 @@ public class QuizService {
      * @throws IllegalArgumentException 参数校验失败
      */
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats"}, allEntries = true)
     public List<Quiz> generate(String docIdStr, String docUuid, String sessionIdStr, String sectionContext, Integer startChunk, Integer endChunk) {
         // sessionId 优先: 解析为 docId + docUuid
         if (sessionIdStr != null && !sessionIdStr.isBlank()) {
@@ -171,7 +174,7 @@ public class QuizService {
 
     /** 保存答题记录 */
     @Transactional
-    @CacheEvict(cacheNames = "dashboard", key = "T(com.edumerge.security.SecurityUtils).getCurrentUserId()")
+    @CacheEvict(cacheNames = {"dashboard", "learningStats"}, key = "T(com.edumerge.security.SecurityUtils).getCurrentUserId()")
     public QuizAttempt saveAttempt(QuizAttempt attempt) {
         attempt.setUserId(SecurityUtils.getCurrentUserId());
         quizAttemptMapper.insert(attempt);

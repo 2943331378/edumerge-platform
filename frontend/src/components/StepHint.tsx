@@ -86,7 +86,7 @@ export function StepHint({ step, visible, onDismiss }: Props) {
           <div className="space-y-1.5 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold">{hint.title}</h3>
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                 <Sparkles className="h-2.5 w-2.5" />
                 功能说明
               </span>
@@ -96,7 +96,7 @@ export function StepHint({ step, visible, onDismiss }: Props) {
               {hint.tips.map((tip, i) => (
                 <span
                   key={i}
-                  className="inline-flex items-center gap-1 rounded-md bg-background/60 border border-border/50 px-2 py-0.5 text-[10px] text-muted-foreground"
+                  className="inline-flex items-center gap-1 rounded-md bg-background/60 border border-border/50 px-2 py-0.5 text-[11px] text-muted-foreground"
                 >
                   <span className="h-0.5 w-0.5 rounded-full bg-primary/50" />
                   {tip}

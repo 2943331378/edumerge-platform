@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edumerge.entity.CardDeck;
 import com.edumerge.mapper.CardDeckMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,6 +72,7 @@ public class CardDeckService {
 
     /** 删除卡片组 */
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats"}, allEntries = true)
     public void delete(Long id) {
         cardDeckMapper.deleteById(id);
         log.info("卡片组已删除: id={}", id);

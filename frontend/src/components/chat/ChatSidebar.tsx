@@ -105,7 +105,7 @@ export function ChatSidebar({ documents, onUpload, onDelete, className }: ChatSi
               <span className="flex-1 truncate">{doc.name}</span>
               <Badge
                 variant={doc.status === "done" ? "secondary" : doc.status === "error" ? "destructive" : "outline"}
-                className="h-4 text-[10px] px-1"
+                className="h-4 text-[11px] px-1"
               >
                 {doc.status === "uploading" ? "处理中" : doc.status === "error" ? "失败" : doc.chunks ? `${doc.chunks}块` : "完成"}
               </Badge>
@@ -124,7 +124,7 @@ export function ChatSidebar({ documents, onUpload, onDelete, className }: ChatSi
 
       {/* Footer */}
       <div className="border-t px-3 py-2">
-        <p className="text-[10px] text-muted-foreground text-center">
+        <p className="text-[11px] text-muted-foreground text-center">
           支持 PDF 格式，上限 50MB
         </p>
       </div>

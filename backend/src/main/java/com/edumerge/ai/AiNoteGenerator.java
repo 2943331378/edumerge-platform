@@ -102,12 +102,12 @@ public class AiNoteGenerator extends AiGeneratorBase {
         String subjectRules = buildSubjectRules(getSubjectType(docId));
         log.info("流式笔记上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
 
-        // 构建 prompt (与 callLLM 相同)
+        // 流式调用 LLM (DeepSeek 支持真正的流式回调)
         List<ChatMessage> messages = buildNoteMessages(context, requirements, sectionContext, subjectRules);
 
-        // 流式调用 LLM (带熔断保护)
         StringBuilder fullContent = new StringBuilder();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
         long llmStart = System.currentTimeMillis();
         try {
             AI_CIRCUIT_BREAKER.execute(() -> {
@@ -121,21 +121,35 @@ public class AiNoteGenerator extends AiGeneratorBase {
                     public void onCompleteResponse(ChatResponse response) {
                         log.info("流式笔记 LLM 完成: docId={}, 长度={}, 耗时={}ms",
                                 docId, fullContent.length(), System.currentTimeMillis() - llmStart);
+                        latch.countDown();
                     }
                     @Override
                     public void onError(Throwable error) {
                         errorRef.set(error);
                         log.error("流式笔记 LLM 错误: docId={}, error={}", docId, error.getMessage(), error);
+                        latch.countDown();
                     }
                 });
+                try {
+                    if (!latch.await(5, java.util.concurrent.TimeUnit.MINUTES)) {
+                        log.error("流式笔记 LLM 超时: docId={}", docId);
+                        errorRef.set(new RuntimeException("LLM 调用超时"));
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    errorRef.set(e);
+                }
+                if (errorRef.get() != null) throw new RuntimeException(errorRef.get());
                 return null;
             });
         } catch (Exception e) {
             log.error("流式笔记生成异常: docId={}, error={}", docId, e.getMessage(), e);
-            return StudyNoteResult.empty();
-        }
-        if (errorRef.get() != null) {
-            log.error("流式笔记 LLM 回调报错, 视为失败: docId={}", docId);
+            String partial = cleanMarkdown(fullContent.toString());
+            if (!partial.isBlank()) {
+                String title = extractTitle(partial);
+                String sourceSummary = buildSourceSummary(matches);
+                return StudyNoteResult.success(title, partial, sourceSummary, requirements);
+            }
             return StudyNoteResult.empty();
         }
 

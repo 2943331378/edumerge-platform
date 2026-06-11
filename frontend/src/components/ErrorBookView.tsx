@@ -469,7 +469,7 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
                 )}
               >
                 <CardContent className="p-4">
-                  <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">
+                  <span className="text-[11px] font-medium text-muted-foreground/50 uppercase tracking-wider">
                     {isCorrect ? "解析" : "答错了，看看解析"}
                   </span>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -643,7 +643,7 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
           {submitted && current?.explanation && (
             <Card className="rounded-2xl border-border/40 bg-muted/10">
               <CardContent className="p-4">
-                <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">
+                <span className="text-[11px] font-medium text-muted-foreground/50 uppercase tracking-wider">
                   解析
                 </span>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{current.explanation}</p>

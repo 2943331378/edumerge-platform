@@ -60,7 +60,7 @@ function CodeBlock({ children, language }: { children: React.ReactNode; language
   return (
     <div className="group relative my-2">
       <div className="flex items-center justify-between rounded-t-xl bg-zinc-800 dark:bg-zinc-800 px-4 py-1.5">
-        <span className="text-[10px] text-zinc-400 font-mono">
+        <span className="text-[11px] text-zinc-400 font-mono">
           {language || "code"}
         </span>
         <Button
@@ -254,7 +254,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                   type="button"
                   onClick={handleSaveToNotes}
                   disabled={saving}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[44px] rounded-md text-[10px] text-muted-foreground/50 active:text-foreground active:bg-muted/50 hover:text-foreground hover:bg-muted/50 transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[44px] rounded-md text-[11px] text-muted-foreground/50 active:text-foreground active:bg-muted/50 hover:text-foreground hover:bg-muted/50 transition-colors"
                   title="保存为学习日志"
                 >
                   <BookmarkPlus className="h-3 w-3" />
@@ -267,7 +267,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                       type="button"
                       onClick={() => handleFeedback(1)}
                       disabled={feedback !== null}
-                      className={`inline-flex items-center gap-1 px-2 py-1.5 min-w-[44px] min-h-[44px] rounded-md text-[10px] transition-colors ${
+                      className={`inline-flex items-center gap-1 px-2 py-1.5 min-w-[44px] min-h-[44px] rounded-md text-[11px] transition-colors ${
                         feedback === 1 ? "text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20" : "text-muted-foreground/50 active:text-emerald-500 hover:text-emerald-500 active:bg-emerald-50 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
                       }`}
                       title="有帮助"
@@ -278,7 +278,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                       type="button"
                       onClick={() => handleFeedback(0)}
                       disabled={feedback !== null}
-                      className={`inline-flex items-center gap-1 px-2 py-1.5 min-w-[44px] min-h-[44px] rounded-md text-[10px] transition-colors ${
+                      className={`inline-flex items-center gap-1 px-2 py-1.5 min-w-[44px] min-h-[44px] rounded-md text-[11px] transition-colors ${
                         feedback === 0 ? "text-destructive bg-destructive/10" : "text-muted-foreground/50 active:text-destructive hover:text-destructive active:bg-destructive/10 hover:bg-destructive/10"
                       }`}
                       title="无帮助"
@@ -342,7 +342,7 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
                             来源 {s.index}
                           </span>
                           <span className={cn(
-                            "text-[10px]",
+                            "text-[11px]",
                             s.score >= 0.9 ? "text-emerald-500" : s.score >= 0.75 ? "text-amber-500" : "text-muted-foreground",
                           )}>
                             {scoreLabel(s.score)}

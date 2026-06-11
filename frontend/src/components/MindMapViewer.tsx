@@ -34,16 +34,16 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
 
   const transformer = useRef(new Transformer());
 
-  /** 品牌色梯度: 深度1=蓝, 深度2=紫, 更深=灰。深色主题使用高亮度色值 */
+  /** 品牌色梯度: 深度1=赤陶, 深度2=琥珀, 更深=石板灰。深色主题使用高亮度色值 */
   const colorByDepth = useCallback((node: INode): string => {
     const depth = node.state?.depth ?? 0;
     if (isDark) {
-      if (depth <= 1) return "oklch(0.72 0.22 255)";
-      if (depth === 2) return "oklch(0.7 0.22 285)";
-      return "oklch(0.68 0.04 260)";
+      if (depth <= 1) return "oklch(0.72 0.16 45)";
+      if (depth === 2) return "oklch(0.72 0.14 75)";
+      return "oklch(0.68 0.03 260)";
     }
-    if (depth <= 1) return "oklch(0.48 0.22 255)";
-    if (depth === 2) return "oklch(0.52 0.24 285)";
+    if (depth <= 1) return "oklch(0.55 0.18 40)";
+    if (depth === 2) return "oklch(0.55 0.16 75)";
     return "oklch(0.55 0.03 260)";
   }, [isDark]);
 
@@ -158,7 +158,7 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
     style.id = styleId;
     style.textContent = `
       .markmap-link {
-        stroke: oklch(0.48 0.22 255 / 0.5);
+        stroke: oklch(0.55 0.18 40 / 0.4);
         transition: stroke 0.3s;
       }
       .markmap-node circle {
@@ -168,10 +168,10 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
         filter: brightness(1.2);
       }
       .dark .markmap-foreign div {
-        color: #f1f5f9 !important;
+        color: oklch(0.94 0.01 65) !important;
       }
       .dark .markmap-link {
-        stroke: oklch(0.65 0.18 255 / 0.55) !important;
+        stroke: oklch(0.72 0.16 45 / 0.5) !important;
       }
     `;
     document.head.appendChild(style);

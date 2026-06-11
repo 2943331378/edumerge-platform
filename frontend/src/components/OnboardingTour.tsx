@@ -191,7 +191,7 @@ export function OnboardingTour({ open, onClose }: Props) {
               <ChevronLeft className="h-3.5 w-3.5" />
               上一步
             </button>
-            <span className="text-[10px] text-muted-foreground/40">
+            <span className="text-[11px] text-muted-foreground/40">
               {step + 1} / {TOUR_STEPS.length}
             </span>
             <button

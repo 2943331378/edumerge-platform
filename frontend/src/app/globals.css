@@ -81,6 +81,15 @@
   --chart-3: oklch(0.60 0.12 55);
   --chart-4: oklch(0.45 0.10 45);
   --chart-5: oklch(0.65 0.08 65);
+
+  /* 语义化辅色 — 赤陶色阶衍生，统一全应用图表/知识图谱/思维导图用色 */
+  --accent-warm:     oklch(0.55 0.18 40);      /* 赤陶（= primary） */
+  --accent-amber:    oklch(0.55 0.16 75);      /* 琥珀 */
+  --accent-rose:     oklch(0.55 0.18 15);      /* 玫瑰 */
+  --accent-teal:     oklch(0.50 0.14 175);     /* 青绿 */
+  --accent-slate:    oklch(0.55 0.03 260);     /* 石板灰（末级） */
+  --accent-purple:   oklch(0.52 0.18 300);     /* 紫罗兰 */
+
   --radius: 0.625rem;
   --sidebar: oklch(0.97 0.01 70);
   --sidebar-foreground: oklch(0.22 0.03 50);
@@ -135,8 +144,8 @@
   image-rendering: crisp-edges;
 }
 
-/* ─── 背景光晕圆球 ─── */
-.orb-blue {
+/* ─── 背景光晕圆球（赤陶色系） ─── */
+.orb-warm {
   position: fixed;
   top: -20%;
   left: -10%;
@@ -149,7 +158,7 @@
   z-index: 0;
 }
 
-.orb-purple {
+.orb-earth {
   position: fixed;
   bottom: -20%;
   right: -10%;
@@ -213,22 +222,22 @@
   @apply not-sr-only fixed top-2 left-2 z-[9999] px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium;
 }
 
-/* ─── rehype-highlight: 防止 Tailwind prose 覆盖语法高亮色 ─── */
+/* ─── rehype-highlight: oklch 语义化语法高亮（赤陶色系） ─── */
 .prose pre code.hljs,
 .prose pre code .hljs {
   color: unset;
   background: transparent;
 }
-.prose pre code .hljs-keyword { color: #ff7b72; }
-.prose pre code .hljs-string { color: #a5d6ff; }
-.prose pre code .hljs-comment { color: #8b949e; font-style: italic; }
-.prose pre code .hljs-function { color: #d2a8ff; }
-.prose pre code .hljs-number { color: #79c0ff; }
-.prose pre code .hljs-title { color: #d2a8ff; }
-.prose pre code .hljs-built_in { color: #ffa657; }
-.prose pre code .hljs-literal { color: #79c0ff; }
-.prose pre code .hljs-attr { color: #79c0ff; }
-.prose pre code .hljs-selector-class { color: #7ee787; }
-.prose pre code .hljs-tag { color: #7ee787; }
-.prose pre code .hljs-name { color: #7ee787; }
-.prose pre code .hljs-attribute { color: #d2a8ff; }
+.prose pre code .hljs-keyword { color: oklch(0.65 0.20 15); }       /* rose */
+.prose pre code .hljs-string { color: oklch(0.70 0.14 175); }       /* teal */
+.prose pre code .hljs-comment { color: oklch(0.55 0.03 260); font-style: italic; } /* slate */
+.prose pre code .hljs-function { color: oklch(0.62 0.18 300); }     /* purple */
+.prose pre code .hljs-number { color: oklch(0.65 0.16 75); }        /* amber */
+.prose pre code .hljs-title { color: oklch(0.62 0.18 300); }        /* purple */
+.prose pre code .hljs-built_in { color: oklch(0.65 0.16 75); }      /* amber */
+.prose pre code .hljs-literal { color: oklch(0.65 0.16 75); }       /* amber */
+.prose pre code .hljs-attr { color: oklch(0.65 0.18 40); }          /* terracotta */
+.prose pre code .hljs-selector-class { color: oklch(0.60 0.14 175); } /* teal */
+.prose pre code .hljs-tag { color: oklch(0.60 0.14 175); }          /* teal */
+.prose pre code .hljs-name { color: oklch(0.60 0.14 175); }         /* teal */
+.prose pre code .hljs-attribute { color: oklch(0.62 0.18 300); }    /* purple */

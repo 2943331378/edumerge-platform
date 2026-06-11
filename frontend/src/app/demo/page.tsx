@@ -609,15 +609,15 @@ function DemoFlowNote() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium", cat.bg, cat.color)}>
+                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", cat.bg, cat.color)}>
                       <cat.icon className="h-2.5 w-2.5" />
                       {cat.label}
                     </span>
                     {note.reviewed && (
-                      <span className="text-[10px] text-primary">已复习</span>
+                      <span className="text-[11px] text-primary">已复习</span>
                     )}
                   </div>
-                  <span className="text-[10px] text-muted-foreground/50">{note.createdAt}</span>
+                  <span className="text-[11px] text-muted-foreground/50">{note.createdAt}</span>
                 </div>
                 <p className="text-sm leading-relaxed text-foreground/90">{note.content}</p>
               </div>
@@ -701,7 +701,7 @@ export default function DemoPage() {
                   )} />
                 </div>
                 <span className={cn(
-                  "text-[10px] md:text-[11px] font-medium transition-colors whitespace-nowrap",
+                  "text-[11px] font-medium transition-colors whitespace-nowrap",
                   isActive ? step.color : "text-muted-foreground/40",
                 )}>
                   {step.label}
@@ -739,7 +739,7 @@ export default function DemoPage() {
           <ChevronLeft className="h-3.5 w-3.5" />
           上一步
         </button>
-        <span className="text-[10px] text-muted-foreground/50">{currentStep} / {STEPS.length}</span>
+        <span className="text-[11px] text-muted-foreground/50">{currentStep} / {STEPS.length}</span>
         <button
           type="button"
           onClick={() => setCurrentStep((v) => Math.min(STEPS.length, v + 1))}

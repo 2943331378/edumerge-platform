@@ -66,54 +66,139 @@ const OUTLINE_STEP_MAP: Record<string, number> = {
 
 /** 处理阶段定义 */
 const PROCESSING_STAGES = [
-  { key: "UPLOADING", label: "上传文件", icon: Upload },
-  { key: "PROCESSING", label: "解析文档 & 向量化", icon: Loader2 },
-  { key: "COMPLETED", label: "处理完成", icon: CheckCircle2 },
+  { key: "UPLOADING", label: "上传", desc: "接收文件" },
+  { key: "PROCESSING", label: "解析", desc: "提取文本 & 向量化" },
+  { key: "COMPLETED", label: "就绪", desc: "可以开始学习" },
 ] as const;
 
-/** 文档处理进度卡片 — 展示当前处理阶段 */
+/** 等待时的轻松文案 */
+const PROCESSING_TIPS = [
+  "AI 正在逐页阅读你的文档",
+  "正在把文档拆解成知识碎片",
+  "向量化进行中，让机器也能「理解」文字",
+  "处理完成后可以生成笔记、闪卡、测验",
+  "每个文本片段都会被转化为 1024 维向量",
+  "文档越复杂，拆解越精细",
+];
+
+/** 文档处理进度卡片 */
 function ProcessingStatusCard({ fileName, status, chunkCount }: {
   fileName: string;
   status: string;
   chunkCount: number | null;
 }) {
   const activeIdx = status === "UPLOADING" ? 0 : status === "COMPLETED" ? 2 : 1;
+  const [tipIdx, setTipIdx] = useState(() => Math.floor(Math.random() * PROCESSING_TIPS.length));
+  useEffect(() => {
+    if (status === "COMPLETED") return;
+    const t = setInterval(() => setTipIdx((v) => (v + 1) % PROCESSING_TIPS.length), 3500);
+    return () => clearInterval(t);
+  }, [status]);
+
   return (
-    <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-6 shadow-sm space-y-5">
-      <div className="text-center space-y-1">
-        <h3 className="text-sm font-semibold text-foreground truncate">{fileName}</h3>
-        <p className="text-xs text-muted-foreground">正在后台处理，请稍候...</p>
-      </div>
-      <div className="flex items-center justify-between">
-        {PROCESSING_STAGES.map((stage, i) => {
-          const Icon = stage.icon;
-          const isActive = i === activeIdx;
-          const isDone = i < activeIdx;
-          return (
-            <div key={stage.key} className="flex flex-col items-center gap-1.5 flex-1">
-              <div className={cn(
-                "relative flex h-9 w-9 items-center justify-center rounded-full transition-all",
-                isDone ? "bg-primary/15 text-primary" : isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground/40",
-              )}>
-                <Icon className={cn("h-4 w-4", isActive && "animate-spin")} />
-                {isActive && <span className="absolute inset-0 rounded-full animate-ping bg-primary/30" />}
-              </div>
-              <span className={cn("text-[10px] font-medium", isActive ? "text-primary" : isDone ? "text-foreground/70" : "text-muted-foreground/40")}>
-                {stage.label}
-              </span>
+    <div className="w-full max-w-sm">
+      {/* 主卡片 */}
+      <div className="relative overflow-hidden rounded-2xl border border-amber-200/40 dark:border-amber-500/10 bg-gradient-to-b from-amber-50/80 to-orange-50/40 dark:from-amber-950/20 dark:to-orange-950/10 p-6">
+        {/* 背景装饰 */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-amber-200/20 dark:from-amber-500/5 to-transparent rounded-bl-full" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-orange-200/15 dark:from-orange-500/5 to-transparent rounded-tr-full" />
+
+        {/* 文件名 */}
+        <div className="relative text-center mb-6">
+          <p className="text-[11px] text-amber-600/60 dark:text-amber-400/40 uppercase tracking-wider font-medium mb-1">处理中</p>
+          <h3 className="text-sm font-semibold text-foreground truncate px-4" style={{ fontFamily: "var(--font-serif)" }}>
+            {fileName}
+          </h3>
+        </div>
+
+        {/* 中央动画区域 */}
+        <div className="relative flex items-center justify-center h-28 mb-6">
+          {/* 轨道环 */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-24 h-24 rounded-full border border-dashed border-amber-300/30 dark:border-amber-500/15 animate-[spin_12s_linear_infinite]" />
+          </div>
+          <div className="absolute inset-2 flex items-center justify-center">
+            <div className="w-16 h-16 rounded-full border border-dashed border-orange-300/20 dark:border-orange-500/10 animate-[spin_8s_linear_infinite_reverse]" />
+          </div>
+          {/* 轨道上的粒子 */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-24 h-24 animate-[spin_12s_linear_infinite]">
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-amber-400 dark:bg-amber-500 shadow-sm shadow-amber-400/50" />
             </div>
-          );
-        })}
+          </div>
+          <div className="absolute inset-2 flex items-center justify-center">
+            <div className="w-16 h-16 animate-[spin_8s_linear_infinite_reverse]">
+              <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-orange-400 dark:bg-orange-500 shadow-sm shadow-orange-400/50" />
+            </div>
+          </div>
+          {/* 中心图标 */}
+          <div className="relative z-10">
+            <div className="h-14 w-14 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900/40 dark:to-orange-900/30 flex items-center justify-center shadow-sm">
+              {status === "COMPLETED" ? (
+                <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+              ) : (
+                <FileText className="h-6 w-6 text-amber-700 dark:text-amber-400 animate-pulse" />
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 垂直步骤 */}
+        <div className="relative space-y-0">
+          {PROCESSING_STAGES.map((stage, i) => {
+            const isActive = i === activeIdx;
+            const isDone = i < activeIdx;
+            const isLast = i === PROCESSING_STAGES.length - 1;
+            return (
+              <div key={stage.key} className="flex items-start gap-3">
+                {/* 竖线 + 圆点 */}
+                <div className="flex flex-col items-center">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full transition-all duration-500 shrink-0",
+                    isDone ? "bg-emerald-500 dark:bg-emerald-400" : isActive ? "bg-amber-500 dark:bg-amber-400 shadow-sm shadow-amber-400/50" : "bg-muted-foreground/15",
+                  )} />
+                  {!isLast && (
+                    <div className={cn(
+                      "w-px h-6 transition-colors duration-500",
+                      isDone ? "bg-emerald-300 dark:bg-emerald-700" : "bg-muted-foreground/10",
+                    )} />
+                  )}
+                </div>
+                {/* 文字 */}
+                <div className="pb-4 -mt-0.5">
+                  <p className={cn(
+                    "text-xs font-medium transition-colors duration-300",
+                    isActive ? "text-amber-700 dark:text-amber-300" : isDone ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground/40",
+                  )}>
+                    {stage.label}
+                    <span className={cn(
+                      "ml-1.5 font-normal",
+                      isActive ? "text-amber-600/60 dark:text-amber-400/50" : isDone ? "text-emerald-600/50 dark:text-emerald-400/40" : "text-muted-foreground/25",
+                    )}>
+                      {stage.desc}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* chunk 计数 */}
+        {chunkCount != null && chunkCount > 0 && (
+          <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-amber-100/40 dark:bg-amber-900/10 border border-amber-200/30 dark:border-amber-500/10">
+            <Layers className="h-3 w-3 text-amber-600/50 dark:text-amber-400/40" />
+            <p className="text-[11px] text-amber-700/70 dark:text-amber-300/50">
+              已切分 <span className="font-semibold text-amber-800 dark:text-amber-200">{chunkCount}</span> 个文本片段
+            </p>
+          </div>
+        )}
       </div>
-      {/* 连接线 */}
-      <div className="relative mx-4 -mt-8 mb-2 h-0.5">
-        <div className="absolute inset-0 bg-muted rounded-full" />
-        <div className="absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-700"
-          style={{ width: `${(activeIdx / (PROCESSING_STAGES.length - 1)) * 100}%` }} />
-      </div>
-      {chunkCount != null && chunkCount > 0 && (
-        <p className="text-center text-[11px] text-muted-foreground">
-          已切分 <span className="font-medium text-foreground">{chunkCount}</span> 个文本片段
+
+      {/* 轮播文案 */}
+      {status !== "COMPLETED" && (
+        <p className="text-center text-[11px] text-muted-foreground/40 mt-4 animate-in fade-in duration-500" key={tipIdx}>
+          {PROCESSING_TIPS[tipIdx]}
         </p>
       )}
     </div>
@@ -352,11 +437,12 @@ export default function HomePage() {
   const outlineCounterRef = useRef(0);
   const handleOutlineGenerate = useCallback((type: "note" | "mindmap" | "flashcard" | "quiz", sectionContext: string, startChunk?: number, endChunk?: number) => {
     outlineCounterRef.current++;
+    const trigger = { type, counter: outlineCounterRef.current };
     updateSessionCache({
       sectionContext,
       startChunk,
       endChunk,
-      outlineGenerateTrigger: { type, counter: outlineCounterRef.current },
+      outlineGenerateTrigger: trigger,
     });
     const targetStep = OUTLINE_STEP_MAP[type];
     if (targetStep) setCurrentStep(targetStep);
@@ -436,6 +522,35 @@ export default function HomePage() {
     if (step2Ready) next.add(2);
     updateSessionCache({ completedSteps: next });
   }, [step1Ready, step2Ready]); // eslint-disable-line
+
+  // 页面刷新后，根据已有内容自动恢复 completedSteps（2-6 步）
+  const restoreKey = activeSession?.docId ?? null;
+  useEffect(() => {
+    if (!restoreKey || activeSession?.docStatus !== "COMPLETED") return;
+    let cancelled = false;
+    (async () => {
+      const api = await import("@/lib/api");
+      const [studyNote, maps, cards, quizzes, flowNotes] = await Promise.all([
+        api.getStudyNote(restoreKey).catch(() => null),
+        api.listMindMaps(restoreKey).catch(() => []),
+        api.listFlashcards(restoreKey).catch(() => []),
+        api.listQuizzes(restoreKey).catch(() => []),
+        api.listFlowNotes(restoreKey).catch(() => []),
+      ]);
+      if (cancelled) return;
+      updateSessionCache((prev) => {
+        const next = new Set(prev.completedSteps ?? EMPTY_STEPS);
+        next.add(1);
+        if (studyNote) next.add(2);
+        if (maps.length > 0) next.add(3);
+        if (cards.length > 0) next.add(4);
+        if (quizzes.length > 0) next.add(5);
+        if (flowNotes.length > 0) next.add(6);
+        return { completedSteps: next, note: studyNote ?? prev.note };
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [restoreKey, activeSession?.docStatus]); // eslint-disable-line
 
   // 全局键盘快捷键: 1-6 跳转步骤, Ctrl+/ 对话, Ctrl+Shift+D 暗黑模式, ? 快捷键帮助
   // step 4(卡片) 时禁用数字键 1-4（卡片自评用），5-6 仍可跳转
@@ -602,7 +717,7 @@ export default function HomePage() {
                     <FileText className="h-3.5 w-3.5 shrink-0" />
                     <span className="flex-1 truncate">{s.fileName ?? s.title}</span>
                     {s.docStatus && s.docStatus !== "COMPLETED" && s.docStatus !== "FAILED" && (
-                      <span className="text-[9px] text-muted-foreground/60 shrink-0">
+                      <span className="text-[11px] text-muted-foreground/60 shrink-0">
                         {s.docStatus === "UPLOADING" ? "上传中" : s.chunkCount ? `${s.chunkCount}片` : "处理中"}
                       </span>
                     )}
@@ -653,6 +768,7 @@ export default function HomePage() {
               import("@/lib/api").then(({ getStudyNote }) => {
                 if (docId) getStudyNote(docId).then((n) => updateSessionCache({ note: n }));
               });
+              updateSessionCache((prev) => ({ completedSteps: new Set([...(prev.completedSteps ?? EMPTY_STEPS), 2]) }));
             }}
           />
         );
@@ -670,6 +786,7 @@ export default function HomePage() {
             generateTrigger={activeCache?.outlineGenerateTrigger}
             generating={activeCache?.mindMapGenerating}
             onGeneratingChange={(v) => updateSessionCache({ mindMapGenerating: v })}
+            onGenerated={() => updateSessionCache((prev) => ({ completedSteps: new Set([...(prev.completedSteps ?? EMPTY_STEPS), 3]) }))}
           />
         );
 
@@ -718,6 +835,7 @@ export default function HomePage() {
             docUuid={docUuid}
             embedded
             onContextChange={setChatContext}
+            onGenerated={() => updateSessionCache((prev) => ({ completedSteps: new Set([...(prev.completedSteps ?? EMPTY_STEPS), 6]) }))}
           />
         );
 
@@ -773,7 +891,7 @@ export default function HomePage() {
             </div>
             <div>
               {activeSession && (
-                <p className="text-[10px] text-muted-foreground truncate max-w-[120px] md:max-w-[200px]">
+                <p className="text-[11px] text-muted-foreground truncate max-w-[120px] md:max-w-[200px]">
                   {activeSession.fileName ?? activeSession.title}
                 </p>
               )}
@@ -899,7 +1017,7 @@ export default function HomePage() {
               <span className="hidden sm:inline">上一步</span>
             </Button>
 
-            <span className="text-[10px] md:text-[11px] text-muted-foreground/50">
+            <span className="text-[11px] text-muted-foreground/50">
               {currentStep} / {STEPS.length}
             </span>
 
@@ -1050,7 +1168,7 @@ export default function HomePage() {
                       <Folder className="h-3.5 w-3.5 shrink-0" style={{ color: f.color }} />
                       <span className="truncate">{f.name}</span>
                       {isSuggested && (
-                        <span className="text-[10px] bg-primary/20 text-primary rounded px-1 py-0.5 font-medium">
+                        <span className="text-[11px] bg-primary/20 text-primary rounded px-1 py-0.5 font-medium">
                           推荐
                         </span>
                       )}

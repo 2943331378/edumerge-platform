@@ -76,6 +76,16 @@ const FOLDER_COLORS = [
 /** 长按触发阈值 (ms) */
 const LONG_PRESS_MS = 500;
 
+/** 文件类型对应的颜色 (collapsed icon bar 用) */
+const FILE_TYPE_COLORS: Record<string, string> = {
+  pdf: "#f87171",
+  xlsx: "#34d399",
+  csv: "#34d399",
+  pptx: "#fb923c",
+  ppt: "#fb923c",
+  md: "#38bdf8",
+};
+
 export function AppSidebar({
   documents,
   folders,
@@ -117,10 +127,109 @@ export function AppSidebar({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
 
+  // Swipe-to-close tracking (mobile)
+  const touchStartX = useRef<number | null>(null);
+
   // Drag and drop state
   const [dragDocId, setDragDocId] = useState<string | null>(null);
   const dragDocIdRef = useRef<string | null>(null);
   const [dropFolderId, setDropFolderId] = useState<number | null | undefined>(undefined);
+
+  // Pointer-based drag-and-drop (more reliable than HTML5 drag)
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const dragGhostRef = useRef<HTMLDivElement | null>(null);
+  const dragActive = useRef(false);
+  const dragRafId = useRef<number>(0);
+  const FOLDER_HEADER_ATTR = "data-folder-id";
+
+  const cleanupDrag = useCallback(() => {
+    dragActive.current = false;
+    dragStartPos.current = null;
+    dragDocIdRef.current = null;
+    cancelAnimationFrame(dragRafId.current);
+    setDragDocId(null);
+    setDropFolderId(undefined);
+    if (dragGhostRef.current) {
+      dragGhostRef.current.remove();
+      dragGhostRef.current = null;
+    }
+    document.removeEventListener("pointermove", handlePointerMove);
+    document.removeEventListener("pointerup", handlePointerUp);
+  }, []);
+
+  const handlePointerMove = useCallback((e: PointerEvent) => {
+    if (!dragStartPos.current) return;
+    const dx = e.clientX - dragStartPos.current.x;
+    const dy = e.clientY - dragStartPos.current.y;
+
+    // Start drag after 5px threshold
+    if (!dragActive.current) {
+      if (Math.abs(dx) + Math.abs(dy) < 5) return;
+      dragActive.current = true;
+      setDragDocId(dragDocIdRef.current);
+
+      // Create ghost
+      const ghost = document.createElement("div");
+      ghost.className = "fixed z-[9999] pointer-events-none rounded-lg bg-primary/10 border border-primary/30 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur-sm";
+      ghost.textContent = documents.find((d) => d.id === dragDocIdRef.current)?.name ?? "";
+      ghost.style.left = `${e.clientX + 12}px`;
+      ghost.style.top = `${e.clientY - 12}px`;
+      document.body.appendChild(ghost);
+      dragGhostRef.current = ghost;
+    }
+
+    // Throttle visual updates via rAF
+    cancelAnimationFrame(dragRafId.current);
+    dragRafId.current = requestAnimationFrame(() => {
+      if (dragGhostRef.current) {
+        dragGhostRef.current.style.left = `${e.clientX + 12}px`;
+        dragGhostRef.current.style.top = `${e.clientY - 12}px`;
+      }
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const folderHeader = el?.closest(`[${FOLDER_HEADER_ATTR}]`);
+      const targetFolderId = folderHeader?.getAttribute(FOLDER_HEADER_ATTR);
+      if (targetFolderId !== undefined && targetFolderId !== null) {
+        setDropFolderId(targetFolderId === "root" ? null : Number(targetFolderId));
+      } else {
+        setDropFolderId(undefined);
+      }
+    });
+  }, [documents]);
+
+  const handlePointerUp = useCallback(async (e: PointerEvent) => {
+    if (!dragActive.current) { cleanupDrag(); return; }
+
+    const currentDragId = dragDocIdRef.current;
+    cleanupDrag();
+    if (!currentDragId || !onMoveDocument) return;
+
+    // Find drop target
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const folderHeader = el?.closest(`[${FOLDER_HEADER_ATTR}]`);
+    const targetFolderId = folderHeader?.getAttribute(FOLDER_HEADER_ATTR);
+    if (targetFolderId === undefined || targetFolderId === null) return;
+
+    const folderId = targetFolderId === "root" ? null : Number(targetFolderId);
+    const doc = documents.find((d) => d.id === currentDragId);
+    if (!doc || doc.folderId === folderId) return;
+
+    try {
+      await onMoveDocument(doc.sessionId, folderId);
+      toast.success(folderId ? "已移入文件夹" : "已移出文件夹");
+    } catch {
+      toast.error("移动失败");
+    }
+  }, [documents, onMoveDocument, cleanupDrag]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent, doc: UploadedDoc) => {
+    if (!onMoveDocument) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragDocIdRef.current = doc.id;
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
+  }, [onMoveDocument, handlePointerMove, handlePointerUp]);
 
   // Toggle folder expand/collapse
   const toggleFolder = useCallback((folderId: number) => {
@@ -208,43 +317,6 @@ export function AppSidebar({
     }
   }, []);
 
-  // Drag-and-drop handlers (desktop)
-  const handleDragStart = useCallback((e: React.DragEvent, doc: UploadedDoc) => {
-    dragDocIdRef.current = doc.id;
-    setDragDocId(doc.id);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", doc.id);
-  }, []);
-
-  const handleDragEnd = useCallback(() => {
-    dragDocIdRef.current = null;
-    setDragDocId(null);
-    setDropFolderId(undefined);
-  }, []);
-
-  const handleFolderDragOver = useCallback((e: React.DragEvent, folderId: number | null) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDropFolderId(folderId);
-  }, []);
-
-  const handleFolderDrop = useCallback(async (e: React.DragEvent, folderId: number | null) => {
-    e.preventDefault();
-    setDropFolderId(undefined);
-    const currentDragId = dragDocIdRef.current;
-    dragDocIdRef.current = null;
-    setDragDocId(null);
-    if (!onMoveDocument || !currentDragId) return;
-    const doc = documents.find((d) => d.id === currentDragId);
-    if (!doc || doc.folderId === folderId) return;
-    try {
-      await onMoveDocument(doc.sessionId, folderId);
-      toast.success(folderId ? "已移入文件夹" : "已移出文件夹");
-    } catch {
-      toast.error("移动失败");
-    }
-  }, [onMoveDocument, documents]);
-
   // Create folder
   const handleCreateFolder = async () => {
     if (!newFolderName.trim() || !onCreateFolder) return;
@@ -307,9 +379,6 @@ export function AppSidebar({
     return (
       <div
         key={doc.id}
-        draggable={!!onMoveDocument}
-        onDragStart={(e) => handleDragStart(e, doc)}
-        onDragEnd={handleDragEnd}
         onClick={() => {
           if (longPressTriggered.current) return;
           if (doc.sessionId > 0) onSelectSession(doc.sessionId);
@@ -318,7 +387,7 @@ export function AppSidebar({
         onTouchEnd={cancelLongPress}
         onTouchMove={cancelLongPress}
         className={cn(
-          "group flex items-center gap-2 rounded-lg px-3 py-1.5 max-md:py-2.5 text-xs transition-all duration-200 select-none",
+          "group flex items-center gap-2 rounded-lg px-3 py-1 max-md:py-2 text-xs select-none",
           doc.sessionId > 0 && "cursor-pointer",
           isActive
             ? "bg-white/40 dark:bg-white/10 ring-1 ring-primary/30 text-foreground font-medium"
@@ -327,22 +396,25 @@ export function AppSidebar({
         )}
       >
         {onMoveDocument && (
-          <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/30 cursor-grab active:cursor-grabbing hidden max-md:block group-hover:block" />
+          <GripVertical
+            className="h-3 w-3 shrink-0 text-muted-foreground/30 cursor-grab active:cursor-grabbing"
+            onPointerDown={(e) => handlePointerDown(e, doc)}
+          />
         )}
         <FileText
           className={cn(
             "h-3 w-3 shrink-0",
             isActive
-              ? "text-primary/70"
+              ? "text-primary"
               : doc.fileType === "pdf"
-                ? "text-red-400/70"
+                ? "text-red-400"
                 : doc.fileType === "xlsx" || doc.fileType === "csv"
-                  ? "text-emerald-400/70"
+                  ? "text-emerald-400"
                   : doc.fileType === "pptx" || doc.fileType === "ppt"
-                    ? "text-orange-400/70"
+                    ? "text-orange-400"
                     : doc.fileType === "md"
-                      ? "text-sky-400/70"
-                      : "text-muted-foreground/50",
+                      ? "text-sky-400"
+                      : "text-muted-foreground/60",
           )}
         />
         <div className="flex-1 min-w-0">
@@ -363,7 +435,7 @@ export function AppSidebar({
             <>
               <span className="block truncate">{doc.name}</span>
               {doc.status === "done" && doc.pageCount != null && doc.pageCount > 0 && (
-                <span className="text-[10px] text-muted-foreground/40">
+                <span className="text-[11px] text-muted-foreground/40">
                   {doc.pageCount}
                   {doc.fileType === "pptx" || doc.fileType === "ppt" ? " 张幻灯片" : doc.fileType === "xlsx" ? " 个工作表" : doc.fileType === "csv" ? " 条记录" : " 页"}
                 </span>
@@ -378,7 +450,7 @@ export function AppSidebar({
               e.stopPropagation();
               onRetryDocument(doc.sessionId);
             }}
-            className="min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="shrink-0 h-5 w-5 flex items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重新处理"
           >
             <RotateCw className="h-3 w-3" />
@@ -391,7 +463,7 @@ export function AppSidebar({
               e.stopPropagation();
               startRename(doc);
             }}
-            className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重命名"
           >
             <Pencil className="h-3 w-3" />
@@ -405,7 +477,7 @@ export function AppSidebar({
               onDeleteDocument(doc.sessionId);
             }
           }}
-          className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+          className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
           title="删除文档"
         >
           <X className="h-3 w-3" />
@@ -436,12 +508,10 @@ export function AppSidebar({
       <div key={folder.id} className="mb-0.5">
         {/* Folder header */}
         <div
+          {...{ [FOLDER_HEADER_ATTR]: String(folder.id) }}
           onClick={() => toggleFolder(folder.id)}
-          onDragOver={(e) => handleFolderDragOver(e, folder.id)}
-          onDragLeave={() => setDropFolderId(undefined)}
-          onDrop={(e) => handleFolderDrop(e, folder.id)}
           className={cn(
-            "group flex items-center gap-2 rounded-lg px-3 py-1.5 max-md:py-2.5 text-xs cursor-pointer transition-all duration-200 select-none",
+            "group flex items-center gap-2 rounded-lg px-3 py-1 max-md:py-2 text-xs cursor-pointer transition-all duration-200 select-none",
             isDropping
               ? "bg-primary/15 ring-1 ring-primary/40 text-foreground"
               : "text-muted-foreground hover:bg-white/10 dark:hover:bg-white/5 active:bg-white/10 dark:active:bg-white/5",
@@ -474,7 +544,7 @@ export function AppSidebar({
           ) : (
             <span className="flex-1 min-w-0 truncate font-medium">{folder.name}</span>
           )}
-          <span className="text-[10px] text-muted-foreground/40 tabular-nums">
+          <span className="text-[11px] text-muted-foreground/40 tabular-nums">
             {docs.length}
           </span>
 
@@ -486,7 +556,7 @@ export function AppSidebar({
                 e.stopPropagation();
                 setEditFolderColorId(editFolderColorId === folder.id ? null : folder.id);
               }}
-              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full shrink-0 hover:ring-primary/50 active:ring-primary/50 transition-all cursor-pointer"
+              className="shrink-0 h-5 w-5 flex items-center justify-center rounded-full hover:ring-primary/50 active:ring-primary/50 transition-all cursor-pointer"
               title="更换颜色"
             >
               <span
@@ -506,7 +576,7 @@ export function AppSidebar({
                 setEditFolderValue(folder.name);
                 setTimeout(() => editFolderInputRef.current?.select(), 0);
               }}
-              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+              className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
               title="重命名"
             >
               <Pencil className="h-2.5 w-2.5" />
@@ -521,7 +591,7 @@ export function AppSidebar({
                 e.stopPropagation();
                 handleDeleteFolder(folder.id);
               }}
-              className="opacity-0 max-md:opacity-100 group-hover:opacity-100 min-w-[44px] min-h-[44px] p-2 max-md:p-2.5 rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+              className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
               title="删除文件夹"
             >
               <X className="h-2.5 w-2.5" />
@@ -573,6 +643,21 @@ export function AppSidebar({
         />
       )}
 
+      {/* Shared file input (used by both collapsed & expanded upload) */}
+      <input
+        ref={fileRef}
+        type="file"
+        aria-label="上传学习资料"
+        multiple
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,.jpg,.jpeg,.png,.bmp,.tiff,image/*,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+          const files = e.target.files;
+          if (files && files.length > 0) handleFile(files.length === 1 ? files[0] : files);
+          if (fileRef.current) fileRef.current.value = "";
+        }}
+        className="hidden"
+      />
+
       <aside
         className={cn(
           "relative flex h-full flex-col shrink-0 overflow-hidden border-r border-border",
@@ -585,16 +670,28 @@ export function AppSidebar({
           "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:flex max-md:w-[260px]",
           collapsed ? "max-md:-translate-x-full" : "max-md:translate-x-0",
         )}
+        onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+        onTouchEnd={(e) => {
+          if (touchStartX.current != null) {
+            const dx = e.changedTouches[0].clientX - touchStartX.current;
+            if (dx < -60) onToggleCollapse();
+            touchStartX.current = null;
+          }
+        }}
       >
       {/* 折叠按钮 */}
       <button
         type="button"
         onClick={onToggleCollapse}
         className={cn(
-          "absolute -right-3.5 bottom-20 z-50 flex h-9 w-9 items-center justify-center rounded-full",
+          "absolute z-50 flex h-9 w-9 items-center justify-center rounded-full",
           "bg-white dark:bg-slate-800 border border-border shadow-lg",
           "hover:shadow-xl hover:scale-110",
           "transition-all duration-300",
+          // Desktop: right edge, centered vertically
+          "-right-3.5 bottom-20 max-md:bottom-auto",
+          // Mobile: top-right corner
+          "max-md:right-2 max-md:top-2",
         )}
         title={collapsed ? "展开侧边栏" : "收起侧边栏"}
       >
@@ -634,7 +731,52 @@ export function AppSidebar({
         )}
       </div>
 
-      {/* Content area: upload + search + doc list — flex-1 min-h-0 enables proper scrolling */}
+      {/* ── Collapsed: icon quick-access bar ── */}
+      {collapsed && (
+        <div className="flex-1 min-h-0 flex flex-col items-center gap-1 pt-2 overflow-y-auto overflow-x-hidden">
+          {/* Upload icon button */}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/10 hover:text-foreground transition-all"
+            title="上传资料"
+          >
+            <Upload className="h-4 w-4" />
+          </button>
+          <div className="w-6 border-t border-white/10 my-1" />
+
+          {/* Document icon list */}
+          {documents.map((doc) => {
+            const isActive = doc.sessionId > 0 && activeSessionId === doc.sessionId;
+            return (
+              <button
+                key={doc.id}
+                type="button"
+                onClick={() => { if (doc.sessionId > 0) onSelectSession(doc.sessionId); }}
+                title={doc.name}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-lg transition-all",
+                  isActive
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground/60 hover:bg-white/10 hover:text-foreground",
+                )}
+              >
+                <FileText
+                  className="h-4 w-4"
+                  style={{ color: FILE_TYPE_COLORS[doc.fileType ?? ""] }}
+                />
+              </button>
+            );
+          })}
+          {documents.length === 0 && (
+            <span className="text-[11px] text-muted-foreground/30 px-1 text-center leading-tight">
+              暂无
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Expanded: upload + search + doc list ── */}
       {!collapsed && (
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="px-3 pt-1 pb-2 shrink-0">
@@ -643,7 +785,9 @@ export function AppSidebar({
                 e.preventDefault();
                 setDragging(true);
               }}
-              onDragLeave={() => setDragging(false)}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+              }}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragging(false);
@@ -665,26 +809,13 @@ export function AppSidebar({
                 )}
               />
               上传资料
-              <input
-                ref={fileRef}
-                type="file"
-                aria-label="上传学习资料"
-                multiple
-                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.html,.htm,.xlsx,.csv,.jpg,.jpeg,.png,.bmp,.tiff,image/*,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/markdown,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-                onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                  const files = e.target.files;
-                  if (files && files.length > 0) handleFile(files.length === 1 ? files[0] : files);
-                  if (fileRef.current) fileRef.current.value = "";
-                }}
-                className="hidden"
-              />
             </div>
-            <p className="mt-1.5 text-center text-[9px] text-muted-foreground/40 leading-tight">
+            <p className="mt-1.5 text-center text-[11px] text-muted-foreground/40 leading-tight">
               PDF / DOCX / PPTX / TXT / 图片 / Markdown / HTML / Excel / CSV
             </p>
           </div>
 
-          {/* Search + Create Folder */}
+          {/* Search + doc count + Create Folder */}
           <div className="px-3 pb-1 flex items-center gap-1.5 shrink-0">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
@@ -696,6 +827,9 @@ export function AppSidebar({
                 className="w-full rounded-lg border border-border/50 bg-muted/30 pl-7 pr-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/30 focus:bg-muted/50 transition-all"
               />
             </div>
+            <span className="text-[11px] text-muted-foreground/40 tabular-nums shrink-0">
+              {documents.length} 份
+            </span>
             {onCreateFolder && (
               <button
                 type="button"
@@ -760,12 +894,12 @@ export function AppSidebar({
           <ScrollArea className="flex-1 min-h-0">
             <div className="px-2 pb-2 space-y-0.5">
               {filteredDocs.length === 0 && documents.length > 0 && (
-                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
+                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/50">
                   无匹配文档
                 </p>
               )}
               {documents.length === 0 && (
-                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
+                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/50">
                   尚无文档
                 </p>
               )}
@@ -776,9 +910,7 @@ export function AppSidebar({
               {/* Root-level drop zone (for removing from folder) */}
               {hasAnyFolders && dragDocId && (
                 <div
-                  onDragOver={(e) => handleFolderDragOver(e, null)}
-                  onDragLeave={() => setDropFolderId(undefined)}
-                  onDrop={(e) => handleFolderDrop(e, null)}
+                  {...{ [FOLDER_HEADER_ATTR]: "root" }}
                   className={cn(
                     "flex items-center justify-center gap-2 rounded-lg border-2 border-dashed p-2 text-[11px] transition-all",
                     dropFolderId === null
@@ -795,10 +927,10 @@ export function AppSidebar({
               {hasAnyFolders && ungroupedDocs.length > 0 && (
                 <>
                   <div className="flex items-center gap-2 px-3 pt-2 pb-0.5">
-                    <span className="text-[10px] text-muted-foreground/40 font-medium uppercase tracking-wider">
+                    <span className="text-[11px] text-muted-foreground/40 font-medium uppercase tracking-wider">
                       未分类
                     </span>
-                    <span className="text-[10px] text-muted-foreground/30 tabular-nums">
+                    <span className="text-[11px] text-muted-foreground/30 tabular-nums">
                       {ungroupedDocs.length}
                     </span>
                   </div>
@@ -823,7 +955,7 @@ export function AppSidebar({
         )}
       >
         {!collapsed && (
-          <span className="text-[10px] text-muted-foreground/40 tracking-wider">
+          <span className="text-[11px] text-muted-foreground/40 tracking-wider">
             EDUMERGE AI
           </span>
         )}
@@ -882,11 +1014,11 @@ export function AppSidebar({
               >
                 <Folder className="h-4 w-4 shrink-0" style={{ color: f.color }} />
                 <span className="flex-1 truncate">{f.name}</span>
-                <span className="text-[10px] text-muted-foreground/40">{f.docCount}</span>
+                <span className="text-[11px] text-muted-foreground/40">{f.docCount}</span>
               </button>
             ))}
             {folders.length === 0 && (
-              <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
+              <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/50">
                 还没有文件夹，请先创建
               </p>
             )}

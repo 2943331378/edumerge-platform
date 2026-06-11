@@ -132,9 +132,9 @@ export function ShortcutsHelp({ open, onOpenChange }: ShortcutsHelpProps) {
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-border/50 text-center">
-          <p className="text-[10px] text-muted-foreground/40">
-            按 <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">?</kbd> 或{" "}
-            <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">Esc</kbd> 关闭
+          <p className="text-[11px] text-muted-foreground/40">
+            按 <kbd className="px-1 py-0.5 rounded bg-muted text-[11px] font-mono">?</kbd> 或{" "}
+            <kbd className="px-1 py-0.5 rounded bg-muted text-[11px] font-mono">Esc</kbd> 关闭
           </p>
         </div>
       </div>
@@ -150,7 +150,7 @@ function ShortcutKey({ keys }: { keys: string }) {
     <span className="flex items-center gap-0.5 shrink-0 ml-3">
       {parts.map((part, i) => (
         <span key={i} className="flex items-center gap-0.5">
-          {i > 0 && <span className="text-[10px] text-muted-foreground/40 mx-0.5">+</span>}
+          {i > 0 && <span className="text-[11px] text-muted-foreground/40 mx-0.5">+</span>}
           <kbd
             className={cn(
               "inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5",

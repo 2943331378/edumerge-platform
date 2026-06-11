@@ -46,6 +46,10 @@ public class MilvusVectorStoreConfig {
     @Value("#{systemEnvironment['DASHSCOPE_API_KEY'] ?: '${langchain4j.openai.embedding-api-key:}'}")
     private String embeddingApiKey;
 
+    // 内容生成模型可单独配置 API Key (默认使用 DeepSeek)
+    @Value("#{systemEnvironment['DEEPSEEK_API_KEY'] ?: '${langchain4j.openai.api-key:}'}")
+    private String contentApiKey;
+
     @Value("${langchain4j.openai.embedding-base-url:#{null}}")
     private String embeddingBaseUrl;
 
@@ -114,17 +118,16 @@ public class MilvusVectorStoreConfig {
     }
 
     /**
-     * 内容生成专用高质量模型 (Qwen3.7-plus, 用于笔记/卡片/测验/思维导图)
-     * 复用 DashScope API Key (与 Embedding 相同)
+     * 内容生成模型 (DeepSeek, 用于笔记/卡片/测验/思维导图)
      */
     @Bean("contentChatModel")
     public ChatModel contentChatModel(
-            @Value("${app.ai.content.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String contentBaseUrl,
-            @Value("${app.ai.content.model:qwen3.7-plus}") String contentModel) {
+            @Value("${app.ai.content.base-url:https://api.deepseek.com/v1}") String contentBaseUrl,
+            @Value("${app.ai.content.model:deepseek-chat}") String contentModel) {
         log.info("初始化内容生成模型: {} (baseUrl={})", contentModel, contentBaseUrl);
         return OpenAiChatModel.builder()
                 .baseUrl(contentBaseUrl)
-                .apiKey(embeddingApiKey)
+                .apiKey(contentApiKey)
                 .modelName(contentModel)
                 .temperature(0.3)
                 .maxTokens(4096)
@@ -134,16 +137,16 @@ public class MilvusVectorStoreConfig {
     }
 
     /**
-     * 内容生成流式模型 (与 contentChatModel 同配置, 用于笔记/思维导图 SSE 流式输出)
+     * 内容生成流式模型 (DeepSeek, 用于笔记/思维导图 SSE 流式输出)
      */
     @Bean("streamingContentChatModel")
     public StreamingChatModel streamingContentChatModel(
-            @Value("${app.ai.content.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String contentBaseUrl,
-            @Value("${app.ai.content.model:qwen3.7-plus}") String contentModel) {
+            @Value("${app.ai.content.base-url:https://api.deepseek.com/v1}") String contentBaseUrl,
+            @Value("${app.ai.content.model:deepseek-chat}") String contentModel) {
         log.info("初始化内容生成流式模型: {} (baseUrl={})", contentModel, contentBaseUrl);
         return OpenAiStreamingChatModel.builder()
                 .baseUrl(contentBaseUrl)
-                .apiKey(embeddingApiKey)
+                .apiKey(contentApiKey)
                 .modelName(contentModel)
                 .temperature(0.3)
                 .maxTokens(4096)

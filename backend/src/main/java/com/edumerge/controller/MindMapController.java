@@ -20,6 +20,9 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -97,7 +100,11 @@ public class MindMapController {
         final int estimatedTokens = 1200;
         final int[] tokenCount = {0};
 
+        // 捕获主线程 SecurityContext，传递给异步线程
+        SecurityContext securityContext = SecurityContextHolder.getContext();
+
         CompletableFuture.runAsync(() -> {
+            SecurityContextHolder.setContext(securityContext);
             StringBuilder tokenBuffer = new StringBuilder();
             final long[] lastFlush = {System.currentTimeMillis()};
             try {
@@ -123,7 +130,7 @@ public class MindMapController {
                 if (cancelled.get()) { sendDoneAndComplete(emitter, response, completed); return; }
 
                 if (result.isSuccess()) {
-                    CardDeck deck = cardDeckService.create(docId, "MINDMAP", result.getTitle());
+                    CardDeck deck = cardDeckService.create(docId, "MIND_MAP", result.getTitle());
                     MindMap saved = mindMapService.create(docId, deck.getId(), result.getContent());
                     Map<String, Object> meta = new LinkedHashMap<>();
                     meta.put("deckId", deck.getId());
@@ -141,7 +148,10 @@ public class MindMapController {
                 if (!cancelled.get()) emit(emitter, cancelled, Map.of("error", "系统异常: " + e.getMessage()));
                 sendDoneAndComplete(emitter, response, completed);
             }
-        }, asyncExecutor);
+        }, asyncExecutor).whenComplete((v, ex) -> {
+            if (ex != null) log.error("思维导图异步任务异常", ex);
+            sendDoneAndComplete(emitter, response, completed);
+        });
 
         return emitter;
     }

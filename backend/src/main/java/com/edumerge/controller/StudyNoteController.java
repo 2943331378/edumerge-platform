@@ -20,6 +20,9 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -132,7 +135,11 @@ public class StudyNoteController {
         final int estimatedTokens = 2500;
         final int[] tokenCount = {0};
 
+        // 捕获主线程 SecurityContext，传递给异步线程
+        SecurityContext securityContext = SecurityContextHolder.getContext();
+
         CompletableFuture.runAsync(() -> {
+            SecurityContextHolder.setContext(securityContext);
             StringBuilder tokenBuffer = new StringBuilder();
             final long[] lastFlush = {System.currentTimeMillis()};
             try {

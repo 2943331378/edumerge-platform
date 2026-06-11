@@ -56,7 +56,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
               />
             ))}
           </span>
-          <span className="text-[10px] text-muted-foreground/50 tabular-nums">
+          <span className="text-[11px] text-muted-foreground/50 tabular-nums">
             {completedCount}/{steps.length}
           </span>
           <ChevronDown className="h-3 w-3 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors" />
@@ -103,7 +103,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
               </div>
               <span
                 className={cn(
-                  "text-[10px] md:text-[11px] font-medium transition-colors whitespace-nowrap",
+                  "text-[11px] font-medium transition-colors whitespace-nowrap",
                   isActive && "text-foreground",
                   isCompleted && "text-lime-600",
                   !isActive && !isCompleted && "text-muted-foreground/40",
@@ -113,7 +113,7 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
               </span>
               {/* 未完成标记 */}
               {!isCompleted && !isActive && idx > 0 && !completedSteps.has(steps[idx - 1].id) && (
-                <span className="text-[8px] text-muted-foreground/30 mt-0.5">未解锁</span>
+                <span className="text-[11px] text-muted-foreground/30 mt-0.5">未解锁</span>
               )}
             </button>
 

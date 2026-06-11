@@ -3,6 +3,7 @@ package com.edumerge.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.concurrent.DelegatingSecurityContextExecutorService;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -44,16 +45,18 @@ public class ThreadPoolConfig {
     /**
      * 通用异步任务线程池 — 用于 SSE 流式对话等非文档处理的异步任务
      * 替代默认的 ForkJoinPool，避免文档处理任务与通用异步任务互相争抢线程
+     * 使用 DelegatingSecurityContextExecutorService 包装，自动传播 SecurityContext 到异步线程
      */
     @Bean("asyncExecutor")
     public ExecutorService asyncExecutor() {
-        return new ThreadPoolExecutor(
+        ExecutorService delegate = new ThreadPoolExecutor(
                 asyncCorePoolSize, asyncMaxPoolSize,
                 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(asyncQueueCapacity),
                 new NamedThreadFactory("edumerge-async"),
                 new ThreadPoolExecutor.CallerRunsPolicy()
         );
+        return new DelegatingSecurityContextExecutorService(delegate);
     }
 
     /** 带命名前缀的线程工厂，方便日志排查 */

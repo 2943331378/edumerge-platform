@@ -140,12 +140,12 @@ export default function RegisterPage() {
           {/* Step indicator */}
           <div className="flex items-center gap-2 mb-5">
             <div className="flex items-center gap-2">
-              <div className={cn("flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold transition-all", step >= 1 ? "bg-primary text-white" : "bg-muted text-muted-foreground")}>1</div>
+              <div className={cn("flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold transition-all", step >= 1 ? "bg-primary text-white" : "bg-muted text-muted-foreground")}>1</div>
               <span className={cn("text-[11px] font-medium transition-colors", step >= 1 ? "text-foreground" : "text-muted-foreground")}>基本信息</span>
             </div>
             <div className={cn("flex-1 h-px transition-all", step >= 2 ? "bg-primary" : "bg-border/50")} />
             <div className="flex items-center gap-2">
-              <div className={cn("flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold transition-all", step >= 2 ? "bg-primary text-white" : "bg-muted text-muted-foreground")}>2</div>
+              <div className={cn("flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold transition-all", step >= 2 ? "bg-primary text-white" : "bg-muted text-muted-foreground")}>2</div>
               <span className={cn("text-[11px] font-medium transition-colors", step >= 2 ? "text-foreground" : "text-muted-foreground")}>设置密码</span>
             </div>
           </div>
@@ -181,7 +181,7 @@ export default function RegisterPage() {
                 <>
                   {/* Summary badge */}
                   <div className="rounded-lg bg-primary/5 border border-primary/15 px-3 py-2 flex items-center gap-2">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary dark:text-primary text-[10px] font-bold">{displayName?.[0]?.toUpperCase()}</div>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary dark:text-primary text-[11px] font-bold">{displayName?.[0]?.toUpperCase()}</div>
                     <div className="min-w-0">
                       <p className="text-[13px] font-medium truncate">{displayName}</p>
                       <p className="text-[11px] text-muted-foreground truncate">{email}</p>

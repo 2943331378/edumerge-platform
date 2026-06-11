@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +10,7 @@ import {
 import {
   Flame, Layers, Target, BookOpen, Clock, Trophy, Star, Zap,
   Loader2, FileWarning, Upload, GitFork, RotateCcw,
-  AlertCircle, ChevronRight, ChevronDown, BarChart3, Settings2,
+  AlertCircle, ChevronRight, ChevronDown, BarChart3, Settings2, Calendar,
   CheckCircle2, Medal, Crown, Rocket, TrendingUp, TrendingDown, Minus,
 } from "lucide-react";
 
@@ -160,6 +160,9 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
   const [error, setError] = useState(false);
   const [expandedError, setExpandedError] = useState<number | null>(null);
   const [selectedHeatDay, setSelectedHeatDay] = useState<{ date: string; reviews: number; quizzes: number } | null>(null);
+  const [hoveredHeat, setHoveredHeat] = useState<{ date: string; reviews: number; quizzes: number; x: number; y: number } | null>(null);
+  const heatGridRef = useRef<HTMLDivElement>(null);
+  const justTouched = useRef(false);
   const [dailyGoal, setDailyGoal] = useState(() => getGoal(DAILY_GOAL_KEY, DAILY_GOAL_DEFAULT));
   const [weeklyGoal, setWeeklyGoal] = useState(() => getGoal(WEEKLY_GOAL_KEY, WEEKLY_GOAL_DEFAULT));
   const [monthlyGoal, setMonthlyGoal] = useState(() => getGoal(MONTHLY_GOAL_KEY, MONTHLY_GOAL_DEFAULT));
@@ -230,7 +233,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
               <button
                 type="button"
                 onClick={() => setEditingGoal(!editingGoal)}
-                className="flex items-center gap-0.5 mt-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                className="flex items-center gap-0.5 mt-1 text-[11px] text-muted-foreground/40 hover:text-muted-foreground transition-colors"
               >
                 <Settings2 className="h-2.5 w-2.5" />调整目标
               </button>
@@ -251,7 +254,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                   >
                     <span className="text-foreground/70 truncate flex-1 mr-2 text-left">{doc.docName}</span>
                     <span className={cn(
-                      "shrink-0 font-medium px-1.5 py-0.5 rounded-full text-[10px]",
+                      "shrink-0 font-medium px-1.5 py-0.5 rounded-full text-[11px]",
                       urgency === "destructive" ? "bg-destructive/10 text-destructive" :
                       urgency === "amber" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" :
                       "bg-primary/10 text-primary",
@@ -262,7 +265,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                 );
               })}
               {dueDocs.length > 4 && (
-                <p className="text-[10px] text-muted-foreground/50 pl-1">
+                <p className="text-[11px] text-muted-foreground/50 pl-1">
                   还有 {dueDocs.length - 4} 份文档...
                 </p>
               )}
@@ -304,7 +307,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                   )}
                 >
                   <p className="text-xs font-medium">{preset.name}</p>
-                  <p className="text-[9px] text-muted-foreground/50 mt-0.5">{preset.desc}</p>
+                  <p className="text-[11px] text-muted-foreground/50 mt-0.5">{preset.desc}</p>
                 </button>
               ))}
             </div>
@@ -416,140 +419,165 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
           {/* 30 天热力图 */}
           {rhythm.monthly && rhythm.monthly.length > 0 && (() => {
             const monthly = rhythm.monthly;
-            const maxActivity = Math.max(...monthly.map(d => d.reviews + d.quizzes), 1);
-            const dayLabels = ["日", "一", "二", "三", "四", "五", "六"];
-            // 让最后一列对齐到今天（今天在最右下角）
             const today = new Date();
-            const todayDow = today.getDay(); // 0=Sun
-            // 补齐到完整的周：从 30 天前的周日开始
+            const todayStr = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
             const firstDate = new Date(today);
             firstDate.setDate(firstDate.getDate() - 29);
-            const firstDow = firstDate.getDay();
-            // 需要补齐的前置空格数
-            const leadingBlanks = firstDow;
-            // 构建完整格子（包括前置空格）
-            const totalCells = leadingBlanks + 30;
-            const rows = Math.ceil(totalCells / 7);
+            const leadingBlanks = firstDate.getDay();
+            const totalRows = Math.ceil((leadingBlanks + 30) / 7);
 
             const getLevel = (reviews: number, quizzes: number) => {
               const total = reviews + quizzes;
-              if (total === 0) return 0;
-              const ratio = total / maxActivity;
-              if (ratio <= 0.25) return 1;
-              if (ratio <= 0.5) return 2;
-              if (ratio <= 0.75) return 3;
+              if (total <= 0) return 0;
+              if (total <= 2) return 1;
+              if (total <= 5) return 2;
+              if (total <= 8) return 3;
               return 4;
             };
 
-            const levelColors = [
-              "bg-muted/40",
-              "bg-primary/20",
-              "bg-primary/40",
-              "bg-primary/65",
-              "bg-primary",
-            ];
+            // 月份标签：检测每月第一天所在的行
+            const monthLabels: { row: number; label: string }[] = [];
+            let lastMonth = -1;
+            for (let i = 0; i < 30; i++) {
+              const parts = monthly[i].date.split("-");
+              const m = parseInt(parts[0], 10);
+              if (m >= 1 && m <= 12 && m !== lastMonth) {
+                monthLabels.push({ row: Math.floor((i + leadingBlanks) / 7), label: `${m}月` });
+                lastMonth = m;
+              }
+            }
+
+            const gridW = 7 * 18 + 6 * 2; // 138px
 
             return (
-              <div>
-                {/* 星期标签 + 热力格子 */}
-                <div className="flex">
-                  {/* 左侧星期标签 */}
-                  <div className="flex flex-col mr-1">
-                    {Array.from({ length: rows }, (_, r) => (
-                      <div key={r} className="flex items-center h-[22px]">
-                        {r % 2 === 0 && (
-                          <span className="text-[8px] text-muted-foreground/30 w-3 text-right leading-none">
-                            {dayLabels[(r * 7) % 7]}
-                          </span>
-                        )}
-                      </div>
+              <div className="overflow-hidden">
+                {/* 左侧月份标签 + 右侧(表头+网格) */}
+                <div className="flex justify-center">
+                  {/* 月份标签列 */}
+                  <div
+                    className="relative w-8 mr-1.5 shrink-0"
+                    style={{ height: 18 + 2 + totalRows * 18 + (totalRows - 1) * 2 }}
+                  >
+                    {monthLabels.map((m, i) => (
+                      <span
+                        key={i}
+                        className="absolute right-0 text-[11px] text-muted-foreground/50 leading-none select-none whitespace-nowrap flex items-center"
+                        style={{ top: 18 + 2 + m.row * 20, height: 18 }}
+                      >
+                        {m.label}
+                      </span>
                     ))}
                   </div>
-                  {/* 格子 — 每格 44x44px 触摸区域，内部 12px 色块居中 */}
-                  <div className="flex flex-col">
-                    {Array.from({ length: rows }, (_, row) => (
-                      <div key={row} className="flex">
-                        {Array.from({ length: 7 }, (_, col) => {
-                          const idx = row * 7 + col - leadingBlanks;
-                          if (idx < 0 || idx >= 30) {
-                            return <div key={col} className="min-w-[44px] min-h-[44px]" />;
-                          }
-                          const day = monthly[idx];
-                          const level = getLevel(day.reviews, day.quizzes);
-                          const isSelected = selectedHeatDay?.date === day.date;
-                          return (
-                            <button
-                              key={col}
-                              type="button"
-                              title={`${day.date}: ${day.reviews}张卡片, ${day.quizzes}次测验`}
-                              aria-label={`${day.date}: ${day.reviews}张卡片, ${day.quizzes}次测验`}
-                              onClick={() => setSelectedHeatDay(isSelected ? null : day)}
-                              className="flex items-center justify-center min-w-[44px] min-h-[44px] cursor-pointer border-0 bg-transparent p-0"
-                            >
-                              <div
-                                className={cn(
-                                  "w-3 h-3 rounded-sm transition-colors",
-                                  levelColors[level],
-                                  isSelected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
-                                )}
-                              />
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))}
+
+                  {/* 表头 + 网格共享列宽 */}
+                  <div>
+                    {/* 星期列头 */}
+                    <div className="grid grid-cols-7 gap-[2px] mb-1">
+                      {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
+                        <span key={d} className="w-[18px] text-[11px] text-muted-foreground/40 text-center leading-none select-none">
+                          {d}
+                        </span>
+                      ))}
+                    </div>
+                    {/* 热力图网格 */}
+                    <div
+                      ref={heatGridRef}
+                      className="grid grid-cols-7 gap-[2px]"
+                    >
+                    {Array.from({ length: totalRows * 7 }, (_, i) => {
+                      const dayIndex = i - leadingBlanks;
+                      if (dayIndex < 0 || dayIndex >= 30) {
+                        return <div key={i} className="w-[18px] h-[18px]" />;
+                      }
+                      const day = monthly[dayIndex];
+                      const level = getLevel(day.reviews, day.quizzes);
+                      const isSelected = selectedHeatDay?.date === day.date;
+                      const isToday = day.date === todayStr;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          aria-label={`${day.date}: ${day.reviews}张卡片, ${day.quizzes}次测验`}
+                          className={cn(
+                            "w-[18px] h-[18px] rounded-[3px] cursor-pointer border-0 p-0 transition-all",
+                            HEAT_COLORS[level],
+                            "hover:brightness-110 hover:scale-110",
+                            isSelected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+                            isToday && !isSelected && "ring-2 ring-amber-500 ring-offset-1 ring-offset-background",
+                          )}
+                          onTouchStart={() => { justTouched.current = true; }}
+                          onMouseEnter={(e) => {
+                            if (justTouched.current) return;
+                            const r = e.currentTarget.getBoundingClientRect();
+                            setHoveredHeat({ ...day, x: r.left + r.width / 2, y: r.top });
+                          }}
+                          onMouseLeave={() => { if (!justTouched.current) setHoveredHeat(null); }}
+                          onClick={() => {
+                            if (justTouched.current) {
+                              justTouched.current = false;
+                              setHoveredHeat(null);
+                            }
+                            setSelectedHeatDay(isSelected ? null : day);
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
-                {/* 图例 + 周/月目标 */}
-                <div className="mt-2 pt-2 border-t border-border/30 space-y-2">
+                </div>
+
+                {/* 悬浮 Tooltip */}
+                {hoveredHeat && (
+                  <HeatTooltip
+                    date={hoveredHeat.date}
+                    reviews={hoveredHeat.reviews}
+                    quizzes={hoveredHeat.quizzes}
+                    x={hoveredHeat.x}
+                    y={hoveredHeat.y}
+                  />
+                )}
+
+                {/* 图例 + 详情 + 进度条 */}
+                <div className="mt-3 pt-2.5 border-t border-border/30 space-y-2" style={{ maxWidth: gridW + 40, marginLeft: "auto", marginRight: "auto" }}>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-muted-foreground/40">
+                    <span className="text-[11px] text-muted-foreground/50">
                       30 天: {monthly.reduce((s, d) => s + d.reviews, 0)} 张卡片
                     </span>
-                    <div className="flex items-center gap-0.5">
-                      <span className="text-[8px] text-muted-foreground/30 mr-0.5">少</span>
-                      {levelColors.map((c, i) => (
-                        <div key={i} className={cn("w-2.5 h-2.5 rounded-sm", c)} />
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-muted-foreground/40 mr-0.5">少</span>
+                      {HEAT_COLORS.map((c, i) => (
+                        <div key={i} className={cn("w-3 h-3 rounded-[2px]", c)} />
                       ))}
-                      <span className="text-[8px] text-muted-foreground/30 ml-0.5">多</span>
+                      <span className="text-[10px] text-muted-foreground/40 ml-0.5">多</span>
                     </div>
                   </div>
-                  {/* 周/月目标进度 */}
+                  {selectedHeatDay && (
+                    <div className="flex items-center gap-2.5 py-1.5 px-2.5 rounded-lg bg-muted/40">
+                      <span className="text-[11px] font-medium text-foreground/80">{selectedHeatDay.date.split("-")[0]}月{selectedHeatDay.date.split("-")[1]}日</span>
+                      <span className="text-[11px] text-muted-foreground/60">{selectedHeatDay.reviews} 张卡片</span>
+                      <span className="text-[11px] text-muted-foreground/60">{selectedHeatDay.quizzes} 次测验</span>
+                      <button type="button" onClick={() => setSelectedHeatDay(null)} className="ml-auto text-[11px] text-muted-foreground/40 hover:text-muted-foreground">关闭</button>
+                    </div>
+                  )}
                   {(() => {
                     const weeklyTotal = rhythm.weekly.reduce((s, d) => s + d.reviews, 0);
                     const monthlyTotal = monthly.reduce((s, d) => s + d.reviews, 0);
                     return (
-                      <>
-                        <div className="space-y-1.5">
-                          <MiniProgress label="本周" current={weeklyTotal} goal={weeklyGoal} />
-                          <MiniProgress label="本月" current={monthlyTotal} goal={monthlyGoal} />
-                        </div>
-                        {/* 选中日期详情（点击格子触发，移动端触摸友好） */}
-                        {selectedHeatDay && (
-                          <div className="flex items-center gap-3 pt-1.5 border-t border-border/30">
-                            <span className="text-[11px] font-medium text-foreground/80">{selectedHeatDay.date}</span>
-                            <span className="text-[10px] text-muted-foreground/60">
-                              {selectedHeatDay.reviews} 张卡片
-                            </span>
-                            <span className="text-[10px] text-muted-foreground/60">
-                              {selectedHeatDay.quizzes} 次测验
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedHeatDay(null)}
-                              className="ml-auto text-[9px] text-muted-foreground/40 hover:text-muted-foreground"
-                            >
-                              关闭
-                            </button>
-                          </div>
-                        )}
-                      </>
+                      <div className="space-y-1.5">
+                        <MiniProgress label="本周" current={weeklyTotal} goal={weeklyGoal} />
+                        <MiniProgress label="本月" current={monthlyTotal} goal={monthlyGoal} />
+                      </div>
                     );
                   })()}
                 </div>
               </div>
             );
-          })()}
+          })() || (
+            <div className="py-6 text-center">
+              <Calendar className="h-8 w-8 mx-auto mb-2 text-muted-foreground/25" />
+              <p className="text-xs text-muted-foreground/50">开始学习后，这里会显示你的学习节奏</p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -575,7 +603,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
               {/* 已解锁 */}
               {earned.length > 0 && (
                 <div>
-                  <p className="text-[10px] text-muted-foreground/50 mb-2">
+                  <p className="text-[11px] text-muted-foreground/50 mb-2">
                     已解锁 {earned.length}/{BADGES.length}
                   </p>
                   <div className="grid grid-cols-4 gap-2">
@@ -590,7 +618,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                           <div className={cn("h-8 w-8 rounded-full flex items-center justify-center", badge.bg)}>
                             <Icon className={cn("h-4 w-4", badge.color)} />
                           </div>
-                          <span className="text-[9px] text-foreground/70 text-center leading-tight">{badge.name}</span>
+                          <span className="text-[11px] text-foreground/70 text-center leading-tight">{badge.name}</span>
                         </div>
                       );
                     })}
@@ -600,7 +628,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
               {/* 未解锁 */}
               {locked.length > 0 && (
                 <div>
-                  <p className="text-[10px] text-muted-foreground/50 mb-2">待解锁</p>
+                  <p className="text-[11px] text-muted-foreground/50 mb-2">待解锁</p>
                   <div className="grid grid-cols-4 gap-2">
                     {locked.map((badge) => {
                       const Icon = badge.icon;
@@ -614,9 +642,9 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                           <div className="h-8 w-8 rounded-full flex items-center justify-center bg-muted/40">
                             <Icon className="h-4 w-4 text-muted-foreground/50" />
                           </div>
-                          <span className="text-[9px] text-muted-foreground/50 text-center leading-tight">{badge.name}</span>
+                          <span className="text-[11px] text-muted-foreground/50 text-center leading-tight">{badge.name}</span>
                           {prog && (
-                            <span className="text-[8px] text-muted-foreground/30 tabular-nums">
+                            <span className="text-[11px] text-muted-foreground/30 tabular-nums">
                               {prog.current}/{prog.target}
                             </span>
                           )}
@@ -646,8 +674,8 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-foreground/80 line-clamp-2">{err.question}</p>
                     <div className="flex items-center gap-2 mt-1.5">
-                      <span className="text-[10px] text-muted-foreground/50 truncate">{err.docName}</span>
-                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">
+                      <span className="text-[11px] text-muted-foreground/50 truncate">{err.docName}</span>
+                      <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">
                         错 {err.errorCount} 次
                       </span>
                     </div>
@@ -708,7 +736,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                       style={{ width: `${dw.accuracyRate}%` }}
                     />
                   </div>
-                  <p className="text-[10px] text-muted-foreground/40 mt-0.5">
+                  <p className="text-[11px] text-muted-foreground/40 mt-0.5">
                     {dw.correctCount}/{dw.totalQuestions} 题答对
                   </p>
                 </div>
@@ -739,8 +767,8 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                     {/* 闪卡进度 */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] text-muted-foreground/50">闪卡复习</span>
-                        <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+                        <span className="text-[11px] text-muted-foreground/50">闪卡复习</span>
+                        <span className="text-[11px] text-muted-foreground/60 tabular-nums">
                           {dp.reviewedCards}/{dp.totalCards}
                         </span>
                       </div>
@@ -757,7 +785,7 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                     {/* 测验正确率 */}
                     {hasQuiz && (
                       <div className="shrink-0 text-right">
-                        <p className="text-[10px] text-muted-foreground/50">测验</p>
+                        <p className="text-[11px] text-muted-foreground/50">测验</p>
                         <p className={cn(
                           "text-xs font-semibold tabular-nums",
                           dp.quizAccuracy >= 80 ? "text-emerald-600 dark:text-emerald-400"
@@ -808,9 +836,9 @@ export function StatsDashboard({ onAction }: StatsDashboardProps) {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-xs text-foreground/80">{entry.description}</p>
-                        <p className="text-[10px] text-muted-foreground/50 truncate mt-0.5">{entry.docName}</p>
+                        <p className="text-[11px] text-muted-foreground/50 truncate mt-0.5">{entry.docName}</p>
                       </div>
-                      <span className="shrink-0 text-[10px] text-muted-foreground/40 tabular-nums">{entry.time}</span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground/40 tabular-nums">{entry.time}</span>
                     </div>
                   </div>
                 ))}
@@ -911,14 +939,14 @@ function StatBox({
       "rounded-lg border border-border/50 p-2.5 text-center",
       highlight ? "bg-primary/5 border-primary/20" : "bg-card",
     )}>
-      <p className="text-[10px] text-muted-foreground/60 mb-1">{label}</p>
+      <p className="text-[11px] text-muted-foreground/60 mb-1">{label}</p>
       <p className={cn(
         "text-lg font-bold tracking-tight",
         highlight ? "text-primary" : "text-foreground",
       )}>
         {value}
       </p>
-      {unit && <p className="text-[10px] text-muted-foreground/40">{unit}</p>}
+      {unit && <p className="text-[11px] text-muted-foreground/40">{unit}</p>}
     </div>
   );
 }
@@ -951,7 +979,7 @@ function GoalInput({ label, value, onChange, unit }: { label: string; value: num
   const [editing, setEditing] = useState(false);
   return (
     <div>
-      <p className="text-[10px] text-muted-foreground/60 mb-1">{label}</p>
+      <p className="text-[11px] text-muted-foreground/60 mb-1">{label}</p>
       {editing ? (
         <div className="flex items-center gap-0.5">
           <input
@@ -973,19 +1001,55 @@ function GoalInput({ label, value, onChange, unit }: { label: string; value: num
           onClick={() => { setInput(String(value)); setEditing(true); }}
           className="w-full h-7 rounded border border-border/50 bg-card px-1.5 text-xs text-center hover:border-primary/30 transition-colors"
         >
-          {value} <span className="text-[9px] text-muted-foreground/40">{unit}</span>
+          {value} <span className="text-[11px] text-muted-foreground/40">{unit}</span>
         </button>
       )}
     </div>
   );
 }
 
+const WEEKDAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
+
+function HeatTooltip({ date, reviews, quizzes, x, y }: {
+  date: string; reviews: number; quizzes: number; x: number; y: number;
+}) {
+  // date 格式 "MM-DD"，推算星期几
+  const [mm, dd] = date.split("-").map(Number);
+  const year = new Date().getFullYear();
+  const weekday = WEEKDAY_NAMES[new Date(year, mm - 1, dd).getDay()];
+
+  return (
+    <div
+      className="fixed z-50 pointer-events-none"
+      style={{ left: x, top: y - 8, transform: "translate(-50%, -100%)" }}
+    >
+      <div className="rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg text-[11px] leading-relaxed whitespace-nowrap">
+        <div className="font-medium text-foreground">{mm}月{dd}日 周{weekday}</div>
+        <div className="text-muted-foreground/70">
+          {reviews > 0 && `${reviews} 张闪卡`}
+          {reviews > 0 && quizzes > 0 && " · "}
+          {quizzes > 0 && `${quizzes} 次测验`}
+          {reviews === 0 && quizzes === 0 && "暂无学习"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const HEAT_COLORS = [
+  "bg-stone-100 dark:bg-zinc-800",   // 0
+  "bg-amber-200 dark:bg-amber-900",  // 1-2
+  "bg-amber-300 dark:bg-amber-700",  // 3-5
+  "bg-amber-400 dark:bg-amber-600",  // 6-8
+  "bg-amber-500 dark:bg-amber-500",  // 9+
+];
+
 function MiniProgress({ label, current, goal }: { label: string; current: number; goal: number }) {
   const pct = goal > 0 ? Math.min(current / goal, 1) : 0;
   const done = current >= goal;
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-muted-foreground/50 w-7 shrink-0">{label}</span>
+      <span className="text-[11px] text-muted-foreground/50 w-7 shrink-0">{label}</span>
       <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
         <div
           className={cn(
@@ -995,7 +1059,7 @@ function MiniProgress({ label, current, goal }: { label: string; current: number
           style={{ width: `${pct * 100}%` }}
         />
       </div>
-      <span className="text-[10px] tabular-nums text-muted-foreground/50 shrink-0">
+      <span className="text-[11px] tabular-nums text-muted-foreground/50 shrink-0">
         {current}/{goal}
       </span>
     </div>
@@ -1010,21 +1074,21 @@ function TrendStat({ label, value, unit, prev }: { label: string; value: number;
   const trendColor = trend === "up" ? "text-emerald-500" : trend === "down" ? "text-destructive" : "text-muted-foreground/40";
   return (
     <div className="rounded-lg bg-muted/30 p-2 text-center">
-      <p className="text-[10px] text-muted-foreground/60 mb-1">{label}</p>
+      <p className="text-[11px] text-muted-foreground/60 mb-1">{label}</p>
       <p className="text-lg font-bold tabular-nums leading-none">
         {typeof value === "number" && value % 1 !== 0 ? value.toFixed(1) : value}
-        <span className="text-[10px] text-muted-foreground/40 ml-0.5">{unit}</span>
+        <span className="text-[11px] text-muted-foreground/40 ml-0.5">{unit}</span>
       </p>
       {prev > 0 ? (
         <div className={cn("flex items-center justify-center gap-0.5 mt-1", trendColor)}>
           <TrendIcon className="h-2.5 w-2.5" />
-          <span className="text-[9px] tabular-nums">
+          <span className="text-[11px] tabular-nums">
             {trend === "flat" ? "持平" : `${trend === "up" ? "+" : ""}${pctChange}%`}
           </span>
         </div>
       ) : value > 0 ? (
         <div className="flex items-center justify-center gap-0.5 mt-1 text-primary">
-          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10">新</span>
+          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10">新</span>
         </div>
       ) : null}
     </div>

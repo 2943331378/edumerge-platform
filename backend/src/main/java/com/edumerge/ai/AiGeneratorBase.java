@@ -61,9 +61,47 @@ public abstract class AiGeneratorBase {
                     .minScore(0.0) // 生成任务不过滤, 确保能检索到文档内容
                     .filter(new IsEqualTo("document_id", docUuid))
                     .build();
-            return embeddingStore.search(request).matches();
+            List<EmbeddingMatch<TextSegment>> matches = embeddingStore.search(request).matches();
+            if (matches.isEmpty()) {
+                log.warn("Milvus 检索为空, 尝试 MySQL 降级: docUuid={}", docUuid);
+                return retrieveTopChunksFromMysql(docUuid, topK);
+            }
+            return matches;
         } catch (Exception e) {
-            log.error("Milvus 检索失败: docUuid={}, error={}", docUuid, e.getMessage(), e);
+            log.error("Milvus 检索失败, 尝试 MySQL 降级: docUuid={}, error={}", docUuid, e.getMessage());
+            return retrieveTopChunksFromMysql(docUuid, topK);
+        }
+    }
+
+    /**
+     * MySQL 降级兜底: Embedding API 不可用时, 直接从 MySQL document_chunks 表取文档内容
+     * 按 chunk_index 顺序取前 topK 块, 保持文档结构完整性
+     */
+    private List<EmbeddingMatch<TextSegment>> retrieveTopChunksFromMysql(String docUuid, int topK) {
+        try {
+            Document doc = documentMapper.selectOne(
+                    new LambdaQueryWrapper<Document>().eq(Document::getDocumentId, docUuid));
+            if (doc == null) { log.warn("MySQL 降级: 文档不存在 docUuid={}", docUuid); return List.of(); }
+
+            List<DocumentChunk> chunks = documentChunkMapper.selectList(
+                    new LambdaQueryWrapper<DocumentChunk>()
+                            .eq(DocumentChunk::getDocumentId, doc.getId())
+                            .orderByAsc(DocumentChunk::getChunkIndex)
+                            .last("LIMIT " + topK));
+            if (chunks.isEmpty()) { log.warn("MySQL 降级: 无切片 docId={}", doc.getId()); return List.of(); }
+
+            List<EmbeddingMatch<TextSegment>> result = new ArrayList<>();
+            for (int i = 0; i < chunks.size(); i++) {
+                DocumentChunk chunk = chunks.get(i);
+                TextSegment seg = TextSegment.from(chunk.getContent(),
+                        dev.langchain4j.data.document.Metadata.from("document_id", docUuid)
+                                .put("chunk_index", String.valueOf(chunk.getChunkIndex())));
+                result.add(new EmbeddingMatch<>(1.0 - i * 0.01, docUuid + "_" + i, null, seg));
+            }
+            log.info("MySQL 降级成功: docId={}, 取{}块", doc.getId(), result.size());
+            return result;
+        } catch (Exception ex) {
+            log.error("MySQL 降级也失败: docUuid={}, error={}", docUuid, ex.getMessage(), ex);
             return List.of();
         }
     }

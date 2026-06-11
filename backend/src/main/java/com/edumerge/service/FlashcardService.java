@@ -62,6 +62,7 @@ public class FlashcardService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats"}, allEntries = true)
     public void batchCreate(List<Flashcard> cards) {
         if (!cards.isEmpty()) {
             flashcardMapper.insert(cards, 50);
@@ -118,6 +119,7 @@ public class FlashcardService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats"}, allEntries = true)
     public int deleteById(Long id) {
         verifyOwnership(id);
         int rows = flashcardMapper.deleteById(id);
@@ -155,6 +157,7 @@ public class FlashcardService {
      * @throws IllegalArgumentException 参数校验失败
      */
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats"}, allEntries = true)
     public List<Flashcard> generate(String docIdStr, String docUuid, String sessionIdStr, String sectionContext, Integer startChunk, Integer endChunk) {
         // sessionId 优先: 解析为 docId + docUuid
         if (sessionIdStr != null && !sessionIdStr.isBlank()) {
@@ -196,7 +199,7 @@ public class FlashcardService {
      * @return 更新后的卡片
      */
     @Transactional
-    @CacheEvict(cacheNames = "dashboard", key = "#userId")
+    @CacheEvict(cacheNames = {"dashboard", "learningStats"}, key = "#userId")
     public Flashcard review(Long cardId, int quality, Long userId) {
         Flashcard card = getById(cardId);
         if (card == null) throw new IllegalArgumentException("卡片不存在: " + cardId);

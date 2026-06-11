@@ -37,6 +37,9 @@ public class FlashcardController {
 
     @PostMapping("/generate")
     public Result<List<FlashcardResponse>> generate(@RequestBody GenerateRequest body) {
+        if (body.getDocId() == null || body.getDocId().isBlank()) {
+            throw new IllegalArgumentException("docId 不能为空");
+        }
         documentService.verifyOwnership(Long.parseLong(body.getDocId()));
         Integer startChunk = body.getStartChunk() != null ? Integer.parseInt(body.getStartChunk()) : null;
         Integer endChunk = body.getEndChunk() != null ? Integer.parseInt(body.getEndChunk()) : null;

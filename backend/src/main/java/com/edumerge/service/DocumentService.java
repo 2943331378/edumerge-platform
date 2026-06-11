@@ -8,6 +8,7 @@ import com.edumerge.entity.*;
 import com.edumerge.mapper.*;
 import com.edumerge.mq.producer.EmbeddingProducer;
 import com.edumerge.security.SecurityUtils;
+import org.springframework.cache.annotation.CacheEvict;
 import com.edumerge.common.util.FileMagicValidator;
 import com.edumerge.store.MilvusEmbeddingStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -183,6 +184,7 @@ public class DocumentService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"dashboard", "stats", "learningStats"}, allEntries = true)
     public void delete(Long id) {
         Document doc = documentMapper.selectById(id);
         if (doc == null) {
@@ -522,21 +524,21 @@ public class DocumentService {
     }
 
     /**
-     * 重新生成文档大纲 — 先生成成功后再删除旧大纲，避免生成失败时数据丢失
+     * 重新生成文档大纲 — 先删除旧大纲，再重新生成
+     * 不加 @Transactional: 删除和生成分开提交，避免 LLM 长耗时期间持锁
      */
-    @Transactional
     public OutlineResponse regenerateOutline(Long docId) {
         Document doc = getById(docId);
         if (doc == null) throw new IllegalArgumentException("文档不存在");
         if (!"COMPLETED".equals(doc.getStatus())) throw new IllegalArgumentException("文档尚未处理完成");
         if (doc.getChunkCount() == null || doc.getChunkCount() == 0) throw new IllegalArgumentException("文档无切块数据");
 
+        // 先删除旧大纲（独立事务），否则 generateAndSave 检测到已存在会跳过
+        outlineService.deleteByDocId(docId);
+
         DocumentOutline newOutline = outlineGenerator.generateAndSave(
                 docId, SecurityUtils.getCurrentUserId(), doc.getChunkCount());
         if (newOutline == null) throw new IllegalStateException("大纲生成失败, 请稍后重试");
-
-        // 生成成功后，删除旧版本的大纲（保留最新版本）
-        outlineService.deleteOldVersions(docId, newOutline.getVersion());
 
         return OutlineResponse.from(newOutline, objectMapper);
     }

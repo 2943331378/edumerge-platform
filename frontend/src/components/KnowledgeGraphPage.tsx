@@ -52,18 +52,35 @@ type GraphLink = {
   strength: number;
 };
 
+// 语义化辅色 — 与 globals.css --accent-* 变量对应的 hex 值（canvas 不支持 oklch）
+const ACCENT = {
+  warm:    { light: "#b5573a", dark: "#cc8468" },   // --accent-warm  oklch(0.55 0.18 40)
+  amber:   { light: "#b08020", dark: "#c4a04e" },   // --accent-amber oklch(0.55 0.16 75)
+  rose:    { light: "#b53a5a", dark: "#cc6880" },   // --accent-rose  oklch(0.55 0.18 15)
+  teal:    { light: "#1a8a78", dark: "#4eaa98" },   // --accent-teal  oklch(0.50 0.14 175)
+  slate:   { light: "#6e7681", dark: "#8b949e" },   // --accent-slate oklch(0.55 0.03 260)
+  purple:  { light: "#7a52b5", dark: "#a080cc" },   // --accent-purple oklch(0.52 0.18 300)
+  destructive: { light: "#c94040", dark: "#e06060" },
+};
+
 function getNodeColor(docCount: number, isDark: boolean): string {
-  if (docCount >= 4) return isDark ? "#fb923c" : "#ea580c";
-  if (docCount >= 2) return isDark ? "#2dd4bf" : "#0d9488";
-  return isDark ? "#60a5fa" : "#2563eb";
+  const mode = isDark ? "dark" : "light";
+  if (docCount >= 4) return ACCENT.amber[mode];
+  if (docCount >= 2) return ACCENT.teal[mode];
+  return ACCENT.warm[mode];
 }
 
-function getLinkColor(type: string): string {
+function getLinkColor(type: string, isDark: boolean): string {
+  const mode = isDark ? "dark" : "light";
   const colors: Record<string, string> = {
-    IS_A: "#a78bfa", PART_OF: "#34d399", RELATES_TO: "#94a3b8",
-    PREREQUISITE: "#f472b6", CONTRADICTS: "#f87171", APPLIES_TO: "#fbbf24",
+    IS_A: ACCENT.purple[mode],
+    PART_OF: ACCENT.teal[mode],
+    RELATES_TO: ACCENT.slate[mode],
+    PREREQUISITE: ACCENT.rose[mode],
+    CONTRADICTS: ACCENT.destructive[mode],
+    APPLIES_TO: ACCENT.amber[mode],
   };
-  return colors[type] ?? "#94a3b8";
+  return colors[type] ?? ACCENT.slate[mode];
 }
 
 const RELATION_LABELS: Record<string, string> = {
@@ -163,7 +180,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
       .map((r) => ({
         source: r.sourceConceptId,
         target: r.targetConceptId,
-        color: getLinkColor(r.relationshipType),
+        color: getLinkColor(r.relationshipType, isDark),
         label: r.relationshipType,
         strength: r.strength,
       }));
@@ -307,7 +324,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
         )}
 
         {/* Legend */}
-        <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground/60">
+        <div className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground/60">
           <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(1, isDark) }} /> 1文档</span>
           <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(2, isDark) }} /> 2-3文档</span>
           <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: getNodeColor(4, isDark) }} /> 4+文档</span>
@@ -330,7 +347,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                 >
                   <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: n.color }} />
                   <span className="flex-1 truncate text-foreground">{n.name}</span>
-                  <span className="text-[10px] text-muted-foreground">{n.docCount} 文档</span>
+                  <span className="text-[11px] text-muted-foreground">{n.docCount} 文档</span>
                 </button>
               ))}
           </div>
@@ -409,11 +426,11 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                       labelY - tp < rect.y + rect.h && labelY + labelH > rect.y) return;
                 }
                 _labelRects.push({ x: labelX, y: labelY - tp, w: labelW, h: labelH + tp });
-                ctx.fillStyle = isDark ? "rgba(15,23,42,0.8)" : "rgba(255,255,255,0.85)";
+                ctx.fillStyle = isDark ? "rgba(30,25,22,0.8)" : "rgba(255,253,248,0.85)";
                 ctx.beginPath();
                 ctx.roundRect(labelX - 2, labelY - tp, labelW + 4, labelH + tp, 3);
                 ctx.fill();
-                ctx.fillStyle = isDark ? "#e2e8f0" : "#1e293b";
+                ctx.fillStyle = isDark ? "#e8e0d8" : "#2a2218";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "top";
                 ctx.fillText(label, n.x!, labelY);
@@ -493,8 +510,8 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                   {/* Importance */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">重要度</span>
-                      <span className="text-[10px] text-muted-foreground">{selectedNode.importance}/10</span>
+                      <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wider">重要度</span>
+                      <span className="text-[11px] text-muted-foreground">{selectedNode.importance}/10</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                       <div className="h-full rounded-full bg-primary transition-all"
@@ -505,15 +522,15 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                   {/* Badges */}
                   <div className="flex gap-1.5 flex-wrap">
                     {selectedNode.documentCount >= 3 && (
-                      <Badge className="text-[10px] bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">高频考点</Badge>
+                      <Badge className="text-[11px] bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">高频考点</Badge>
                     )}
-                    <Badge className="text-[10px] bg-muted text-muted-foreground">{selectedNode.documentCount} 个文档</Badge>
+                    <Badge className="text-[11px] bg-muted text-muted-foreground">{selectedNode.documentCount} 个文档</Badge>
                   </div>
 
                   {/* Definition */}
                   {selectedDetail?.concept.definition && (
                     <div>
-                      <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">定义</span>
+                      <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wider">定义</span>
                       <div className="mt-1 text-xs text-muted-foreground leading-relaxed prose prose-sm dark:prose-invert max-w-none">
                         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
                           {selectedDetail.concept.definition}
@@ -525,7 +542,7 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                   {/* Source documents */}
                   {selectedDocs.length > 0 && (
                     <div>
-                      <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">
+                      <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wider">
                         出现在 {selectedDocs.length} 个文档中
                       </span>
                       <div className="mt-2 space-y-1">
@@ -550,16 +567,16 @@ export function KnowledgeGraphPage({ sessions, onSelectSession, onOpenChat }: Pr
                   {/* Related concepts */}
                   {selectedDetail && selectedDetail.relatedConcepts.length > 0 && (
                     <div>
-                      <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">关联概念</span>
+                      <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wider">关联概念</span>
                       <div className="mt-2 space-y-1">
                         {selectedDetail.relationships.map((r) => {
                           const relatedId = r.sourceId === selectedNode.id ? r.targetId : r.sourceId;
                           const related = selectedDetail.relatedConcepts.find((c) => c.id === relatedId);
                           return (
                             <div key={r.id} className="flex items-center gap-2 text-xs">
-                              <span className={cn("text-[10px] px-1 py-0.5 rounded font-medium",
-                                r.type === "IS_A" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" :
-                                r.type === "PREREQUISITE" ? "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300" :
+                              <span className={cn("text-[11px] px-1 py-0.5 rounded font-medium",
+                                r.type === "IS_A" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300" :
+                                r.type === "PREREQUISITE" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300" :
                                 "bg-muted text-muted-foreground")}>
                                 {RELATION_LABELS[r.type] ?? r.type}
                               </span>
