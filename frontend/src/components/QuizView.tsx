@@ -142,13 +142,20 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   const abortRef = useRef<AbortController | null>(null);
   const mindMapAbortRef = useRef<AbortController | null>(null);
   const generatingRef = useRef(false);
+  const propGeneratingRef = useRef(generating);
+  propGeneratingRef.current = generating;
+  const mountedRef = useRef(true);
+  const prevCounterRef = useRef<number | undefined>(undefined);
 
-  // Cleanup: abort in-flight requests on unmount
+  // Cleanup: 重置 generating 状态（不 abort 请求 — React double-mount 会误杀）
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      abortRef.current?.abort();
+      mountedRef.current = false;
+      prevCounterRef.current = undefined;
       mindMapAbortRef.current?.abort();
       generatingRef.current = false;
+      if (propGeneratingRef.current) onGeneratingChange?.(false);
     };
   }, []);
 
@@ -327,8 +334,10 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     setLoading(true);
     onGeneratingChange?.(true);
     try {
-      await generateApi(undefined, undefined, sessionId, controller.signal, sectionContext || undefined, startChunk, endChunk);
+      await generateApi(docId ?? undefined, docUuid ?? undefined, sessionId, controller.signal, sectionContext || undefined, startChunk, endChunk);
+      if (!mountedRef.current || abortRef.current !== controller) return;
       const fresh = await listDecks(docId, "QUIZ");
+      if (!mountedRef.current || abortRef.current !== controller) return;
       setDecks(fresh);
       onGenerated?.();
       toast.success("测试题生成成功");
@@ -336,19 +345,21 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
         await enterDeck(fresh[0]);
       }
     } catch (err) {
+      if (!mountedRef.current || abortRef.current !== controller) return;
       if ((err as Error).name !== "AbortError") {
         toast.error("测试题生成失败");
       }
     } finally {
       generatingRef.current = false;
     }
-    abortRef.current = null;
-    setLoading(false);
-    onGeneratingChange?.(false);
+    if (abortRef.current === controller) {
+      abortRef.current = null;
+      setLoading(false);
+      onGeneratingChange?.(false);
+    }
   };
 
   // 从大纲页面跳转过来时自动触发生成
-  const prevCounterRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     const counter = generateTrigger?.counter;
     if (counter !== undefined && counter !== prevCounterRef.current && generateTrigger?.type === "quiz") {
@@ -472,7 +483,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
               <div className="flex-1 h-1 rounded-full bg-purple-200 dark:bg-purple-900 overflow-hidden">
                 <div className="h-full rounded-full bg-purple-500 transition-all duration-700 ease-out" style={{ width: `${mindMapProgress}%` }} />
               </div>
-              <span className="text-[10px] text-purple-400 shrink-0">{mindMapProgress}%</span>
+              <span className="text-[11px] text-purple-400 shrink-0">{mindMapProgress}%</span>
             </div>
           </div>
         )}
@@ -529,13 +540,13 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30">
                           <HelpCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                         </div>
-                        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">QUIZ</span>
+                        <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">QUIZ</span>
                       </div>
                       <p className="text-sm font-medium text-foreground/85 leading-snug pr-6">{deck.title}</p>
                       <div className="flex items-center gap-2">
                         <p className="text-[11px] text-muted-foreground/50">{new Date(deck.createdAt).toLocaleString("zh-CN")}</p>
                         {isNewDeck(deck.createdAt) && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-md">
+                          <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-md">
                             <Sparkle className="h-2.5 w-2.5" />
                             New
                           </span>
@@ -547,7 +558,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                           const color = w.accuracyRate >= 80 ? "bg-emerald-500" : w.accuracyRate >= 60 ? "bg-amber-500" : "bg-red-500";
                           const textColor = w.accuracyRate >= 80 ? "text-emerald-600 dark:text-emerald-400" : w.accuracyRate >= 60 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
                           return (
-                            <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${textColor}`}>
+                            <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${textColor}`}>
                               <span className={`inline-block h-1.5 w-1.5 rounded-full ${color}`} />
                               {w.accuracyRate}%
                             </span>
@@ -719,10 +730,10 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
               {reviewMode ? "错题回顾" : (currentDeck?.title ?? "")}
             </span>
             {!reviewMode && !manageMode && answers.length > 0 && (
-              <span className="text-[10px] text-emerald-600/60 dark:text-emerald-400/60 font-medium">{answers.filter((a) => a.correct).length}/{answers.length}</span>
+              <span className="text-[11px] text-emerald-600/60 dark:text-emerald-400/60 font-medium">{answers.filter((a) => a.correct).length}/{answers.length}</span>
             )}
             {reviewMode && (
-              <span className="text-[10px] text-muted-foreground/40">{reviewIdx + 1}/{wrongQuizzes.length}</span>
+              <span className="text-[11px] text-muted-foreground/40">{reviewIdx + 1}/{wrongQuizzes.length}</span>
             )}
             <ChevronRight className="h-3 w-3 -rotate-90 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors" />
           </button>
@@ -768,17 +779,17 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 space-y-1">
-                        <span className="text-[10px] font-medium text-primary/60 uppercase tracking-wider">Q{i + 1}</span>
+                        <span className="text-[11px] font-medium text-primary/60 uppercase tracking-wider">Q{i + 1}</span>
                         <p className="text-xs text-foreground/85 leading-relaxed">{quiz.question}</p>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {quiz.options.map((opt, oi) => (
-                            <span key={opt} className={`text-[10px] px-1.5 py-0.5 rounded ${opt === quiz.answer ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground/70'}`}>
+                            <span key={opt} className={`text-[11px] px-1.5 py-0.5 rounded ${opt === quiz.answer ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground/70'}`}>
                               <span className="font-medium mr-0.5">{String.fromCharCode(65 + oi)}.</span>{opt}
                             </span>
                           ))}
                         </div>
                         {quiz.explanation && (
-                          <p className="text-[10px] text-muted-foreground/50 mt-1">解析: {quiz.explanation}</p>
+                          <p className="text-[11px] text-muted-foreground/50 mt-1">解析: {quiz.explanation}</p>
                         )}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
@@ -822,10 +833,10 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
             </div>
             <div className="flex items-center gap-2">
               {quiz?.quizType === "FILL_BLANK" && (
-                <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">填空题</span>
+                <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">填空题</span>
               )}
               {quiz?.quizType === "SINGLE" && (
-                <span className="inline-flex items-center rounded-md bg-purple-50 dark:bg-purple-900/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">选择题</span>
+                <span className="inline-flex items-center rounded-md bg-purple-50 dark:bg-purple-900/20 px-1.5 py-0.5 text-[11px] font-medium text-purple-700 dark:text-purple-300">选择题</span>
               )}
               {quiz?.difficulty && <span>{quiz.difficulty >= 4 ? "综合应用" : "基础概念"}</span>}
             </div>
@@ -957,7 +968,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
           {activeSubmitted && quiz?.explanation && (
             <Card className="rounded-2xl border-border/40 bg-muted/10">
               <CardContent className="p-4">
-                <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">解析</span>
+                <span className="text-[11px] font-medium text-muted-foreground/50 uppercase tracking-wider">解析</span>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{quiz.explanation}</p>
               </CardContent>
             </Card>

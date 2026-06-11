@@ -96,12 +96,17 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 /** 流式请求 — 返回 ReadableStream，由调用方逐行解析 SSE。支持 401 token 刷新重试。 */
 async function streamRequest(url: string, body: Record<string, string>, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
-  let res = await fetch(`${BASE}${url}`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify(body),
-    signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${url}`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    throw e;
+  }
   if (res.status === 401) {
     const refreshed = await tryRefreshToken();
     if (refreshed) {
@@ -624,8 +629,8 @@ export async function listFlashcardsByDeck(deckId: number, important?: boolean):
 export async function generateFlashcards(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<FlashcardItem[]> {
   const body: Record<string, string> = {};
   if (sessionId) body.sessionId = String(sessionId);
-  if (docId && !sessionId) body.docId = String(docId);
-  if (docUuid && !sessionId) body.docUuid = docUuid;
+  if (docId) body.docId = String(docId);
+  if (docUuid) body.docUuid = docUuid;
   if (sectionContext) body.sectionContext = sectionContext;
   if (startChunk != null) body.startChunk = String(startChunk);
   if (endChunk != null) body.endChunk = String(endChunk);
@@ -733,8 +738,8 @@ export async function listQuizAttempts(docId: number): Promise<QuizAttemptRecord
 export async function generateQuizzes(docId?: number, docUuid?: string, sessionId?: number, signal?: AbortSignal, sectionContext?: string, startChunk?: number, endChunk?: number): Promise<QuizItem[]> {
   const body: Record<string, string> = {};
   if (sessionId) body.sessionId = String(sessionId);
-  if (docId && !sessionId) body.docId = String(docId);
-  if (docUuid && !sessionId) body.docUuid = docUuid;
+  if (docId) body.docId = String(docId);
+  if (docUuid) body.docUuid = docUuid;
   if (sectionContext) body.sectionContext = sectionContext;
   if (startChunk != null) body.startChunk = String(startChunk);
   if (endChunk != null) body.endChunk = String(endChunk);

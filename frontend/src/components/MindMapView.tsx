@@ -31,9 +31,10 @@ interface Props {
   generateTrigger?: { type: string; counter: number };
   generating?: boolean;
   onGeneratingChange?: (v: boolean) => void;
+  onGenerated?: () => void;
 }
 
-export function MindMapView({ docId, docStatus, embedded, onContextChange, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
+export function MindMapView({ docId, docStatus, embedded, onContextChange, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange, onGenerated }: Props) {
   const [view, setView] = useState<"list" | "viewer">("list");
   const [mindMaps, setMindMaps] = useState<MindMapRecord[]>([]);
   const [currentMap, setCurrentMap] = useState<MindMapRecord | null>(null);
@@ -44,6 +45,21 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
   const streamingRef = useRef("");
   const rafIdRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const generatingRef = useRef(generating);
+  generatingRef.current = generating;
+  const mountedRef = useRef(true);
+  const prevCounterRef = useRef<number | undefined>(undefined);
+
+  // Cleanup: 重置 generating 状态（不 abort 请求 — React double-mount 会误杀）
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      prevCounterRef.current = undefined;
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+      if (generatingRef.current) onGeneratingChange?.(false);
+    };
+  }, []);
 
   const isReady = docStatus === "COMPLETED";
 
@@ -77,17 +93,23 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
         endChunk,
         signal: controller.signal,
         onToken: (token) => {
+          if (!mountedRef.current || abortRef.current !== controller) return;
           streamingRef.current += token;
           if (rafIdRef.current === null) {
             rafIdRef.current = requestAnimationFrame(() => {
               rafIdRef.current = null;
-              setStreamingContent(streamingRef.current);
+              if (mountedRef.current && abortRef.current === controller) {
+                setStreamingContent(streamingRef.current);
+              }
             });
           }
         },
-        onProgress: (p) => setStreamingProgress(p),
+        onProgress: (p) => {
+          if (mountedRef.current && abortRef.current === controller) setStreamingProgress(p);
+        },
         onDone: async (meta) => {
           if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          if (!mountedRef.current || abortRef.current !== controller) return;
           setStreamingContent(null);
           setStreamingError(null);
           setStreamingProgress(0);
@@ -95,16 +117,20 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
           setCurrentMap(meta);
           setView("viewer");
           await reloadList();
+          if (!mountedRef.current || abortRef.current !== controller) return;
           toast.success("思维导图生成成功");
+          onGenerated?.();
         },
         onError: (msg) => {
           if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          if (!mountedRef.current || abortRef.current !== controller) return;
           setStreamingError(msg || "生成中断");
           onGeneratingChange?.(false);
         },
       });
     } catch (err) {
       if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+      if (!mountedRef.current || abortRef.current !== controller) return;
       if ((err as Error).name !== "AbortError") {
         setStreamingError(err instanceof Error ? err.message : "生成中断");
         toast.error(err instanceof Error ? err.message : "思维导图生成失败");
@@ -115,12 +141,13 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
       onGeneratingChange?.(false);
     }
     clearTimeout(timeoutId);
-    abortRef.current = null;
-    onGeneratingChange?.(false);
+    if (abortRef.current === controller) {
+      abortRef.current = null;
+      onGeneratingChange?.(false);
+    }
   }, [docId, generating, sectionContext, startChunk, endChunk, reloadList, onGeneratingChange]);
 
   // 从大纲跳转自动触发
-  const prevCounterRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     const counter = generateTrigger?.counter;
     if (counter !== undefined && counter !== prevCounterRef.current && generateTrigger?.type === "mindmap") {
@@ -282,7 +309,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
                     <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
                       <GitFork className="h-4 w-4 text-primary" />
                     </div>
-                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">MINDMAP</span>
+                    <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">MINDMAP</span>
                   </div>
                   <p className="text-sm font-medium text-foreground/85 leading-snug pr-6">{mm.title}</p>
                   <p className="text-[11px] text-muted-foreground/50">
