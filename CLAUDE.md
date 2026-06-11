@@ -58,7 +58,7 @@ npm run build     # 生产构建
 - **生成去重**：`AiFlashcardGenerator.generate()` / `AiQuizGenerator.generate()` 接受 `existingQuestions` 参数，注入 Prompt 的 `{EXISTING_HINT}` 占位符，防止重复生成已有内容。
 - **SSE 流式响应**：`LearningChatController.stream()` 用 `sendDoneAndComplete()` 延迟 500ms 关闭连接，防 `ERR_INCOMPLETE_CHUNKED_ENCODING`。**禁止**多线程并发写 SseEmitter。
 - **按会话缓存状态**：`page.tsx` 使用 `sessionCache`（Map<sessionId, {note, mindMap, completedSteps}>）在切换文档时保留 AI 生成内容。
-- **AbortController 取消生成**：FlashcardView、QuizView 和 StudyNoteView 使用 `AbortController` + `abortRef` 取消进行中的 AI 生成请求。
+- **AbortController 取消生成**：FlashcardView、QuizView、MindMapView 和 StudyNoteView 使用 `AbortController` + `abortRef` 取消进行中的 AI 生成请求。**React double-mount 安全**：cleanup 中**禁止** `abortRef.current?.abort()`（Strict Mode 的 unmount 阶段会误杀正在进行的请求）。改用三重防护：① `mountedRef` — mount effect 函数体中 `mountedRef.current = true`（`useRef(true)` 只初始化一次，cleanup 设 false 后第二次 mount 不会自动重置）；② 回调中 `if (!mountedRef.current || abortRef.current !== controller) return;` 跳过已卸载或已过期的请求；③ `prevCounterRef.current = undefined` 在 cleanup 中重置，确保 trigger effect 在第二次 mount 时重新触发。
 - **FlowNote 自动提取**：`AiRagService.saveExchange()` 每 5 轮对话自动触发 `FlowNoteService.extractFromChat()`。
 - **测验错题回顾**：`QuizView` 完成答题后筛选 `wrongQuizzes`，进入回顾模式逐题重做。
 - **闪卡预览审核**：`FlashcardView` 生成后先进入 preview 网格视图，用户可逐条编辑/删除后再开始学习。
