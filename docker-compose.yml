@@ -14,13 +14,13 @@ services:
     container_name: edumerge-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-edumerge_root_2026}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-edumerge}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./backend/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-edumerge_root_2026}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -52,7 +52,7 @@ services:
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-edumerge}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-edumerge_mq_2026}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -148,14 +148,14 @@ services:
       - MYSQL_PORT=3306
       - MYSQL_DATABASE=${MYSQL_DATABASE:-edumerge}
       - MYSQL_USER=root
-      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-edumerge_root_2026}
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-edumerge}
-      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-edumerge_mq_2026}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
       - MILVUS_HOST=milvus-standalone
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - AI_API_KEY=${AI_API_KEY}
