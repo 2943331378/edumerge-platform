@@ -213,6 +213,7 @@ export default function HomePage() {
   const {
     sessions, activeSession, setActiveSession, sessionCache, loadSessions, updateSessionCache,
     handleSelectSession, handleDeleteDocument, handleRetryDocument, handleRenameDocument,
+    sessionsLoading,
   } = useSessionState(() => setCurrentStep(1));
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -321,6 +322,15 @@ export default function HomePage() {
       await loadFolders();
     } catch {
       toast.error("更新颜色失败");
+    }
+  }, [loadFolders]);
+
+  const handleReorderFolders = useCallback(async (orderedIds: number[]) => {
+    try {
+      await Promise.all(orderedIds.map((id, idx) => updateFolder(id, { sortOrder: idx })));
+      await loadFolders();
+    } catch {
+      toast.error("排序失败");
     }
   }, [loadFolders]);
 
@@ -870,8 +880,10 @@ export default function HomePage() {
         onRenameFolder={handleRenameFolder}
         onUpdateFolderColor={handleUpdateFolderColor}
         onMoveDocument={handleMoveDocument}
+        onReorderFolders={handleReorderFolders}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+        loading={sessionsLoading}
       />
 
       <main id="main-content" role="main" className="flex-1 flex flex-col min-w-0">

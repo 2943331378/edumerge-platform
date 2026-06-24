@@ -21,9 +21,11 @@ export function useSessionState(onSessionChange?: () => void) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null);
   const [sessionCache, setSessionCache] = useState<Map<number, SessionCacheEntry>>(new Map());
+  const [sessionsLoading, setSessionsLoading] = useState(true);
 
   const loadSessions = useCallback(async () => {
     try {
+      setSessionsLoading(true);
       const list = await listSessions();
       setSessions(list);
       setActiveSession((cur) => {
@@ -35,6 +37,7 @@ export function useSessionState(onSessionChange?: () => void) {
         return updated ?? cur;
       });
     } catch { toast.error("加载会话列表失败"); }
+    finally { setSessionsLoading(false); }
   }, []);
 
   const updateSessionCache = useCallback((updates: Partial<SessionCacheEntry> | ((prev: SessionCacheEntry) => Partial<SessionCacheEntry>)) => {
@@ -62,7 +65,6 @@ export function useSessionState(onSessionChange?: () => void) {
   const handleDeleteDocument = useCallback(async (sessionId: number) => {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session?.docId) return;
-    if (!confirm(`确定删除「${session.fileName ?? session.title}」及其全部关联数据吗？此操作不可撤销。`)) return;
     try {
       await deleteDocument(session.docId);
       toast.success("文档已删除");
@@ -118,5 +120,6 @@ export function useSessionState(onSessionChange?: () => void) {
     handleDeleteDocument,
     handleRetryDocument,
     handleRenameDocument,
+    sessionsLoading,
   };
 }

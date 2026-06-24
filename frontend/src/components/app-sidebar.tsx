@@ -7,6 +7,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { toast } from "sonner";
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import {
   Upload,
   FileText,
   PanelLeftClose,
@@ -21,6 +31,10 @@ import {
   ChevronRight,
   GripVertical,
   Check,
+  Clock,
+  FileUp,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 
 export interface UploadedDoc {
@@ -40,6 +54,7 @@ export interface FolderInfo {
   name: string;
   color: string;
   docCount: number;
+  sortOrder?: number;
 }
 
 interface AppSidebarProps {
@@ -56,8 +71,10 @@ interface AppSidebarProps {
   onRenameFolder?: (folderId: number, name: string) => Promise<void>;
   onUpdateFolderColor?: (folderId: number, color: string) => Promise<void>;
   onMoveDocument?: (sessionId: number, folderId: number | null) => Promise<void>;
+  onReorderFolders?: (orderedIds: number[]) => Promise<void>;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  loading?: boolean;
 }
 
 /** 预定义文件夹颜色 */
@@ -101,8 +118,10 @@ export function AppSidebar({
   onRenameFolder,
   onUpdateFolderColor,
   onMoveDocument,
+  onReorderFolders,
   collapsed,
   onToggleCollapse,
+  loading = false,
 }: AppSidebarProps) {
   const [dragging, setDragging] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -125,6 +144,9 @@ export function AppSidebar({
   // Move document bottom sheet
   const [moveTarget, setMoveTarget] = useState<UploadedDoc | null>(null);
 
+  // Shared confirm dialog state
+  const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; description: string; onConfirm: () => void }>({ open: false, title: "", description: "", onConfirm: () => {} });
+
   // Long-press tracking
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
@@ -143,6 +165,33 @@ export function AppSidebar({
   const dragActive = useRef(false);
   const dragRafId = useRef<number>(0);
   const FOLDER_HEADER_ATTR = "data-folder-id";
+
+  // Recent docs tracking (localStorage)
+  const RECENT_KEY = "edumerge_recent_docs";
+  const RECENT_MAX = 5;
+
+  const getRecentIds = useCallback((): string[] => {
+    try {
+      return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const trackRecent = useCallback((docId: string) => {
+    const ids = getRecentIds().filter((id) => id !== docId);
+    ids.unshift(docId);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(ids.slice(0, RECENT_MAX)));
+  }, [getRecentIds]);
+
+  const recentDocs = useMemo(() => {
+    if (searchQuery) return [];
+    const ids = getRecentIds();
+    return ids
+      .map((id) => documents.find((d) => d.id === id))
+      .filter((d): d is UploadedDoc => !!d && d.sessionId > 0)
+      .slice(0, RECENT_MAX);
+  }, [documents, searchQuery, getRecentIds]);
 
   const cleanupDrag = useCallback(() => {
     dragActive.current = false;
@@ -344,17 +393,40 @@ export function AppSidebar({
     }
   };
 
+  // Reorder folder (move up/down)
+  const handleReorderFolder = useCallback(async (folderId: number, direction: "up" | "down") => {
+    if (!onReorderFolders) return;
+    const sorted = [...folders].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    const idx = sorted.findIndex((f) => f.id === folderId);
+    if (idx < 0) return;
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= sorted.length) return;
+    const newOrder = [...sorted];
+    [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
+    try {
+      await onReorderFolders(newOrder.map((f) => f.id));
+    } catch {
+      toast.error("排序失败");
+    }
+  }, [folders, onReorderFolders]);
+
   // Delete folder
-  const handleDeleteFolder = async (folderId: number) => {
+  const handleDeleteFolder = (folderId: number) => {
     if (!onDeleteFolder) return;
     const folder = folders.find((f) => f.id === folderId);
-    if (!confirm(`删除文件夹「${folder?.name ?? ""}」？文件夹内的文档将回到根目录。`)) return;
-    try {
-      await onDeleteFolder(folderId);
-      toast.success("文件夹已删除");
-    } catch {
-      toast.error("删除失败");
-    }
+    setConfirmState({
+      open: true,
+      title: `删除文件夹「${folder?.name ?? ""}」？`,
+      description: "文件夹内的文档将回到根目录，不会被删除。",
+      onConfirm: async () => {
+        try {
+          await onDeleteFolder(folderId);
+          toast.success("文件夹已删除");
+        } catch {
+          toast.error("删除失败");
+        }
+      },
+    });
   };
 
   // Dismiss move sheet and reset long-press flag
@@ -383,17 +455,20 @@ export function AppSidebar({
         key={doc.id}
         onClick={() => {
           if (longPressTriggered.current) return;
-          if (doc.sessionId > 0) onSelectSession(doc.sessionId);
+          if (doc.sessionId > 0) {
+            trackRecent(doc.id);
+            onSelectSession(doc.sessionId);
+          }
         }}
         onTouchStart={() => startLongPress(doc)}
         onTouchEnd={cancelLongPress}
         onTouchMove={cancelLongPress}
         className={cn(
-          "group flex items-center gap-2 rounded-lg px-3 py-1 max-md:py-2 text-xs select-none",
+          "group flex items-center gap-2 rounded-lg px-3 py-1 max-md:py-2 text-sm select-none",
           doc.sessionId > 0 && "cursor-pointer",
           isActive
-            ? "bg-white/40 dark:bg-white/10 ring-1 ring-primary/30 text-foreground font-medium"
-            : "text-muted-foreground hover:bg-white/10 dark:hover:bg-white/5 active:bg-white/10 dark:active:bg-white/5",
+            ? "bg-primary/10 dark:bg-primary/15 text-foreground"
+            : "text-muted-foreground hover:bg-muted/60 dark:hover:bg-muted/40 active:bg-muted/60 dark:active:bg-muted/40",
           dragDocId === doc.id && "opacity-40",
         )}
       >
@@ -432,7 +507,7 @@ export function AppSidebar({
                   if (e.key === "Escape") setEditingId(null);
                 }}
                 onClick={(e) => e.stopPropagation()}
-                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-2 py-1 max-md:py-1.5 text-xs outline-none"
+                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-2 py-1 max-md:py-1.5 text-sm outline-none"
               />
               <button
                 type="button"
@@ -455,7 +530,7 @@ export function AppSidebar({
             <>
               <span className="block truncate">{doc.name}</span>
               {doc.status === "done" && doc.pageCount != null && doc.pageCount > 0 && (
-                <span className="text-[11px] text-muted-foreground/40">
+                <span className="text-[11px] text-muted-foreground/60">
                   {doc.pageCount}
                   {doc.fileType === "pptx" || doc.fileType === "ppt" ? " 张幻灯片" : doc.fileType === "xlsx" ? " 个工作表" : doc.fileType === "csv" ? " 条记录" : " 页"}
                 </span>
@@ -493,27 +568,32 @@ export function AppSidebar({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            if (confirm(`确定删除「${doc.name}」？此操作将删除文档及所有关联的闪卡、测验、笔记等数据。`)) {
-              onDeleteDocument(doc.sessionId);
-            }
+            setConfirmState({
+              open: true,
+              title: `删除「${doc.name}」？`,
+              description: "此操作将删除文档及所有关联的闪卡、测验、笔记等数据，不可恢复。",
+              onConfirm: () => onDeleteDocument(doc.sessionId),
+            });
           }}
           className="hidden group-hover:flex max-md:flex shrink-0 min-w-[44px] min-h-[44px] items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
           title="删除文档"
         >
           <X className="h-3 w-3" />
         </button>
-        <span
-          className={cn(
-            "inline-block h-1.5 w-1.5 rounded-full shrink-0 ring-1 ring-white/20",
-            doc.status === "done"
-              ? "bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/30"
-              : doc.status === "error"
-                ? "bg-destructive"
-                : doc.status === "processing"
-                  ? "bg-blue-400 animate-pulse"
-                  : "bg-amber-400 animate-pulse",
-          )}
-        />
+        {doc.status === "done" ? (
+          <span className="inline-block h-2 w-2 rounded-full shrink-0 bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/30 ring-1 ring-white/20" />
+        ) : (
+          <span className={cn(
+            "inline-flex items-center gap-1 shrink-0 text-[10px] font-medium",
+            doc.status === "error" ? "text-destructive" : doc.status === "processing" ? "text-blue-400" : "text-amber-400",
+          )}>
+            <span className={cn(
+              "h-2 w-2 rounded-full animate-pulse",
+              doc.status === "error" ? "bg-destructive" : doc.status === "processing" ? "bg-blue-400" : "bg-amber-400",
+            )} />
+            {doc.status === "error" ? "失败" : doc.status === "processing" ? "处理中" : "上传中"}
+          </span>
+        )}
       </div>
     );
   };
@@ -531,10 +611,10 @@ export function AppSidebar({
           {...{ [FOLDER_HEADER_ATTR]: String(folder.id) }}
           onClick={() => toggleFolder(folder.id)}
           className={cn(
-            "group flex items-center gap-2 rounded-lg px-3 py-1 max-md:py-2 text-xs cursor-pointer transition-all duration-200 select-none",
+            "group flex items-center gap-2 rounded-lg px-3 py-1 max-md:py-2 text-sm cursor-pointer transition-all duration-200 select-none",
             isDropping
               ? "bg-primary/15 ring-1 ring-primary/40 text-foreground"
-              : "text-muted-foreground hover:bg-white/10 dark:hover:bg-white/5 active:bg-white/10 dark:active:bg-white/5",
+              : "text-muted-foreground hover:bg-muted/60 dark:hover:bg-muted/40 active:bg-muted/60 dark:active:bg-muted/40",
           )}
         >
           <ChevronRight
@@ -568,7 +648,7 @@ export function AppSidebar({
                     blurCommitTimerRef.current = null;
                   }
                 }}
-                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-2 py-1 max-md:py-1.5 text-xs outline-none"
+                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-2 py-1 max-md:py-1.5 text-sm outline-none"
               />
               <button
                 type="button"
@@ -589,7 +669,7 @@ export function AppSidebar({
           ) : (
             <span className="flex-1 min-w-0 truncate font-medium">{folder.name}</span>
           )}
-          <span className="text-[11px] text-muted-foreground/40 tabular-nums">
+          <span className="text-[11px] text-muted-foreground/60 tabular-nums">
             {docs.length}
           </span>
 
@@ -609,6 +689,28 @@ export function AppSidebar({
                 style={{ backgroundColor: folder.color }}
               />
             </button>
+          )}
+
+          {/* Reorder buttons */}
+          {onReorderFolders && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleReorderFolder(folder.id, "up"); }}
+                className="hidden group-hover:flex max-md:flex shrink-0 min-w-[44px] min-h-[44px] items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+                title="上移"
+              >
+                <ArrowUp className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleReorderFolder(folder.id, "down"); }}
+                className="hidden group-hover:flex max-md:flex shrink-0 min-w-[44px] min-h-[44px] items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+                title="下移"
+              >
+                <ArrowDown className="h-3 w-3" />
+              </button>
+            </>
           )}
 
           {/* Rename button */}
@@ -793,28 +895,35 @@ export function AppSidebar({
           {/* Document icon list */}
           {documents.map((doc) => {
             const isActive = doc.sessionId > 0 && activeSessionId === doc.sessionId;
+            const label = doc.name.replace(/\.[^.]+$/, "").slice(0, 2);
             return (
               <button
                 key={doc.id}
                 type="button"
-                onClick={() => { if (doc.sessionId > 0) onSelectSession(doc.sessionId); }}
+                onClick={() => {
+                  if (doc.sessionId > 0) {
+                    trackRecent(doc.id);
+                    onSelectSession(doc.sessionId);
+                  }
+                }}
                 title={doc.name}
                 className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-lg transition-all",
+                  "flex flex-col items-center gap-0.5 rounded-lg transition-all px-1 py-1",
                   isActive
                     ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground/60 hover:bg-white/10 hover:text-foreground",
+                    : "text-muted-foreground/60 hover:bg-muted/60 hover:text-foreground",
                 )}
               >
                 <FileText
-                  className="h-4 w-4"
+                  className="h-4 w-4 shrink-0"
                   style={{ color: FILE_TYPE_COLORS[doc.fileType ?? ""] }}
                 />
+                <span className="text-[10px] leading-none truncate max-w-[44px]">{label}</span>
               </button>
             );
           })}
           {documents.length === 0 && (
-            <span className="text-[11px] text-muted-foreground/30 px-1 text-center leading-tight">
+            <span className="text-[11px] text-muted-foreground/50 px-1 text-center leading-tight">
               暂无
             </span>
           )}
@@ -872,7 +981,7 @@ export function AppSidebar({
                 className="w-full rounded-lg border border-border/50 bg-muted/30 pl-7 pr-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/30 focus:bg-muted/50 transition-all"
               />
             </div>
-            <span className="text-[11px] text-muted-foreground/40 tabular-nums shrink-0">
+            <span className="text-[11px] text-muted-foreground/60 tabular-nums shrink-0">
               {documents.length} 份
             </span>
             {onCreateFolder && (
@@ -935,18 +1044,67 @@ export function AppSidebar({
             </div>
           )}
 
+          {/* First-use gesture hint */}
+          {documents.length > 0 && !localStorage.getItem("edumerge_gesture_hint_dismissed") && (
+            <div className="mx-3 mb-2 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-[11px] text-primary/80 shrink-0">
+              <span className="shrink-0 mt-0.5">💡</span>
+              <div className="flex-1 min-w-0">
+                <p>拖拽文档到文件夹可归类，长按文档可移动</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => localStorage.setItem("edumerge_gesture_hint_dismissed", "1")}
+                className="shrink-0 h-4 w-4 flex items-center justify-center rounded hover:bg-primary/10"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
           {/* Document list with folders — fills remaining space and scrolls */}
           <ScrollArea className="flex-1 min-h-0">
             <div className="px-2 pb-2 space-y-0.5">
+              {/* Loading skeleton */}
+              {loading && documents.length === 0 && (
+                <div className="space-y-1 px-1">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-lg px-3 py-1.5">
+                      <div className="h-3 w-3 rounded bg-muted/50 animate-pulse" />
+                      <div className="flex-1 h-3 rounded bg-muted/50 animate-pulse" style={{ width: `${60 + i * 10}%` }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Empty state */}
+              {documents.length === 0 && !loading && (
+                <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted/50">
+                    <FileUp className="h-6 w-6 text-muted-foreground/40" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-foreground/70">还没有学习资料</p>
+                    <p className="text-[11px] text-muted-foreground/50 mt-0.5">上传 PDF、DOCX 等开始学习</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Search no results */}
               {filteredDocs.length === 0 && documents.length > 0 && (
                 <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/50">
                   无匹配文档
                 </p>
               )}
-              {documents.length === 0 && (
-                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground/50">
-                  尚无文档
-                </p>
+
+              {/* Recent docs section */}
+              {!searchQuery && recentDocs.length > 0 && (
+                <div className="mb-1">
+                  <div className="flex items-center gap-1.5 px-3 pt-1 pb-0.5">
+                    <Clock className="h-3 w-3 text-muted-foreground/40" />
+                    <span className="text-[11px] text-muted-foreground/60 font-medium">最近访问</span>
+                  </div>
+                  {recentDocs.map(renderDocItem)}
+                </div>
               )}
 
               {/* Folder sections */}
@@ -972,10 +1130,10 @@ export function AppSidebar({
               {hasAnyFolders && ungroupedDocs.length > 0 && (
                 <>
                   <div className="flex items-center gap-2 px-3 pt-2 pb-0.5">
-                    <span className="text-[11px] text-muted-foreground/40 font-medium uppercase tracking-wider">
+                    <span className="text-[11px] text-muted-foreground/60 font-medium uppercase tracking-wider">
                       未分类
                     </span>
-                    <span className="text-[11px] text-muted-foreground/30 tabular-nums">
+                    <span className="text-[11px] text-muted-foreground/50 tabular-nums">
                       {ungroupedDocs.length}
                     </span>
                   </div>
@@ -1000,7 +1158,7 @@ export function AppSidebar({
         )}
       >
         {!collapsed && (
-          <span className="text-[11px] text-muted-foreground/40 tracking-wider">
+          <span className="text-[11px] text-muted-foreground/60 tracking-wider">
             EDUMERGE AI
           </span>
         )}
@@ -1071,6 +1229,20 @@ export function AppSidebar({
         </div>
       </>
     )}
+
+    {/* Shared confirm dialog */}
+    <AlertDialog open={confirmState.open} onOpenChange={(open) => setConfirmState((s) => ({ ...s, open }))}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{confirmState.title}</AlertDialogTitle>
+          <AlertDialogDescription>{confirmState.description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { confirmState.onConfirm(); setConfirmState((s) => ({ ...s, open: false })); }}>确认删除</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }
