@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { toast } from "sonner";
 import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, X, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,17 @@ import type { StudyNoteRecord } from "@/lib/api";
 import { generateStudyNote, generateStudyNoteStream, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { printNote } from "@/lib/printExport";
+import { MermaidDiagram } from "@/components/MermaidDiagram";
+
+// rehype-sanitize 默认 schema 不保留 code 元素的 class 属性，
+// 需要扩展以支持 Mermaid 语言类名检测
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [...(defaultSchema.attributes?.code ?? []), "className"],
+  },
+};
 
 interface Props {
   docId: number | null;
@@ -53,9 +64,34 @@ const markdownComponents: Components = {
   ),
   li: ({ children }) => <li className="pl-1">{children}</li>,
   strong: ({ children }) => <strong className="font-semibold text-foreground/90">{children}</strong>,
-  code: ({ children }) => (
-    <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground/85">{children}</code>
-  ),
+  pre: ({ children }) => {
+    // Mermaid blocks: render MermaidDiagram directly without <pre> wrapper
+    const child = children as React.ReactElement<{ className?: string; children?: unknown }> | undefined;
+    if (
+      child &&
+      typeof child === "object" &&
+      "props" in child &&
+      child.props?.className?.includes("language-mermaid") &&
+      typeof child.props?.children === "string"
+    ) {
+      return <MermaidDiagram code={child.props.children} />;
+    }
+    return <pre>{children}</pre>;
+  },
+  code: ({ className, children, node, ...props }) => {
+    const isBlock = className?.includes("language-");
+    if (isBlock) {
+      // Block code — render as styled code block (mermaid handled by pre above)
+      return (
+        <code className="block overflow-x-auto rounded-lg bg-muted/60 p-4 text-xs leading-5 text-foreground/85 font-mono" {...props}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground/85" {...props}>{children}</code>
+    );
+  },
   blockquote: ({ children }) => (
     <blockquote className="my-4 border-l-2 border-primary/40 pl-4 text-sm text-muted-foreground">{children}</blockquote>
   ),
@@ -175,14 +211,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
         onToken: (token) => {
           if (!mountedRef.current || abortRef.current !== controller) return;
           streamingContentRef.current += token;
-          if (rafIdRef.current === null) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              rafIdRef.current = null;
-              if (mountedRef.current && abortRef.current === controller) {
-                setStreamingContent(streamingContentRef.current);
-              }
-            });
-          }
+          setStreamingContent(streamingContentRef.current);
         },
         onProgress: (progress) => {
           if (mountedRef.current && abortRef.current === controller) setStreamingProgress(progress);
@@ -190,12 +219,15 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
         onDone: async () => {
           if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
           if (!mountedRef.current || abortRef.current !== controller) return;
-          const list = await listNoteHistory(docId);
-          if (!mountedRef.current || abortRef.current !== controller) return;
+          // 同步清理流式状态 — 必须在 await 之前，
+          // 否则 handleGenerate 的 finally 块会抢先把 abortRef 设为 null，
+          // 导致 await 之后的 abortRef 检查失败、setStreamingContent(null) 永远不执行
           setStreamingContent(null);
           setStreamingError(null);
           setStreamingProgress(0);
           streamingContentRef.current = "";
+          const list = await listNoteHistory(docId);
+          if (!mountedRef.current) return;
           loadHistory(list);
           onGenerated?.();
           toast.success("学习笔记生成成功");
@@ -469,7 +501,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                   </div>
                 )}
                 <article className="max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]} components={markdownComponents}>
                     {streamingContent}
                   </ReactMarkdown>
                 </article>
@@ -493,7 +525,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                   />
                 ) : (
                   <article className="max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]} components={markdownComponents}>
                       {note.content}
                     </ReactMarkdown>
                   </article>
@@ -509,7 +541,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                     笔记结构
                   </div>
                   <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-                    {["文档概述", "核心知识点", "关键概念解释", "易混淆点", "复习清单", "可自测问题"].map((item) => (
+                    {["文档概述", "核心知识点", "知识图解", "关键概念辨析", "典型应用场景", "易错点", "复习清单", "可自测问题"].map((item) => (
                       <div key={item} className="rounded-lg bg-background/60 px-3 py-2">{item}</div>
                     ))}
                   </div>

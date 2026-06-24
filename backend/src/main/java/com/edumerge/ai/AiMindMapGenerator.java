@@ -70,11 +70,11 @@ public class AiMindMapGenerator extends AiGeneratorBase {
             context = buildContextWithPages(matches);
             chunkCount = matches.size();
         }
-        String subjectRules = buildSubjectRules(getSubjectType(docId));
+        String subjectType = getSubjectType(docId);
         log.info("思维导图上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, chunkCount, System.currentTimeMillis() - startTime);
 
         long llmStart = System.currentTimeMillis();
-        String markdown = callLLM(context, sectionContext, subjectRules);
+        String markdown = callLLM(context, sectionContext, subjectType);
         log.info("LLM 思维导图生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, markdown.length(), System.currentTimeMillis() - llmStart);
 
         markdown = cleanMarkdown(markdown);
@@ -109,10 +109,10 @@ public class AiMindMapGenerator extends AiGeneratorBase {
             if (matches.isEmpty()) return MindMapResult.empty();
             context = buildContextWithPages(matches);
         }
-        String subjectRules = buildSubjectRules(getSubjectType(docId));
+        String subjectType = getSubjectType(docId);
         log.info("流式思维导图上下文构建完成: docId={}, 耗时={}ms", docId, System.currentTimeMillis() - startTime);
 
-        List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectRules);
+        List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectType);
 
         // 流式调用 LLM (DeepSeek 支持真正的流式回调)
         StringBuilder fullContent = new StringBuilder();
@@ -172,13 +172,14 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         return MindMapResult.success(title, markdown);
     }
 
-    private String callLLM(String context, String sectionContext, String subjectRules) {
-        List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectRules);
+    private String callLLM(String context, String sectionContext, String subjectType) {
+        List<ChatMessage> messages = buildMindMapMessages(context, sectionContext, subjectType);
         ChatResponse response = chatContent(chatLanguageModel, messages);
         return response.aiMessage().text();
     }
 
-    private List<ChatMessage> buildMindMapMessages(String context, String sectionContext, String subjectRules) {
+    private List<ChatMessage> buildMindMapMessages(String context, String sectionContext, String subjectType) {
+        String subjectGuide = buildMindMapSubjectGuide(subjectType);
         String systemTemplate = """
                 你是一个严谨的 AI 知识架构师，擅长从非结构化文本中提取层级知识结构。
 
@@ -193,12 +194,12 @@ public class AiMindMapGenerator extends AiGeneratorBase {
                 2. 每个节点须为完整短语或句子，不可仅为单个词
                 3. 层级间无空行，保持紧凑树状结构
 
-                {SUBJECT_RULES}
+                {SUBJECT_GUIDE}
                 """;
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage(systemTemplate
                 .replace("{COMMON_RULES}", buildCommonRules())
-                .replace("{SUBJECT_RULES}", subjectRules)));
+                .replace("{SUBJECT_GUIDE}", subjectGuide)));
 
         StringBuilder userSb = new StringBuilder();
         if (sectionContext != null && !sectionContext.isBlank()) {
@@ -208,6 +209,49 @@ public class AiMindMapGenerator extends AiGeneratorBase {
         userSb.append("请基于以上文档内容，生成一份结构清晰的 Markdown 思维导图。仅输出 Markdown 内容。");
         messages.add(new UserMessage(userSb.toString()));
         return messages;
+    }
+
+    /**
+     * 根据学科类型生成思维导图的结构化指引 — 引导 LLM 按学科特点组织节点层级
+     * (区别于 buildSubjectRules 的出题策略，本方法聚焦知识结构)
+     */
+    private String buildMindMapSubjectGuide(String subjectType) {
+        if (subjectType == null) subjectType = SubjectClassifier.GENERAL;
+        return switch (subjectType) {
+            case "ALGORITHM" -> """
+                    # 学科结构指引：算法与数据结构
+                    每个数据结构/算法概念的分支应按以下维度展开，而非仅罗列名称：
+                    - **定义与结构**：是什么、由哪些部分组成、逻辑结构和物理结构
+                    - **核心操作**：增删查改的时间复杂度，关键操作的执行步骤
+                    - **典型实现**：关键代码片段或伪代码的思路（如链表插入、二叉树遍历顺序）
+                    - **时间/空间复杂度**：最好、平均、最坏情况的分析
+                    - **典型应用**：在哪些场景下使用，解决什么问题
+                    - **对比与选型**：与同类数据结构/算法的异同（如数组 vs 链表、快排 vs 归并）
+
+                    树形结构（二叉树、B树、堆等）的分支应体现层次遍历/遍历顺序；
+                    图相关概念应区分有向/无向、带权/无权、存储方式（邻接矩阵 vs 邻接表）；
+                    排序/搜索算法应体现稳定性、是否原地、适用场景等对比维度。
+                    """;
+            case "MATH" -> """
+                    # 学科结构指引：数学
+                    每个定理/概念的分支应体现：
+                    - 定义与符号 → 直觉理解（几何/物理意义） → 关键公式 → 适用条件与边界 → 典型应用题型
+                    注意公式间的推导关系和定理间的逻辑依赖。
+                    """;
+            case "PROGRAMMING" -> """
+                    # 学科结构指引：程序设计
+                    每个概念的分支应体现：
+                    - 语法/API 定义 → 语义规则 → 典型用法示例 → 常见陷阱 → 与相似概念的对比
+                    注意代码范式（OOP/FP）和设计模式的层次关系。
+                    """;
+            case "THEORY" -> """
+                    # 学科结构指引：计算机理论
+                    每个机制/协议的分支应体现：
+                    - 工作原理 → 状态/流程 → 关键参数 → 性能指标 → 与其他方案的对比
+                    注意协议栈的层次关系和系统组件的依赖关系。
+                    """;
+            default -> "";
+        };
     }
 
     /** 拼装上下文 — 标注片段来源以实现数据溯源 */

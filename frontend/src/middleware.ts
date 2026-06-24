@@ -7,8 +7,8 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get("edumerge_token")?.value;
 
-  // 未登录且访问受保护页面 → 跳转介绍页
-  if (!token && !PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+  // 未登录且访问受保护页面 → 跳转介绍页（API 路径由后端处理，不拦截）
+  if (!token && !pathname.startsWith("/api") && !PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     const landingUrl = new URL("/landing", request.url);
     return NextResponse.redirect(landingUrl);
   }

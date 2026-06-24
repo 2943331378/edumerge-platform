@@ -176,6 +176,13 @@ public class AiNoteGenerator extends AiGeneratorBase {
                 # 中文学习笔记
                 ## 文档概述（100-200字）
                 ## 核心知识点（5-8条，每条含原理说明和适用条件，而非仅列定义）
+                ## 知识图解（当文档涉及数据结构、算法、程序流程时，必须包含 2-3 个 Mermaid 图表。使用 ```mermaid 代码块。每图前后加一行说明文字。若文档为纯理论概念则跳过此节）
+                Mermaid 语法铁律（违反任何一条都会导致渲染失败）：
+                1. 节点文本必须用双引号包裹：A["说明文字"]，禁止裸露花括号/方括号/冒号/分号
+                2. 边标签禁止使用引号：A -->|标签文字| B，不要写 A -->|"标签"| B
+                3. subgraph 标题禁止括号：subgraph 标题名称，不要写 subgraph 标题(说明)
+                4. 节点 ID 只用英文字母和数字：A、B、node1，禁止中文 ID
+                5. 示例：graph LR; A["集合A"] -->|"合并"| B["集合B"]
                 ## 关键概念辨析（4-6组易混淆概念的对比分析，用表格或并列说明区别与联系）
                 ## 典型应用场景（每个知识点在什么条件下用、怎么用、举具体例子）
                 ## 易错点与注意事项（常见的错误理解、边界条件、特殊情况）
@@ -213,8 +220,8 @@ public class AiNoteGenerator extends AiGeneratorBase {
 
     private String cleanMarkdown(String raw) {
         String trimmed = raw == null ? "" : raw.trim();
-        int fenceStart = trimmed.indexOf("```");
-        if (fenceStart >= 0) {
+        // 仅剥离 LLM 输出外层包裹的单个代码块，保留 Mermaid 等内嵌代码块
+        if (trimmed.startsWith("```") && trimmed.endsWith("```") && trimmed.indexOf("```", 3) == trimmed.length() - 3) {
             trimmed = trimmed.replaceFirst("^```[a-zA-Z]*\\s*", "").replaceFirst("\\s*```$", "").trim();
         }
         int heading = trimmed.indexOf("# ");

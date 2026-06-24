@@ -174,6 +174,7 @@ public class DocumentService {
         Document update = new Document();
         update.setId(id);
         update.setTitle(title);
+        update.setFileName(title);
         documentMapper.updateById(update);
         // 同步更新关联会话标题
         sessionMapper.update(null,

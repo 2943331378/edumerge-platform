@@ -419,18 +419,36 @@ export function AppSidebar({
         />
         <div className="flex-1 min-w-0">
           {editingId === doc.id ? (
-            <input
-              ref={editInputRef}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={() => commitRename(doc)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitRename(doc);
-                if (e.key === "Escape") setEditingId(null);
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full bg-background border border-primary/30 rounded px-1 py-0.5 text-xs outline-none"
-            />
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <input
+                ref={editInputRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={() => commitRename(doc)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename(doc);
+                  if (e.key === "Escape") setEditingId(null);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-1 py-0.5 text-xs outline-none"
+              />
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); commitRename(doc); }}
+                className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-emerald-600 hover:bg-emerald-500/10"
+                title="确认"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); setEditingId(null); }}
+                className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                title="取消"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
           ) : (
             <>
               <span className="block truncate">{doc.name}</span>
