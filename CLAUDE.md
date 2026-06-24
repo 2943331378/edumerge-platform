@@ -4,7 +4,7 @@
 
 ## 构建与运行
 
-### 后端 (Spring Boot 3.2.4 + Java 17)
+### 后端 (Spring Boot 3.2.4 + Java 17) — 端口 8085
 
 ```bash
 # 构建（必须分开执行 clean 和 package — Windows 下合并执行会导致资源打包竞态）
@@ -19,7 +19,7 @@ java -Dfile.encoding=UTF-8 -jar target/edumerge-backend-1.0.0.jar
 powershell -Command "Stop-Process -Name java -Force"
 ```
 
-### 前端 (Next.js 16.2.4 + shadcn/ui + Tailwind v4)
+### 前端 (Next.js 16.2.4 + shadcn/ui + Tailwind v4) — 端口 3000
 
 ```bash
 cd frontend
@@ -38,7 +38,8 @@ npm run build     # 生产构建
 - `FlashcardView.tsx` — 闪卡组（AI生成→预览审核→逐条编辑/删除→翻转学习→SM-2自评→到期复习）含 AbortController 取消
 - `QuizView.tsx` — 测验组（AI生成→逐条编辑/删除→答题→错题回顾→历史得分→全局错题本→薄弱度热力图）含 AbortController 取消
 - `ErrorBookView.tsx` — 全局错题本（跨测验组聚合错题、逐题重做、标记掌握）
-- `StudyNoteView.tsx` — AI 生成学习笔记，含 AbortController 取消
+- `StudyNoteView.tsx` — AI 生成学习笔记，含 Mermaid 图表渲染、AbortController 取消
+- `MermaidDiagram.tsx` — Mermaid 图表渲染组件（暗黑模式自适应、securityLevel: strict）
 - `FlowNoteView.tsx` — 持续学习日志（分类筛选/AI提取/手动添加/复习标记/导出）
 - `MindMapViewer.tsx` — markmap 思维导图渲染器（手动触发生成，暗黑模式 PNG 导出）
 - `learning-path.tsx` — 6 步进度导航（响应式，所有步骤可自由点击跳转）
@@ -71,6 +72,8 @@ npm run build     # 生产构建
 - **学习者个人中心看板**：`StatsController.getLearnerDashboard()` 返回 `LearnerDashboardResponse`，由 `StatsService.calculateLearnerDashboard()` 一次查询聚合 7 大板块数据。DTO 使用嵌套静态类（TodayTasks、LearningRhythm、Achievement、DocDueInfo、ErrorItem、DeckWeakness、DocProgress、TimelineEntry、WeeklySummary）。前端 `StatsDashboard.tsx` 包含：进度环（SVG）、30 天 GitHub 风格热力图、成就徽章系统（10 枚徽章，基于数据自动解锁）、周度报告（本周 vs 上周趋势对比）、目标管理（日/周/月目标 + 轻松/标准/挑战预设，localStorage 持久化）、情境化行动卡（有待复习/有错题时动态显示）。
 - **测验答题记录保存**：`QuizView.handleSubmit()` 在最后一题时立即调用 `saveQuizAttempt()` 写入 `quiz_attempts` 表（而非在 `goNext()` 中调用，因为最后一题不会触发 `goNext`）。`answer_details` 为 JSON 列，格式 `[{quizId, selectedAnswer, correct}]`。
 - **错题本状态持久化**：`ErrorBookView` 的 `mastered` 状态通过 localStorage 持久化（key: `edumerge_mastered_${docId}`），刷新页面后保留。
+- **Mermaid 图表渲染**：`StudyNoteView` 的 `markdownComponents` 中，`pre` 组件检测 `language-mermaid` 代码块并替换为 `MermaidDiagram`；`rehype-sanitize` 使用自定义 schema 保留 `code` 元素的 `className` 属性。`AiNoteGenerator.cleanMarkdown()` 仅剥离 LLM 输出外层包裹的单个代码块，保留内嵌的 Mermaid 代码块。
+- **思维导图学科适配**：`AiMindMapGenerator.buildMindMapSubjectGuide(subjectType)` 为不同学科生成导图结构指引（ALGORITHM 按"定义→操作→实现→复杂度→应用→对比"展开），与 `buildSubjectRules(subjectType)` 的出题策略互补。
 
 ## 架构
 
@@ -180,7 +183,7 @@ POST /api/documents/upload → 保存文件 → EmbeddingProducer.sendEmbeddingT
 
 ### 学科分类 (SubjectClassifier)
 
-文档上传处理时自动判断学科类型，持久化到 `documents.subject_type` 字段。生成闪卡/测验/笔记/思维导图时，各 Generator 通过 `getSubjectType(docId)` 读取学科类型，注入 `buildSubjectRules(subjectType)` 提供的针对性出题策略。
+文档上传处理时自动判断学科类型，持久化到 `documents.subject_type` 字段。生成闪卡/测验/笔记/思维导图时，各 Generator 通过 `getSubjectType(docId)` 读取学科类型，注入 `buildSubjectRules(subjectType)` 提供的针对性出题策略。`AiMindMapGenerator` 额外使用 `buildMindMapSubjectGuide(subjectType)` 生成导图结构指引（区别于出题策略，聚焦知识结构组织方式）。
 
 学科类型：`ALGORITHM`（算法）、`MATH`（数学）、`PROGRAMMING`（程序设计）、`SCIENCE`（自然科学）、`THEORY`（计算机理论）、`MEDICAL`（医学）、`HUMANITIES`（人文社科）、`GENERAL`（通用兜底）。
 
@@ -222,3 +225,76 @@ POST /api/documents/upload → 保存文件 → EmbeddingProducer.sendEmbeddingT
 - **生成去重**：`FlashcardController.generate()` 和 `QuizController.generate()` 在调用 AI 前先查询已有卡片/题目的问题列表，传给 Generator 的 `existingQuestions` 参数。Generator 将其注入 Prompt 的 `{EXISTING_HINT}` 占位符。
 - **对话持久化**：`chatStream()` 的空结果路径由 `AiRagService` 内部处理（含 `saveExchange`），控制器不得提前 return。所有路径（onComplete/onError/空结果/异常）都保证 `saveExchange()` 被调用。
 - **知识图谱**：`knowledge_concepts`/`concept_documents`/`concept_relationships` 三张表。`AiKnowledgeGraphGenerator` 一次 LLM 调用处理所有文档。前端用 `react-force-graph-2d`，canvas 渲染，SSR 禁用（dynamic import with `ssr: false`）。
+- **Mermaid securityLevel**：`MermaidDiagram` 必须使用 `securityLevel: "strict"`，禁止 `"loose"` — 恶意文档可通过 LLM 注入含 `click` 处理器的 Mermaid 图表执行 XSS。
+- **mermaid.render() DOM 泄漏**：`mermaid.render(id, code)` 会在 `document.body` 创建隐藏 `<div id="mermaid-xxx">` 作为离屏渲染目标，渲染完成后必须 `document.getElementById(id)?.remove()` 清理。
+
+## gstack
+
+gstack 提供 headless 浏览器能力，用于 QA 测试和站点体验。项目 `.claude/skills/gstack` 已链接到全局安装。
+
+**所有网页浏览必须使用 `/browse` 技能，禁止使用 `mcp__claude-in-chrome__*` 工具。**
+
+团队成员首次使用需先安装：
+```bash
+git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
+cd ~/.claude/skills/gstack && ./setup
+```
+
+### 可用技能
+
+| 技能 | 说明 |
+|---|---|
+| `/browse` | 无头浏览器浏览（所有网页浏览用这个） |
+| `/qa` | QA 测试 |
+| `/qa-only` | 仅 QA（不修复） |
+| `/review` | 代码审查 |
+| `/ship` | 发布流程 |
+| `/land-and-deploy` | 合并并部署 |
+| `/canary` | 金丝雀部署 |
+| `/benchmark` | 性能基准测试 |
+| `/investigate` | 问题调查 |
+| `/office-hours` | 办公时间 |
+| `/plan-ceo-review` | CEO 审查规划 |
+| `/plan-eng-review` | 工程审查规划 |
+| `/plan-design-review` | 设计审查规划 |
+| `/plan-devex-review` | DevEx 审查规划 |
+| `/devex-review` | DevEx 审查 |
+| `/design-consultation` | 设计咨询 |
+| `/design-shotgun` | 设计快速迭代 |
+| `/design-html` | HTML 设计 |
+| `/design-review` | 设计审查 |
+| `/document-release` | 文档发布 |
+| `/document-generate` | 文档生成 |
+| `/codex` | Codex |
+| `/cso` | CSO |
+| `/autoplan` | 自动规划 |
+| `/setup-browser-cookies` | 设置浏览器 cookies |
+| `/setup-deploy` | 设置部署 |
+| `/setup-gbrain` | 设置 gbrain |
+| `/retro` | 回顾 |
+| `/connect-chrome` | 连接 Chrome |
+| `/careful` | 谨慎模式 |
+| `/freeze` | 冻结状态 |
+| `/guard` | 守护模式 |
+| `/unfreeze` | 解冻状态 |
+| `/gstack-upgrade` | 升级 gstack |
+| `/learn` | 学习 |
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+
+Key routing rules:
+- Product ideas/brainstorming → invoke /office-hours
+- Strategy/scope → invoke /plan-ceo-review
+- Architecture → invoke /plan-eng-review
+- Design system/plan review → invoke /design-consultation or /plan-design-review
+- Full review pipeline → invoke /autoplan
+- Bugs/errors → invoke /investigate
+- QA/testing site behavior → invoke /qa or /qa-only
+- Code review/diff check → invoke /review
+- Visual polish → invoke /design-review
+- Ship/deploy/PR → invoke /ship or /land-and-deploy
+- Save progress → invoke /context-save
+- Resume context → invoke /context-restore
+- Author a backlog-ready spec/issue → invoke /spec
