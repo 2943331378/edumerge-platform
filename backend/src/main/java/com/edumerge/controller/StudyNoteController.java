@@ -70,6 +70,12 @@ public class StudyNoteController {
         return Result.success(notes.stream().map(studyNoteService::toMap).toList());
     }
 
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        studyNoteService.deleteById(id);
+        return Result.success(null);
+    }
+
     // TODO: 替换 Map<String, String> 为 UpdateNoteRequest DTO（含 content, title 字段）
     @PutMapping("/{id}")
     public Result<Map<String, Object>> update(@PathVariable Long id, @RequestBody Map<String, String> body) {

@@ -20,6 +20,7 @@ import {
   Plus,
   ChevronRight,
   GripVertical,
+  Check,
 } from "lucide-react";
 
 export interface UploadedDoc {
@@ -119,6 +120,7 @@ export function AppSidebar({
   const [editFolderValue, setEditFolderValue] = useState("");
   const [editFolderColorId, setEditFolderColorId] = useState<number | null>(null);
   const editFolderInputRef = useRef<HTMLInputElement>(null);
+  const blurCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Move document bottom sheet
   const [moveTarget, setMoveTarget] = useState<UploadedDoc | null>(null);
@@ -430,12 +432,12 @@ export function AppSidebar({
                   if (e.key === "Escape") setEditingId(null);
                 }}
                 onClick={(e) => e.stopPropagation()}
-                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-1 py-0.5 text-xs outline-none"
+                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-2 py-1 max-md:py-1.5 text-xs outline-none"
               />
               <button
                 type="button"
                 onMouseDown={(e) => { e.preventDefault(); commitRename(doc); }}
-                className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-emerald-600 hover:bg-emerald-500/10"
+                className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-emerald-600 hover:bg-emerald-500/10"
                 title="确认"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -468,7 +470,7 @@ export function AppSidebar({
               e.stopPropagation();
               onRetryDocument(doc.sessionId);
             }}
-            className="shrink-0 h-5 w-5 flex items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重新处理"
           >
             <RotateCw className="h-3 w-3" />
@@ -481,7 +483,7 @@ export function AppSidebar({
               e.stopPropagation();
               startRename(doc);
             }}
-            className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+            className="hidden group-hover:flex max-md:flex shrink-0 min-w-[44px] min-h-[44px] items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
             title="重命名"
           >
             <Pencil className="h-3 w-3" />
@@ -495,7 +497,7 @@ export function AppSidebar({
               onDeleteDocument(doc.sessionId);
             }
           }}
-          className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+          className="hidden group-hover:flex max-md:flex shrink-0 min-w-[44px] min-h-[44px] items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
           title="删除文档"
         >
           <X className="h-3 w-3" />
@@ -547,18 +549,43 @@ export function AppSidebar({
             <Folder className="h-3.5 w-3.5 shrink-0" style={{ color: folder.color }} />
           )}
           {editingFolderId === folder.id ? (
-            <input
-              ref={editFolderInputRef}
-              value={editFolderValue}
-              onChange={(e) => setEditFolderValue(e.target.value)}
-              onBlur={() => commitRenameFolder(folder.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitRenameFolder(folder.id);
-                if (e.key === "Escape") setEditingFolderId(null);
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-1 py-0.5 text-xs outline-none"
-            />
+            <>
+              <input
+                ref={editFolderInputRef}
+                value={editFolderValue}
+                onChange={(e) => setEditFolderValue(e.target.value)}
+                onBlur={() => {
+                  blurCommitTimerRef.current = setTimeout(() => commitRenameFolder(folder.id), 200);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRenameFolder(folder.id);
+                  if (e.key === "Escape") setEditingFolderId(null);
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (blurCommitTimerRef.current) {
+                    clearTimeout(blurCommitTimerRef.current);
+                    blurCommitTimerRef.current = null;
+                  }
+                }}
+                className="flex-1 min-w-0 bg-background border border-primary/30 rounded px-2 py-1 max-md:py-1.5 text-xs outline-none"
+              />
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (blurCommitTimerRef.current) {
+                    clearTimeout(blurCommitTimerRef.current);
+                    blurCommitTimerRef.current = null;
+                  }
+                  commitRenameFolder(folder.id);
+                }}
+                className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded active:bg-primary/10 text-primary"
+                title="确认重命名"
+              >
+                <Check className="h-3.5 w-3.5" />
+              </button>
+            </>
           ) : (
             <span className="flex-1 min-w-0 truncate font-medium">{folder.name}</span>
           )}
@@ -574,7 +601,7 @@ export function AppSidebar({
                 e.stopPropagation();
                 setEditFolderColorId(editFolderColorId === folder.id ? null : folder.id);
               }}
-              className="shrink-0 h-5 w-5 flex items-center justify-center rounded-full hover:ring-primary/50 active:ring-primary/50 transition-all cursor-pointer"
+              className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full hover:ring-primary/50 active:ring-primary/50 transition-all cursor-pointer"
               title="更换颜色"
             >
               <span
@@ -594,10 +621,10 @@ export function AppSidebar({
                 setEditFolderValue(folder.name);
                 setTimeout(() => editFolderInputRef.current?.select(), 0);
               }}
-              className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+              className="hidden group-hover:flex max-md:flex shrink-0 min-w-[44px] min-h-[44px] items-center justify-center rounded active:bg-primary/10 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
               title="重命名"
             >
-              <Pencil className="h-2.5 w-2.5" />
+              <Pencil className="h-3 w-3" />
             </button>
           )}
 
@@ -609,10 +636,10 @@ export function AppSidebar({
                 e.stopPropagation();
                 handleDeleteFolder(folder.id);
               }}
-              className="hidden group-hover:flex max-md:flex shrink-0 h-5 w-5 items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+              className="hidden group-hover:flex max-md:flex shrink-0 min-w-[44px] min-h-[44px] items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
               title="删除文件夹"
             >
-              <X className="h-2.5 w-2.5" />
+              <X className="h-3 w-3" />
             </button>
           )}
         </div>
@@ -630,7 +657,7 @@ export function AppSidebar({
                   setEditFolderColorId(null);
                 }}
                 className={cn(
-                  "h-5 w-5 rounded-full ring-1 ring-white/20 hover:ring-primary/50 hover:scale-110 transition-all",
+                  "h-7 w-7 max-md:h-8 max-md:w-8 rounded-full ring-1 ring-white/20 hover:ring-primary/50 hover:scale-110 transition-all",
                   folder.color === c && "ring-2 ring-primary scale-110",
                 )}
                 style={{ backgroundColor: c }}

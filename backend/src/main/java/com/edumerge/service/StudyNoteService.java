@@ -93,6 +93,17 @@ public class StudyNoteService {
     }
 
     @Transactional
+    public void deleteById(Long id) {
+        StudyNote note = studyNoteMapper.selectById(id);
+        if (note == null) {
+            throw new IllegalArgumentException("笔记不存在: " + id);
+        }
+        verifyOwnership(note.getDocId());
+        studyNoteMapper.deleteById(id);
+        log.info("学习笔记已删除: id={}, docId={}", id, note.getDocId());
+    }
+
+    @Transactional
     public void deleteByDocId(Long docId) {
         studyNoteMapper.delete(
                 new LambdaQueryWrapper<StudyNote>()

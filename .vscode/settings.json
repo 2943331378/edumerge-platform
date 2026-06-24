@@ -1,4 +1,14 @@
 {
   "java.compile.nullAnalysis.mode": "automatic",
-  "java.configuration.updateBuildConfiguration": "interactive"
+  "java.configuration.updateBuildConfiguration": "interactive",
+  "markdown-pdf.styles": ["${workspaceFolder}/.vscode/markdown-pdf.css"],
+  "markdown-pdf.format": "A4",
+  "markdown-pdf.margin.top": "15mm",
+  "markdown-pdf.margin.bottom": "18mm",
+  "markdown-pdf.margin.left": "22mm",
+  "markdown-pdf.margin.right": "22mm",
+  "markdown-pdf.displayHeaderFooter": true,
+  "markdown-pdf.headerTemplate": "<span></span>",
+  "markdown-pdf.footerTemplate": "<div style=\"font-size:10px; text-align:center; width:100%; color:#999;\">— <span class=\"pageNumber\"></span> / <span class=\"totalPages\"></span> —</div>",
+  "markdown-pdf.outline": true
 }

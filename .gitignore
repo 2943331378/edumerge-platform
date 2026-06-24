@@ -69,3 +69,4 @@ scripts/golden_dataset.json
 scripts/eval_results.json
 scripts/eval_report.md
 .claude/
+.gstack/

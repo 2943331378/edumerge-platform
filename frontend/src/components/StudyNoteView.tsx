@@ -5,12 +5,12 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { toast } from "sonner";
-import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, X, Loader2, XCircle } from "lucide-react";
+import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, Trash2, X, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExportBottomSheet } from "@/components/ui/export-bottom-sheet";
 import type { StudyNoteRecord } from "@/lib/api";
-import { generateStudyNote, generateStudyNoteStream, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
+import { deleteStudyNote, generateStudyNote, generateStudyNoteStream, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { printNote } from "@/lib/printExport";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
@@ -190,7 +190,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     return () => { cancelled = true; };
   }, [docId]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     if (!docId || generating) return;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -201,61 +201,47 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     setStreamingError(null);
     setStreamingProgress(0);
 
-    try {
-      await generateStudyNoteStream(docId, {
-        requirements: requirements.trim() || undefined,
-        sectionContext: sectionContext || undefined,
-        startChunk,
-        endChunk,
-        signal: controller.signal,
-        onToken: (token) => {
-          if (!mountedRef.current || abortRef.current !== controller) return;
-          streamingContentRef.current += token;
-          setStreamingContent(streamingContentRef.current);
-        },
-        onProgress: (progress) => {
-          if (mountedRef.current && abortRef.current === controller) setStreamingProgress(progress);
-        },
-        onDone: async () => {
-          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-          if (!mountedRef.current || abortRef.current !== controller) return;
-          // 同步清理流式状态 — 必须在 await 之前，
-          // 否则 handleGenerate 的 finally 块会抢先把 abortRef 设为 null，
-          // 导致 await 之后的 abortRef 检查失败、setStreamingContent(null) 永远不执行
-          setStreamingContent(null);
-          setStreamingError(null);
-          setStreamingProgress(0);
-          streamingContentRef.current = "";
-          const list = await listNoteHistory(docId);
-          if (!mountedRef.current) return;
-          loadHistory(list);
-          onGenerated?.();
-          toast.success("学习笔记生成成功");
-        },
-        onError: (msg) => {
-          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-          if (!mountedRef.current || abortRef.current !== controller) return;
-          setStreamingError(msg || "生成中断");
-          onGeneratingChange?.(false);
-        },
-      });
-    } catch (err) {
-      if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-      if (!mountedRef.current || abortRef.current !== controller) return;
-      if ((err as Error).name !== "AbortError") {
-        setStreamingError(err instanceof Error ? err.message : "生成中断");
-        toast.error(err instanceof Error ? err.message : "学习笔记生成失败");
-      } else {
+    generateStudyNoteStream(docId, {
+      requirements: requirements.trim() || undefined,
+      sectionContext: sectionContext || undefined,
+      startChunk,
+      endChunk,
+      signal: controller.signal,
+      onToken: (token) => {
+        if (!mountedRef.current || abortRef.current !== controller) return;
+        streamingContentRef.current += token;
+        setStreamingContent(streamingContentRef.current);
+      },
+      onProgress: (progress) => {
+        if (mountedRef.current && abortRef.current === controller) setStreamingProgress(progress);
+      },
+      onDone: async (meta) => {
+        clearTimeout(timeoutId);
+        if (!mountedRef.current || abortRef.current !== controller) return;
         setStreamingContent(null);
+        setStreamingError(null);
+        setStreamingProgress(0);
         streamingContentRef.current = "";
-      }
-      onGeneratingChange?.(false);
-    }
-    clearTimeout(timeoutId);
-    if (abortRef.current === controller) {
-      abortRef.current = null;
-      onGeneratingChange?.(false);
-    }
+        const list = await listNoteHistory(docId);
+        if (!mountedRef.current) return;
+        loadHistory(list);
+        onGenerated?.();
+        toast.success("学习笔记生成成功");
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          onGeneratingChange?.(false);
+        }
+      },
+      onError: (msg) => {
+        clearTimeout(timeoutId);
+        if (!mountedRef.current || abortRef.current !== controller) return;
+        setStreamingError(msg || "生成中断");
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          onGeneratingChange?.(false);
+        }
+      },
+    });
   };
 
   // 从大纲页面跳转过来时自动触发生成
@@ -349,6 +335,21 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     setSaving(false);
   };
 
+  const handleDelete = async () => {
+    if (!note?.id) return;
+    if (!confirm("确定删除该笔记？删除后无法恢复。")) return;
+    try {
+      await deleteStudyNote(note.id);
+      toast.success("笔记已删除");
+      if (docId) {
+        const list = await listNoteHistory(docId);
+        loadHistory(list);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "删除失败");
+    }
+  };
+
   if (!docId) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -395,6 +396,10 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
               <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={() => setShowExportSheet(true)}>
                 <Download className="h-3.5 w-3.5" />
                 导出
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5 text-destructive hover:bg-destructive/10" onClick={handleDelete}>
+                <Trash2 className="h-3.5 w-3.5" />
+                删除
               </Button>
             </>
           )}

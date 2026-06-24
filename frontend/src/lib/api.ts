@@ -522,8 +522,8 @@ export async function generateStudyNote(docId: number, requirements?: string, si
   });
 }
 
-/** 流式生成笔记 — 返回 SSE token 流 + 进度 + 完成时的元数据 */
-export async function generateStudyNoteStream(
+/** 流式生成笔记 — 用 XHR + onprogress 实现实时 SSE 读取（fetch ReadableStream 在部分环境下不实时） */
+export function generateStudyNoteStream(
   docId: number,
   opts: {
     requirements?: string;
@@ -536,43 +536,88 @@ export async function generateStudyNoteStream(
     onDone: (meta: { deckId: number; docId: number; title: string; sourceSummary?: string; createdAt?: string }) => void;
     onError: (msg: string) => void;
   }
-): Promise<void> {
+): void {
   const body: Record<string, string> = { docId: String(docId) };
   if (opts.requirements) body.requirements = opts.requirements;
   if (opts.sectionContext) body.sectionContext = opts.sectionContext;
   if (opts.startChunk != null) body.startChunk = String(opts.startChunk);
   if (opts.endChunk != null) body.endChunk = String(opts.endChunk);
 
-  const stream = await streamRequest("/notes/stream", body, opts.signal);
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", `${BASE}/notes/stream`);
+  xhr.setRequestHeader("Content-Type", "application/json");
+  const token = getStoredToken();
+  if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (data === "[DONE]") return;
-        try {
-          const json = JSON.parse(data);
-          if (json.token) opts.onToken(json.token);
-          if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
-          if (json.done) {
-            try { await opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
-            return;
-          }
-          if (json.error) { opts.onError(json.error); return; }
-        } catch { /* 忽略非 JSON 行 */ }
-      }
+  let processedLen = 0;
+  let done = false;
+
+  xhr.onprogress = () => {
+    if (done) return;
+    const text = xhr.responseText;
+    const newPart = text.substring(processedLen);
+    processedLen = text.length;
+    const lines = newPart.split("\n");
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") { done = true; return; }
+      try {
+        const json = JSON.parse(data);
+        if (json.token) opts.onToken(json.token);
+        if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
+        if (json.done) {
+          done = true;
+          opts.onDone(json.done);
+          return;
+        }
+        if (json.error) { done = true; opts.onError(json.error); return; }
+      } catch { /* 忽略非 JSON 行 */ }
     }
-  } catch (e) {
-    if ((e as Error).name !== "AbortError") opts.onError((e as Error).message);
+  };
+
+  xhr.onload = () => {
+    if (done) return;
+    if (xhr.status === 401) {
+      opts.onError("登录已过期，请重新登录");
+      return;
+    }
+    if (xhr.status >= 400) {
+      try {
+        const json = JSON.parse(xhr.responseText);
+        opts.onError(json?.message ?? `HTTP ${xhr.status}`);
+      } catch {
+        opts.onError(`HTTP ${xhr.status}`);
+      }
+      return;
+    }
+    // Stream ended without [DONE] — treat as complete
+    if (!done) {
+      done = true;
+      opts.onError("流式响应异常结束");
+    }
+  };
+
+  xhr.onerror = () => {
+    if (!done) {
+      done = true;
+      opts.onError("网络错误");
+    }
+  };
+
+  xhr.onabort = () => {
+    done = true;
+  };
+
+  xhr.send(JSON.stringify(body));
+
+  // Wire up AbortSignal
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      xhr.abort();
+    } else {
+      opts.signal.addEventListener("abort", () => xhr.abort(), { once: true });
+    }
   }
 }
 
@@ -581,6 +626,10 @@ export async function updateStudyNote(id: number, data: { content?: string; titl
     method: "PUT",
     body: JSON.stringify(data),
   });
+}
+
+export async function deleteStudyNote(id: number): Promise<void> {
+  return request<void>(`/notes/${id}`, { method: "DELETE" });
 }
 
 // ===== 卡片组 (Deck) =====

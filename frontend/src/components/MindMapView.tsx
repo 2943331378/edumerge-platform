@@ -95,14 +95,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
         onToken: (token) => {
           if (!mountedRef.current || abortRef.current !== controller) return;
           streamingRef.current += token;
-          if (rafIdRef.current === null) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              rafIdRef.current = null;
-              if (mountedRef.current && abortRef.current === controller) {
-                setStreamingContent(streamingRef.current);
-              }
-            });
-          }
+          setStreamingContent(streamingRef.current);
         },
         onProgress: (p) => {
           if (mountedRef.current && abortRef.current === controller) setStreamingProgress(p);
@@ -117,7 +110,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
           setCurrentMap(meta);
           setView("viewer");
           await reloadList();
-          if (!mountedRef.current || abortRef.current !== controller) return;
+          if (!mountedRef.current) return;
           toast.success("思维导图生成成功");
           onGenerated?.();
         },
