@@ -40,6 +40,8 @@ backend/INITIALIZATION_REPORT.md
 backend/API_GUIDE.md
 feedback_from_hardcore_student.md
 docs/product-feedback-cuflow-user.md
+docs/Agent_Architecture_Proposal.md
+note*.json
 *.docx
 DEPLOY-UPDATE.md
 frontend/test_learner.mjs
