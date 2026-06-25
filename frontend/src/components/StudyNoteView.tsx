@@ -1,19 +1,36 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { toast } from "sonner";
-import { BookOpenCheck, Clipboard, Download, NotebookText, Pencil, RotateCw, Save, Sparkles, Trash2, X, Loader2, XCircle } from "lucide-react";
+import { BookOpenCheck, Clipboard, Download, MoreHorizontal, NotebookText, Pencil, RotateCw, Save, Sparkles, Trash2, X, Loader2, XCircle } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExportBottomSheet } from "@/components/ui/export-bottom-sheet";
 import type { StudyNoteRecord } from "@/lib/api";
-import { deleteStudyNote, generateStudyNote, generateStudyNoteStream, getStudyNote, listNoteHistory, updateStudyNote } from "@/lib/api";
+import { deleteStudyNote, generateStudyNoteStream, listNoteHistory, updateStudyNote } from "@/lib/api";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { printNote } from "@/lib/printExport";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
+import { diffLines, type Change } from "diff";
 
 // rehype-sanitize 默认 schema 不保留 code 元素的 class 属性，
 // 需要扩展以支持 Mermaid 语言类名检测
@@ -24,6 +41,30 @@ const sanitizeSchema = {
     code: [...(defaultSchema.attributes?.code ?? []), "className"],
   },
 };
+
+/** 从 Markdown 中提取标题（跳过代码块） */
+function extractHeadings(markdown: string): { level: number; text: string; id: string }[] {
+  // 先移除围栏代码块和行内代码，避免误匹配
+  const stripped = markdown
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`\n]+`/g, "");
+  const headings: { level: number; text: string; id: string }[] = [];
+  const slugCount: Record<string, number> = {};
+  for (const line of stripped.split("\n")) {
+    const m = line.match(/^(#{1,3})\s+(.+)$/);
+    if (!m) continue;
+    const text = m[2].replace(/\*\*|__|\*|_|`/g, "").trim();
+    let slug = text.toLowerCase().replace(/[^\w一-鿿]+/g, "-").replace(/^-|-$/g, "");
+    if (slugCount[slug] !== undefined) {
+      slugCount[slug]++;
+      slug = `${slug}-${slugCount[slug]}`;
+    } else {
+      slugCount[slug] = 0;
+    }
+    headings.push({ level: m[1].length, text, id: `heading-${slug}` });
+  }
+  return headings;
+}
 
 interface Props {
   docId: number | null;
@@ -43,15 +84,31 @@ interface Props {
   onGeneratingChange?: (v: boolean) => void;
 }
 
+/** 从 React children 中提取纯文本（用于生成 heading slug） */
+function extractText(children: React.ReactNode): string {
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(extractText).join("");
+  if (children && typeof children === "object" && "props" in children) {
+    return extractText((children as React.ReactElement<{ children?: React.ReactNode }>).props.children);
+  }
+  return "";
+}
+
+function headingSlug(children: React.ReactNode): string {
+  const text = extractText(children).replace(/\*\*|__|\*|_|`/g, "").trim();
+  return text.toLowerCase().replace(/[^\w一-鿿]+/g, "-").replace(/^-|-$/g, "");
+}
+
 const markdownComponents: Components = {
   h1: ({ children }) => (
-    <h1 className="text-2xl font-semibold tracking-tight text-foreground">{children}</h1>
+    <h1 id={`heading-${headingSlug(children)}`} className="text-2xl font-semibold tracking-tight text-foreground scroll-mt-20">{children}</h1>
   ),
   h2: ({ children }) => (
-    <h2 className="mt-8 border-b border-border/60 pb-2 text-base font-semibold text-foreground/90">{children}</h2>
+    <h2 id={`heading-${headingSlug(children)}`} className="mt-8 border-b border-border/60 pb-2 text-base font-semibold text-foreground/90 scroll-mt-20">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 className="mt-5 text-sm font-semibold text-foreground/85">{children}</h3>
+    <h3 id={`heading-${headingSlug(children)}`} className="mt-5 text-sm font-semibold text-foreground/85 scroll-mt-20">{children}</h3>
   ),
   p: ({ children }) => (
     <p className="my-3 text-sm leading-7 text-foreground/75">{children}</p>
@@ -147,10 +204,36 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
   const [editContent, setEditContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [showExportSheet, setShowExportSheet] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const isReady = docStatus === "COMPLETED";
   const generatedAt = note?.createdAt ? new Date(note.createdAt).toLocaleString("zh-CN") : "";
   const hasHistory = history.length > 1;
+
+  // T1: 动态目录
+  const headings = useMemo(() => (note?.content ? extractHeadings(note.content) : []), [note?.content]);
+  const scrollToHeading = useCallback((id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  // T5: 版本 diff
+  const [showDiff, setShowDiff] = useState(false);
+  const diffChanges = useMemo<Change[]>(() => {
+    if (!showDiff || activeVersionIdx === 0 || !history[0]?.content || !note?.content) return [];
+    // 对比当前选中版本与最新版本，移除代码块避免干扰
+    const stripCode = (s: string) => s.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]+`/g, "");
+    return diffLines(stripCode(history[0].content), stripCode(note.content));
+  }, [showDiff, activeVersionIdx, history, note?.content]);
+
+  // T2: 编辑器防抖预览
+  const [debouncedContent, setDebouncedContent] = useState(editContent);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!editing) return;
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => setDebouncedContent(editContent), 300);
+    return () => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); };
+  }, [editContent, editing]);
 
   useEffect(() => {
     if (note?.title) {
@@ -272,6 +355,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     if (idx >= 0 && idx < history.length) {
       setActiveVersionIdx(idx);
       setNote(history[idx]);
+      if (idx === 0) setShowDiff(false);
     }
   };
 
@@ -335,9 +419,9 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
     setSaving(false);
   };
 
-  const handleDelete = async () => {
+  const handleDeleteConfirm = async () => {
     if (!note?.id) return;
-    if (!confirm("确定删除该笔记？删除后无法恢复。")) return;
+    setShowDeleteDialog(false);
     try {
       await deleteStudyNote(note.id);
       toast.success("笔记已删除");
@@ -385,31 +469,39 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
         <div className="flex items-center gap-2">
           {note?.content && !editing && (
             <>
-              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleStartEdit}>
+              <Button size="sm" variant="outline" className="h-10 rounded-xl gap-1.5" onClick={handleStartEdit}>
                 <Pencil className="h-3.5 w-3.5" />
                 编辑
               </Button>
-              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleCopy}>
+              <Button size="sm" variant="outline" className="h-10 rounded-xl gap-1.5" onClick={handleCopy}>
                 <Clipboard className="h-3.5 w-3.5" />
                 复制
               </Button>
-              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={() => setShowExportSheet(true)}>
-                <Download className="h-3.5 w-3.5" />
-                导出
-              </Button>
-              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5 text-destructive hover:bg-destructive/10" onClick={handleDelete}>
-                <Trash2 className="h-3.5 w-3.5" />
-                删除
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-input bg-background text-sm font-medium hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="sr-only">更多操作</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setShowExportSheet(true)}>
+                    <Download className="h-3.5 w-3.5 mr-2" />
+                    导出
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowDeleteDialog(true)} variant="destructive">
+                    <Trash2 className="h-3.5 w-3.5 mr-2" />
+                    删除
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
           {editing && (
             <>
-              <Button size="sm" variant="outline" className="h-8 rounded-xl gap-1.5" onClick={handleCancelEdit}>
+              <Button size="sm" variant="outline" className="h-10 rounded-xl gap-1.5" onClick={handleCancelEdit}>
                 <X className="h-3.5 w-3.5" />
                 取消
               </Button>
-              <Button size="sm" className="h-8 rounded-xl gap-1.5" onClick={handleSave} disabled={saving}>
+              <Button size="sm" className="h-10 rounded-xl gap-1.5" onClick={handleSave} disabled={saving}>
                 <Save className="h-3.5 w-3.5" />
                 {saving ? "保存中..." : "保存"}
               </Button>
@@ -418,7 +510,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
         </div>
       </div>
 
-      {isReady && (
+      {isReady && note?.content && !streamingContent && (
         <div className="shrink-0 px-6 pt-2 pb-1">
           <div className="flex items-center gap-2">
             <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary/60" />
@@ -434,16 +526,16 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                 清除
               </button>
             )}
-            {generating ? (
-              <Button size="sm" variant="outline" className="h-7 rounded-lg gap-1 shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
-                <RotateCw className="h-3 w-3 animate-spin" />取消
-              </Button>
-            ) : (
-              <Button size="sm" className="h-7 rounded-lg gap-1 shrink-0" onClick={handleGenerate}>
-                <Sparkles className="h-3 w-3" />
-                {note?.content ? "重新生成" : "生成笔记"}
-              </Button>
-            )}
+            <Button
+              size="sm"
+              className="h-10 rounded-lg gap-1 shrink-0"
+              onClick={handleGenerate}
+              disabled={generating}
+              aria-busy={generating}
+            >
+              <Sparkles className="h-3 w-3" />
+              重新生成
+            </Button>
           </div>
         </div>
       )}
@@ -468,11 +560,47 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
               {i === 0 ? "最新" : `v${history.length - i}`}
             </button>
           ))}
+          {activeVersionIdx > 0 && (
+            <button
+              onClick={() => setShowDiff(!showDiff)}
+              className={cn(
+                "text-[11px] rounded-md px-2 py-0.5 transition-all ml-1",
+                showDiff ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30",
+              )}
+            >
+              {showDiff ? "隐藏变更" : "查看变更"}
+            </button>
+          )}
           {note?.requirements && (
             <span className="text-[11px] text-muted-foreground/40 ml-2 truncate max-w-[200px]">
               · {note.requirements}
             </span>
           )}
+        </div>
+      )}
+
+      {/* T5: 内联 diff 视图 */}
+      {showDiff && diffChanges.length > 0 && (
+        <div className="shrink-0 mx-6 mb-2 max-h-[30vh] overflow-y-auto rounded-xl border border-border/40 bg-muted/10 p-4 text-xs font-mono leading-6">
+          {diffChanges.map((part, i) => {
+            const lines = part.value.replace(/\n$/, "").split("\n");
+            return lines.map((line, j) => (
+              <div
+                key={`${i}-${j}`}
+                className={cn(
+                  "px-2 -mx-2",
+                  part.added && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+                  part.removed && "bg-red-500/10 text-red-700 dark:text-red-400 line-through",
+                  !part.added && !part.removed && "text-muted-foreground/60",
+                )}
+              >
+                <span className="inline-block w-4 text-muted-foreground/30 select-none mr-2">
+                  {part.added ? "+" : part.removed ? "-" : " "}
+                </span>
+                {line || " "}
+              </div>
+            ));
+          })}
         </div>
       )}
 
@@ -499,7 +627,14 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                       {streamingProgress > 0 && <span className="text-muted-foreground/50">{streamingProgress}%</span>}
                     </div>
                     {streamingProgress > 0 && (
-                      <div className="h-1 w-full overflow-hidden rounded-full bg-muted/50">
+                      <div
+                        className="h-1 w-full overflow-hidden rounded-full bg-muted/50"
+                        role="progressbar"
+                        aria-valuenow={streamingProgress}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label="笔记生成进度"
+                      >
                         <div className="h-full rounded-full bg-primary/50 transition-all duration-300" style={{ width: `${streamingProgress}%` }} />
                       </div>
                     )}
@@ -516,54 +651,88 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
         ) : !note?.content ? (
           <EmptyState title="尚无学习笔记" description="一键生成后，系统会提炼中文概述、核心知识点、易混淆点和复习问题。" onGenerate={handleGenerate} generating={generating} onCancelGeneration={cancelGeneration} requirements={requirements} onRequirementsChange={setRequirements} />
         ) : (
-          <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-            <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
-              <CardContent className="p-6 sm:p-8">
-                {editing ? (
-                  <textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full min-h-[60vh] bg-transparent text-sm leading-7 text-foreground/85 outline-none resize-y font-mono"
-                    spellCheck={false}
-                    aria-label="编辑笔记内容"
-                    placeholder="在此编辑 Markdown 笔记内容..."
-                  />
-                ) : (
-                  <article className="max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]} components={markdownComponents}>
-                      {note.content}
-                    </ReactMarkdown>
-                  </article>
-                )}
-              </CardContent>
-            </Card>
+          <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+            {editing ? (
+              /* T2: 分栏编辑器 — 移动端上下、桌面端左右 */
+              <div className="col-span-1 lg:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
+                  <CardContent className="p-6 sm:p-8">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground/60">编辑</p>
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      className="w-full min-h-[50vh] lg:min-h-[60vh] bg-transparent text-sm leading-7 text-foreground/85 outline-none resize-y font-mono"
+                      spellCheck={false}
+                      aria-label="编辑笔记内容"
+                      placeholder="在此编辑 Markdown 笔记内容..."
+                    />
+                  </CardContent>
+                </Card>
+                <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
+                  <CardContent className="p-6 sm:p-8">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground/60">预览</p>
+                    <article className="max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]} components={markdownComponents}>
+                        {debouncedContent}
+                      </ReactMarkdown>
+                    </article>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              <>
+                <Card className="rounded-2xl border-border/60 bg-card/95 shadow-sm">
+                  <CardContent className="p-6 sm:p-8">
+                    <article className="max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]} components={markdownComponents}>
+                        {note.content}
+                      </ReactMarkdown>
+                    </article>
+                  </CardContent>
+                </Card>
 
-            <aside className="space-y-3">
-              <Card className="rounded-2xl border-border/60 bg-muted/20 shadow-sm">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground/80">
-                    <BookOpenCheck className="h-4 w-4 text-emerald-500" />
-                    笔记结构
-                  </div>
-                  <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-                    {["文档概述", "核心知识点", "知识图解", "关键概念辨析", "典型应用场景", "易错点", "复习清单", "可自测问题"].map((item) => (
-                      <div key={item} className="rounded-lg bg-background/60 px-3 py-2">{item}</div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+                <aside className="space-y-3">
+                  {/* T1: 动态目录 */}
+                  {headings.length > 0 && (
+                    <Card className="rounded-2xl border-border/60 bg-muted/20 shadow-sm">
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground/80">
+                          <BookOpenCheck className="h-4 w-4 text-emerald-500" />
+                          目录
+                        </div>
+                        <nav className="mt-3 space-y-0.5 text-xs">
+                          {headings.map((h) => (
+                            <button
+                              key={h.id}
+                              onClick={() => scrollToHeading(h.id)}
+                              className={cn(
+                                "block w-full rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-background/60 hover:text-foreground/80 text-muted-foreground",
+                                h.level === 1 && "font-medium text-foreground/80",
+                                h.level === 2 && "pl-6",
+                                h.level === 3 && "pl-10 text-[11px]",
+                              )}
+                            >
+                              {h.text}
+                            </button>
+                          ))}
+                        </nav>
+                      </CardContent>
+                    </Card>
+                  )}
 
-              {note.sourceSummary && (
-                <Card className="rounded-2xl border-border/60 bg-muted/10 shadow-sm">
-                  <CardContent className="p-4">
-                    <p className="text-sm font-medium text-foreground/80">参考片段摘要</p>
-                    <pre className="mt-3 max-h-[360px] overflow-y-auto whitespace-pre-wrap text-[11px] leading-5 text-muted-foreground">
-                      {note.sourceSummary}
+                  {note.sourceSummary && (
+                    <Card className="rounded-2xl border-border/60 bg-muted/10 shadow-sm">
+                      <CardContent className="p-4">
+                        <p className="text-sm font-medium text-foreground/80">参考片段摘要</p>
+                        <pre className="mt-3 max-h-[360px] overflow-y-auto whitespace-pre-wrap text-[11px] leading-5 text-muted-foreground">
+                          {note.sourceSummary}
                     </pre>
                   </CardContent>
                 </Card>
               )}
             </aside>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -577,6 +746,21 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
           { icon: Download, iconColor: "text-primary", title: "导出为 PDF", description: "通过浏览器打印保存为 PDF", onClick: handleExportPDF },
         ]}
       />
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除笔记</AlertDialogTitle>
+            <AlertDialogDescription>确定删除该笔记？删除后无法恢复。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
