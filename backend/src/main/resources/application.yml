@@ -153,7 +153,7 @@ langchain4j:
 # ===== 应用自定义配置 =====
 app:
   jwt:
-    secret: ${JWT_SECRET}
+    secret: ${JWT_SECRET:edumerge-jwt-secret-key-2026-for-hs256}
     expiration-ms: 7200000     # 2h (access token)
     refresh-expiration-ms: 604800000  # 7d (refresh token)
 
