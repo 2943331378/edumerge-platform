@@ -55,6 +55,10 @@ public class LearningChatController {
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@RequestBody ChatStreamRequest body,
                               HttpServletResponse response) {
+        // SSE 必需响应头 — 防止 Nginx/浏览器缓存
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("X-Accel-Buffering", "no");
+
         String message = body.getMessage();
         String documentId = body.getDocumentId();
         String sessionIdStr = body.getSessionId();

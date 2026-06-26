@@ -60,7 +60,7 @@ public class MilvusVectorStoreConfig {
     @Value("${app.rag.collection-name:edumerge_knowledge_chunks}")
     private String collectionName;
 
-    @Value("${app.rag.embedding-dimension:1536}")
+    @Value("${app.rag.embedding-dimension:1024}")
     private int embeddingDimension;
 
     @Value("${app.rag.top-k:5}")

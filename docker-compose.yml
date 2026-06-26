@@ -13,6 +13,7 @@ services:
     image: mysql:8.0
     container_name: edumerge-mysql
     restart: unless-stopped
+    mem_limit: 512m
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-edumerge}
@@ -113,6 +114,7 @@ services:
     image: milvusdb/milvus:v2.4.4
     container_name: edumerge-milvus
     restart: unless-stopped
+    mem_limit: 1g
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -142,6 +144,7 @@ services:
       dockerfile: ../Dockerfile.backend
     container_name: edumerge-backend
     restart: unless-stopped
+    mem_limit: 1200m
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - MYSQL_HOST=mysql

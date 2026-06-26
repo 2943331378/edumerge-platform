@@ -123,6 +123,10 @@ function DemoOutline() {
 /* ═══════════════════════════════════════════
    Step 2: 学习笔记
    ═══════════════════════════════════════════ */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function DemoNote() {
   // Simple markdown-like rendering
   const lines = demoNote.content.split("\n");
@@ -142,7 +146,7 @@ function DemoNote() {
       return (
         <div key={i} className="flex gap-2 ml-2 my-0.5">
           <span className="text-primary mt-1.5 text-xs">●</span>
-          <span className="text-sm" dangerouslySetInnerHTML={{ __html: content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`(.*?)`/g, '<code class="bg-muted px-1 rounded text-xs">$1</code>') }} />
+          <span className="text-sm" dangerouslySetInnerHTML={{ __html: escapeHtml(content).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`(.*?)`/g, '<code class="bg-muted px-1 rounded text-xs">$1</code>') }} />
         </div>
       );
     }
@@ -152,7 +156,7 @@ function DemoNote() {
       return (
         <div key={i} className="flex gap-2 ml-2 my-0.5">
           <span className="text-primary text-xs font-mono mt-0.5 min-w-[1rem]">{num}.</span>
-          <span className="text-sm" dangerouslySetInnerHTML={{ __html: content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+          <span className="text-sm" dangerouslySetInnerHTML={{ __html: escapeHtml(content).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
         </div>
       );
     }
@@ -164,7 +168,7 @@ function DemoNote() {
         <div key={i} className="grid grid-cols-2 gap-2 my-0.5 text-sm border-b border-border/30 py-1.5">
           {cells.map((c, j) => (
             <span key={j} className={cn(j === 0 ? "font-medium" : "text-muted-foreground")}>
-              <span dangerouslySetInnerHTML={{ __html: c.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+              <span dangerouslySetInnerHTML={{ __html: escapeHtml(c).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
             </span>
           ))}
         </div>
@@ -173,7 +177,7 @@ function DemoNote() {
     if (line.trim() === "") return <div key={i} className="h-2" />;
     return (
       <p key={i} className="text-sm leading-relaxed my-1" dangerouslySetInnerHTML={{
-        __html: line
+        __html: escapeHtml(line)
           .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
           .replace(/`(.*?)`/g, '<code class="bg-muted px-1 rounded text-xs">$1</code>'),
       }} />

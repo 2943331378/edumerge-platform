@@ -2,8 +2,6 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useTheme } from "next-themes";
-import { Transformer } from "markmap-lib";
-import { Markmap } from "markmap-view";
 import type { INode, IPureNode } from "markmap-common";
 import { Button } from "@/components/ui/button";
 import { Maximize2, Loader2, Printer, UnfoldVertical, FoldVertical, Image } from "lucide-react";
@@ -19,7 +17,7 @@ interface MindMapViewerProps {
 export function MindMapViewer({ markdown, className = "", onContextChange }: MindMapViewerProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const mmRef = useRef<Markmap | null>(null);
+  const mmRef = useRef<any>(null);
   const rootRef = useRef<IPureNode | null>(null);
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -32,7 +30,9 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
     onContextChange?.("用户正在查看思维导图");
   }, [onContextChange]);
 
-  const transformer = useRef(new Transformer());
+  // 动态导入 markmap（减少主 bundle 体积，D3.js + markmap 约 200KB+）
+  const transformerRef = useRef<any>(null);
+  const MarkmapRef = useRef<any>(null);
 
   /** 品牌色梯度: 深度1=赤陶, 深度2=琥珀, 更深=石板灰。深色主题使用高亮度色值 */
   const colorByDepth = useCallback((node: INode): string => {
@@ -96,24 +96,41 @@ export function MindMapViewer({ markdown, className = "", onContextChange }: Min
     const svg = svgRef.current;
     if (!svg) return;
 
-    const { root } = transformer.current.transform(markdown);
-    rootRef.current = root;
+    let cancelled = false;
 
-    if (mmRef.current) {
-      mmRef.current.setData(root);
-      setTimeout(() => mmRef.current?.fit(), 100);
-    } else {
-      mmRef.current = Markmap.create(svg, { ...mmOptionsRef.current(), autoFit: false }, root);
-      setTimeout(() => mmRef.current?.fit(), 100);
-    }
-    setReady(true);
-    setCollapsed(false);
+    (async () => {
+      // 动态导入 markmap 库
+      if (!transformerRef.current) {
+        const { Transformer } = await import("markmap-lib");
+        transformerRef.current = new Transformer();
+      }
+      if (!MarkmapRef.current) {
+        const { Markmap } = await import("markmap-view");
+        MarkmapRef.current = Markmap;
+      }
 
-    if (mmRef.current && mmRef.current.zoom) {
-      mmRef.current.zoom.scaleExtent([0.1, 8]);
-    }
+      if (cancelled) return;
+
+      const { root } = transformerRef.current.transform(markdown);
+      rootRef.current = root;
+
+      if (mmRef.current) {
+        mmRef.current.setData(root);
+        setTimeout(() => mmRef.current?.fit(), 100);
+      } else {
+        mmRef.current = MarkmapRef.current.create(svg, { ...mmOptionsRef.current(), autoFit: false }, root);
+        setTimeout(() => mmRef.current?.fit(), 100);
+      }
+      setReady(true);
+      setCollapsed(false);
+
+      if (mmRef.current && mmRef.current.zoom) {
+        mmRef.current.zoom.scaleExtent([0.1, 8]);
+      }
+    })();
 
     return () => {
+      cancelled = true;
       mmRef.current?.destroy();
       mmRef.current = null;
     };

@@ -10,10 +10,14 @@
 
 <p align="center">
   <a href="https://spring.io/projects/spring-boot"><img src="https://img.shields.io/badge/Spring%20Boot-3.2.4-6DB33F?style=flat-square&logo=springboot&logoColor=white" alt="Spring Boot" /></a>
-  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js" /></a>
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2.4-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js" /></a>
+  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-19.2-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React" /></a>
   <a href="https://milvus.io/"><img src="https://img.shields.io/badge/Milvus-2.4.4-00A1EA?style=flat-square&logo=milvus&logoColor=white" alt="Milvus" /></a>
   <a href="https://docs.langchain4j.dev/"><img src="https://img.shields.io/badge/LangChain4j-1.12-00B265?style=flat-square&logo=openai&logoColor=white" alt="LangChain4j" /></a>
+  <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind" /></a>
+  <a href="https://ui.shadcn.com/"><img src="https://img.shields.io/badge/shadcn/ui-components-000000?style=flat-square&logo=shadcnui&logoColor=white" alt="shadcn/ui" /></a>
   <a href="https://www.deepseek.com/"><img src="https://img.shields.io/badge/LLM-DeepSeek-536DFE?style=flat-square&logo=openai&logoColor=white" alt="DeepSeek" /></a>
+  <a href="https://dashscope.aliyun.com/"><img src="https://img.shields.io/badge/Embedding-DashScope-FF6A00?style=flat-square&logo=alibabacloud&logoColor=white" alt="DashScope" /></a>
   <a href="https://www.rabbitmq.com/"><img src="https://img.shields.io/badge/RabbitMQ-async-FF6600?style=flat-square&logo=rabbitmq&logoColor=white" alt="RabbitMQ" /></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" /></a>
 </p>
@@ -26,7 +30,9 @@
 - [核心功能](#核心功能)
 - [架构设计](#架构设计)
 - [快速开始](#快速开始)
+- [Docker 部署](#docker-部署)
 - [API 端点](#api-端点)
+- [项目结构](#项目结构)
 
 ---
 
@@ -120,6 +126,14 @@ AI 生成单选/多选/判断题，完成答题后进入错题循环：
 - **个人中心**：桌面端右侧面板（340px），移动端跳转 `/dashboard` 全屏页面
 - **全局键盘快捷键**：1-6 步骤跳转、Ctrl+/ 对话、Ctrl+Shift+D 暗黑模式
 
+### 用户体验
+
+- **Landing 页面**：独立着陆页，项目介绍与快速入口
+- **Login / Register**：独立登录/注册页面，JWT 鉴权流程
+- **OnboardingTour**：首次使用引导流程，帮助新用户快速上手
+- **暗黑模式**：全局深色/浅色主题切换，所有组件自适应
+- **ErrorBoundary**：全局错误边界，防止组件崩溃白屏
+
 ### 学科分类
 
 文档上传时自动判断学科类型，生成内容时注入针对性策略：
@@ -153,6 +167,11 @@ AI 生成单选/多选/判断题，完成答题后进入错题循环：
 │  │StudyNote  │ │ FlowNote  │ │MindMap    │ │ StatsDashboard  │  │
 │  │ View      │ │ View      │ │Viewer     │ │ (徽章/热力图)   │  │
 │  └────┬──────┘ └────┬──────┘ └────┬──────┘ └──────┬──────────┘  │
+│       │             │             │                 │             │
+│  ┌────┴──────┐ ┌────┴──────┐ ┌────┴──────┐ ┌──────┴──────────┐  │
+│  │Landing    │ │ Login /   │ │ Onboard   │ │ Theme / Dark    │  │
+│  │ Page      │ │ Register  │ │ ingTour   │ │ Mode            │  │
+│  └────┬──────┘ └────┬──────┘ └────┬──────┘ └──────┬──────────┘  │
 │       └─────────────┴─────────────┴───────────────┘              │
 │                         │ HTTP/REST + SSE                         │
 └─────────────────────────┼────────────────────────────────────────┘
@@ -161,10 +180,11 @@ AI 生成单选/多选/判断题，完成答题后进入错题循环：
 │               Backend (Spring Boot 3.2.4)            /api        │
 │                         │                                         │
 │  ┌──────────────────────┴──────────────────────────────────┐     │
-│  │                   Controller Layer (14 个)               │     │
-│  │  Document  Session  RagChat  LearningChat  Flashcard    │     │
-│  │  Quiz  MindMap  StudyNote  Stats  FlowNote  Deck        │     │
-│  │  KnowledgeGraph  Auth                                     │     │
+│  │                   Controller Layer (16 个)               │     │
+│  │  Document  DocumentFolder  Session  RagChat             │     │
+│  │  LearningChat  Flashcard  Quiz  Deck  MindMap           │     │
+│  │  StudyNote  Stats  FlowNote  KnowledgeGraph  Auth       │     │
+│  │  HealthCheck                                            │     │
 │  └──────────────────────┬──────────────────────────────────┘     │
 │                         │                                         │
 │  ┌──────────────────────┴──────────────────────────────────┐     │
@@ -226,7 +246,8 @@ PDF/Word 上传
 
 | 用途 | 模型 | 提供商 |
 |---|---|---|
-| RAG 对话 / 内容生成 | deepseek-chat | DeepSeek |
+| RAG 对话 | deepseek-chat | DeepSeek |
+| 内容生成（闪卡/测验/笔记） | qwen3.7-plus | DashScope (阿里云) |
 | 嵌入向量化 | text-embedding-v3 | DashScope (阿里云) |
 | 图像 OCR | qwen-vl-max | DashScope (阿里云) |
 
@@ -313,6 +334,40 @@ npm run dev
 
 ---
 
+## Docker 部署
+
+项目提供完整的 Docker Compose 生产部署方案（8 个服务）：
+
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+# 编辑 .env，填入 API Key 和数据库密码
+
+# 2. 一键启动
+docker compose up -d
+
+# 3. 查看状态
+docker compose ps
+```
+
+服务列表：
+
+| 服务 | 镜像 | 端口 | 说明 |
+|---|---|---|---|
+| mysql | mysql:8.0 | 3306 | 关系数据库，schema 自动初始化 |
+| redis | redis:7-alpine | 6379 | 缓存 |
+| rabbitmq | rabbitmq:3-management | 5672/15672 | 异步消息队列 + 管理面板 |
+| etcd | etcd:v3.5.5 | 2379 | Milvus 元数据 |
+| minio | minio | 9000/9001 | Milvus 对象存储 |
+| milvus | milvusdb/milvus:v2.4.4 | 19530 | 向量数据库 |
+| backend | Spring Boot | 8085 | API 服务（JVM 512m-1024m） |
+| frontend | Next.js | 3000 | 前端 SSR |
+| nginx | nginx:alpine | 80 | 反向代理 |
+
+也可以使用宝塔面板部署，参考 `nginx-baota.conf` 配置。
+
+---
+
 ## API 端点
 
 ### 文档与会话
@@ -367,6 +422,7 @@ npm run dev
 |---|---|---|
 | GET | `/mindmap` | 获取/生成思维导图 |
 | GET | `/notes` | 获取学习笔记 |
+| GET | `/notes/history` | 查询学习笔记版本历史 |
 | POST | `/notes/generate` | AI 生成学习笔记 |
 | GET | `/knowledge-graph` | 获取知识图谱 |
 | POST | `/knowledge-graph/generate` | AI 生成知识图谱 |
@@ -379,6 +435,7 @@ npm run dev
 | POST | `/flownote/extract` | AI 从对话中提取条目 |
 | POST | `/flownote/entries` | 手动创建条目 |
 | PUT | `/flownote/entries/{id}` | 更新条目 |
+| DELETE | `/flownote/entries/{id}` | 删除条目 |
 | PUT | `/flownote/entries/{id}/review` | 标记已复习 |
 | GET | `/flownote/stats` | FlowNote 统计 |
 
@@ -395,6 +452,51 @@ npm run dev
 
 ---
 
+## 项目结构
+
+```
+EduMerge/
+├── backend/                          # Spring Boot 后端
+│   └── src/main/java/com/edumerge/
+│       ├── controller/               # REST 端点（16 个控制器）
+│       ├── service/                  # 业务逻辑
+│       ├── ai/                       # AI 生成器（7 个，继承 AiGeneratorBase）
+│       ├── security/                 # JWT 认证
+│       ├── mq/                       # RabbitMQ 生产者/消费者
+│       ├── config/                   # Spring 配置 Bean
+│       ├── store/                    # Milvus 向量存储
+│       ├── entity/                   # MyBatis-Plus 实体
+│       ├── mapper/                   # MyBatis-Plus Mapper
+│       └── dto/                      # 数据传输对象
+├── frontend/                         # Next.js 前端
+│   └── src/
+│       ├── app/                      # App Router 页面
+│       │   ├── page.tsx              # 主页面（6 步学习路径）
+│       │   ├── landing/              # 着陆页
+│       │   ├── login/                # 登录页
+│       │   ├── register/             # 注册页
+│       │   └── dashboard/            # 个人中心全屏页
+│       └── components/
+│           ├── chat/                 # AI 对话（ChatDrawer, ChatRoom, MessageBubble）
+│           ├── ui/                   # shadcn/ui 组件（15 个）
+│           ├── FlashcardView.tsx     # 闪卡（SM-2 间隔重复）
+│           ├── QuizView.tsx          # 测验 + 错题系统
+│           ├── StudyNoteView.tsx     # AI 学习笔记
+│           ├── StatsDashboard.tsx    # 学习者看板
+│           ├── KnowledgeGraphPage.tsx # 知识图谱
+│           ├── MindMapViewer.tsx     # 思维导图
+│           ├── FlowNoteView.tsx      # 持续学习日志
+│           ├── ErrorBookView.tsx     # 全局错题本
+│           └── OnboardingTour.tsx    # 新手引导
+├── docker-compose.yml                # Docker 生产部署
+├── nginx.conf                        # Nginx 反向代理
+├── nginx-baota.conf                  # 宝塔面板 Nginx 配置
+├── scripts/                          # 工具脚本
+└── docs/                             # 项目文档
+```
+
+---
+
 ## 开源许可证
 
 本项目采用 [MIT License](LICENSE) 开源。
@@ -402,5 +504,5 @@ npm run dev
 ---
 
 <p align="center">
-  <sub>Made with ❤️ by <a href="https://github.com/2943331378">EduMerge</a> &mdash; 让知识不再碎片化</sub>
+  <sub>Made with ❤️ by <a href="https://github.com/2943331378">EduMerge</a> &mdash; 2026 大数据要素素质大赛参赛作品</sub>
 </p>

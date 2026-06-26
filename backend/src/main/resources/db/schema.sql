@@ -148,7 +148,9 @@ CREATE TABLE IF NOT EXISTS card_decks (
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
     title VARCHAR(200) NOT NULL COMMENT '组标题',
     type VARCHAR(20) NOT NULL COMMENT 'FLASHCARD / QUIZ / MIND_MAP / NOTE',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
     INDEX idx_doc_id (doc_id),
     INDEX idx_type (type)
@@ -160,7 +162,9 @@ CREATE TABLE IF NOT EXISTS mind_maps (
     doc_id BIGINT NOT NULL COMMENT '关联文档ID',
     deck_id BIGINT NOT NULL COMMENT '关联卡片组ID',
     content TEXT NOT NULL COMMENT 'Markdown格式的树状思维导图',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
     FOREIGN KEY (deck_id) REFERENCES card_decks(id) ON DELETE CASCADE,
     INDEX idx_doc_id (doc_id),
@@ -209,7 +213,8 @@ CREATE TABLE IF NOT EXISTS flashcards (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_doc_id (doc_id),
     INDEX idx_user_id (user_id),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_deck_id (deck_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学习卡片表';
 
 -- ===== 测试题表 =====

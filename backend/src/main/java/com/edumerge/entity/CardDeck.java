@@ -20,7 +20,13 @@ public class CardDeck {
 
     private Long docId;
     private String title;
-    private String type; // FLASHCARD / QUIZ
+    private String type; // FLASHCARD / QUIZ / MIND_MAP / NOTE
+
+    @TableLogic
+    private Integer deleted;
 
     private LocalDateTime createdAt;
+
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime updatedAt;
 }

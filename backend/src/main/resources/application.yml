@@ -209,9 +209,9 @@ server:
   servlet:
     context-path: /api
   error:
-    include-message: always
-    include-binding-errors: always
-    include-stacktrace: on_param
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
     include-exception: false
 
 # ===== Actuator + Prometheus 监控 =====

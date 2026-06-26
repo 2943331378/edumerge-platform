@@ -4,7 +4,9 @@ import com.edumerge.ai.AiRagService;
 import com.edumerge.common.result.Result;
 import com.edumerge.dto.*;
 import com.edumerge.entity.ChatHistory;
+import com.edumerge.security.SecurityUtils;
 import com.edumerge.service.ChatHistoryService;
+import com.edumerge.service.DocumentService;
 import com.edumerge.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -25,14 +27,17 @@ public class RagChatController {
     private final AiRagService aiRagService;
     private final ChatHistoryService chatHistoryService;
     private final SessionService sessionService;
+    private final DocumentService documentService;
 
     @Autowired
     public RagChatController(AiRagService aiRagService,
                              ChatHistoryService chatHistoryService,
-                             SessionService sessionService) {
+                             SessionService sessionService,
+                             DocumentService documentService) {
         this.aiRagService = aiRagService;
         this.chatHistoryService = chatHistoryService;
         this.sessionService = sessionService;
+        this.documentService = documentService;
     }
 
     @PostMapping("/chat")
@@ -46,13 +51,16 @@ public class RagChatController {
             try { docId = Long.parseLong(req.getDocId()); } catch (NumberFormatException ignored) {}
         }
 
-        // sessionId 优先: 解析为 documentUuid
+        // sessionId 优先: 解析为 documentUuid（resolveDocUuid 内部已有所有权校验）
         if (sessionIdStr != null && !sessionIdStr.isBlank()) {
             try {
                 documentId = sessionService.resolveDocUuid(Long.parseLong(sessionIdStr));
             } catch (Exception e) {
                 log.warn("sessionId 解析失败: {}", e.getMessage());
             }
+        } else if (docId != null) {
+            // 直接传入 docId 时，校验文档归属
+            documentService.verifyOwnership(docId);
         }
 
         log.info("RAG 对话请求: msgLen={}, documentId='{}'", req.getMessage().length(), documentId);
@@ -71,7 +79,8 @@ public class RagChatController {
 
     @GetMapping("/history")
     public Result<List<ChatHistoryResponse>> history(@RequestParam(required = false) String sessionId) {
-        return Result.success(DtoMapper.toChatHistoryResponseList(chatHistoryService.listBySession(sessionId, 100)));
+        return Result.success(DtoMapper.toChatHistoryResponseList(
+                chatHistoryService.listBySession(sessionId, SecurityUtils.getCurrentUserId(), 100)));
     }
 
     @PutMapping("/history/{id}/feedback")

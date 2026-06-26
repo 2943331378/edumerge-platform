@@ -49,7 +49,22 @@ public class SessionService {
 
     @Transactional(readOnly = true)
     public Session getById(Long id) {
-        return sessionMapper.selectById(id);
+        Session session = sessionMapper.selectById(id);
+        if (session == null || !session.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权访问此会话");
+        }
+        return session;
+    }
+
+    /** 校验当前用户是否有权访问指定会话 */
+    @Transactional(readOnly = true)
+    public void verifyOwnership(Long sessionId) {
+        Session session = sessionMapper.selectById(sessionId);
+        if (session == null || !session.getUserId().equals(SecurityUtils.getCurrentUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "无权访问此会话");
+        }
     }
 
     @Transactional(readOnly = true)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -92,7 +92,7 @@ function scoreLabel(score: number): string {
   return "部分相关";
 }
 
-export function MessageBubble({ message, onRetry, docId }: { message: MessageData; onRetry?: () => void; docId?: number | null }) {
+export const MessageBubble = memo(function MessageBubble({ message, onRetry, docId }: { message: MessageData; onRetry?: () => void; docId?: number | null }) {
   const isUser = message.role === "user";
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [feedback, setFeedback] = useState<number | null>(null);
@@ -362,4 +362,4 @@ export function MessageBubble({ message, onRetry, docId }: { message: MessageDat
       </div>
     </div>
   );
-}
+});

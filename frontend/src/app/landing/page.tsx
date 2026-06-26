@@ -156,20 +156,71 @@ export default function LandingPage() {
             type="button"
             onClick={() => setMobileMenuOpen((v) => !v)}
             className="p-2 rounded-lg hover:bg-muted transition-colors"
+            aria-label={mobileMenuOpen ? "关闭菜单" : "打开菜单"}
           >
             {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
-
-        {/* Mobile dropdown */}
-        {mobileMenuOpen && (
-          <div className="absolute top-full left-0 right-0 z-50 bg-background/95 backdrop-blur-xl border-b border-border p-4 flex flex-col gap-2 md:hidden">
-            <Link href="/demo" onClick={() => setMobileMenuOpen(false)} className="text-sm px-3 py-2.5 rounded-lg hover:bg-muted transition-colors">体验演示</Link>
-            <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="text-sm px-3 py-2.5 rounded-lg hover:bg-muted transition-colors">登录</Link>
-            <Link href="/register" onClick={() => setMobileMenuOpen(false)} className="text-sm px-3 py-2.5 rounded-lg bg-primary text-primary-foreground text-center font-medium">免费注册</Link>
-          </div>
-        )}
       </nav>
+
+      {/* Mobile full-screen menu */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background md:hidden">
+          <FloatingOrbs />
+
+          {/* Header */}
+          <div className="relative z-10 flex items-center justify-between px-5 py-4">
+            <BrandMark variant="navbar" />
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(false)}
+              className="p-2 rounded-full border border-border/60 hover:bg-muted transition-colors"
+              aria-label="关闭菜单"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Nav links — centered vertically */}
+          <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-2 px-8">
+            {[
+              { href: "/demo", label: "体验演示", icon: Play },
+              { href: "/login", label: "登录", icon: null },
+            ].map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className="w-full max-w-xs text-center text-lg font-medium py-3.5 rounded-xl hover:bg-muted/60 transition-colors flex items-center justify-center gap-2"
+              >
+                {item.icon && <item.icon className="h-4 w-4 text-muted-foreground" />}
+                {item.label}
+              </Link>
+            ))}
+
+            <div className="w-12 h-px bg-border my-4" />
+
+            <Link
+              href="/register"
+              onClick={() => setMobileMenuOpen(false)}
+              className={cn(
+                "w-full max-w-xs text-center text-base font-semibold py-3.5 rounded-xl",
+                "bg-primary text-primary-foreground shadow-lg shadow-primary/20",
+                "hover:shadow-xl hover:shadow-primary/30 active:scale-[0.98] transition-all",
+                "flex items-center justify-center gap-2",
+              )}
+            >
+              免费注册
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+
+          {/* Footer */}
+          <div className="relative z-10 px-5 py-5 text-center text-xs text-muted-foreground/50">
+            AI 驱动的智能学习平台
+          </div>
+        </div>
+      )}
 
       {/* ════════ Hero Section ════════ */}
       <section className="relative z-10 flex flex-col items-center justify-center px-4 pt-12 sm:pt-20 pb-16 sm:pb-24 text-center">

@@ -64,12 +64,13 @@ public class ChatHistoryService {
         log.info("对话反馈已记录: id={}, isHelpful={}, reason={}", id, isHelpful, reason);
     }
 
-    /** 按会话查询最近对话历史 */
+    /** 按会话查询最近对话历史（含用户隔离） */
     @Transactional(readOnly = true)
-    public List<ChatHistory> listBySession(String sessionId, int limit) {
+    public List<ChatHistory> listBySession(String sessionId, Long userId, int limit) {
         return chatHistoryMapper.selectList(
                 new LambdaQueryWrapper<ChatHistory>()
                         .eq(sessionId != null, ChatHistory::getSessionId, sessionId)
+                        .eq(ChatHistory::getUserId, userId)
                         .orderByDesc(ChatHistory::getCreatedAt)
                         .last("LIMIT " + limit));
     }

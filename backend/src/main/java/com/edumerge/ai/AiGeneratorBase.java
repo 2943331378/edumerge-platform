@@ -129,9 +129,12 @@ public abstract class AiGeneratorBase {
         }
 
         StringBuilder sb = new StringBuilder();
+        int totalChars = 0;
         for (int i = 0; i < chunks.size(); i++) {
-            sb.append("【片段").append(i + 1).append("】\n");
-            sb.append(chunks.get(i).getContent()).append("\n\n");
+            String entry = "【片段" + (i + 1) + "】\n" + chunks.get(i).getContent() + "\n\n";
+            if (totalChars + entry.length() > 15000) break;
+            sb.append(entry);
+            totalChars += entry.length();
         }
         log.info("按 chunk 范围获取内容: docId={}, range=[{},{}], 总块数={}, 实际取={}", docId, startChunk, endChunk, allChunks.size(), chunks.size());
         return sb.toString();

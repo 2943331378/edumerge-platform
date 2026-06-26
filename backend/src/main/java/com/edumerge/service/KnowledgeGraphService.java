@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -157,26 +158,30 @@ public class KnowledgeGraphService {
         List<ConceptDocument> docs = conceptDocMapper.selectList(
                 new LambdaQueryWrapper<ConceptDocument>().eq(ConceptDocument::getConceptId, conceptId));
 
+        // 批量查询文档和 session，避免 N+1
+        List<Long> docIds = docs.stream().map(ConceptDocument::getDocId).toList();
+        Map<Long, Document> docMap = docIds.isEmpty() ? Map.of() :
+                documentMapper.selectBatchIds(docIds).stream()
+                        .collect(Collectors.toMap(Document::getId, d -> d));
+        Map<Long, Session> sessionMap = docIds.isEmpty() ? Map.of() :
+                sessionMapper.selectList(new LambdaQueryWrapper<Session>().in(Session::getDocId, docIds))
+                        .stream().collect(Collectors.toMap(Session::getDocId, s -> s, (a, b) -> a));
+
         return docs.stream().map(d -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("docId", d.getDocId());
             m.put("docUuid", d.getDocUuid());
             m.put("mentionText", d.getMentionText());
 
-            // 查找文档信息
-            Document doc = documentMapper.selectById(d.getDocId());
+            Document doc = docMap.get(d.getDocId());
             if (doc != null) {
                 m.put("docTitle", doc.getFileName() != null ? doc.getFileName() : doc.getTitle());
                 m.put("fileName", doc.getFileName());
             }
 
-            // 查找关联的 session
-            List<Session> sessions = sessionMapper.selectList(
-                    new LambdaQueryWrapper<Session>()
-                            .eq(Session::getDocId, d.getDocId())
-                            .last("LIMIT 1"));
-            if (!sessions.isEmpty()) {
-                m.put("sessionId", sessions.get(0).getId());
+            Session session = sessionMap.get(d.getDocId());
+            if (session != null) {
+                m.put("sessionId", session.getId());
             }
 
             return m;
