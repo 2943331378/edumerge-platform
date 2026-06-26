@@ -676,11 +676,14 @@ export default function HomePage() {
                   </span>
                   <span className="text-xs text-muted-foreground">{uploadProgress}%</span>
                 </div>
-                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={uploadProgress} aria-valuemin={0} aria-valuemax={100} aria-label="文件上传进度">
+                <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted/50" role="progressbar" aria-valuenow={uploadProgress} aria-valuemin={0} aria-valuemax={100} aria-label="文件上传进度">
                   <div
-                    className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                    className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-primary/70 to-primary transition-all duration-500 ease-out"
                     style={{ width: `${uploadProgress}%` }}
                   />
+                  {uploadProgress < 100 && (
+                    <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-transparent via-white/20 to-transparent animate-[shimmer_1.5s_ease-in-out_infinite]" style={{ width: `${uploadProgress}%` }} />
+                  )}
                 </div>
               </div>
             )}

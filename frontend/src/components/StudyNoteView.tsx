@@ -30,6 +30,8 @@ import {
 import { cn } from "@/lib/utils";
 import { printNote } from "@/lib/printExport";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
+import { ChartPlaceholder } from "@/components/ChartPlaceholder";
+import { Skeleton } from "@/components/ui/skeleton";
 import { diffLines, type Change } from "diff";
 
 // rehype-sanitize 默认 schema 不保留 code 元素的 class 属性，
@@ -122,16 +124,18 @@ const markdownComponents: Components = {
   li: ({ children }) => <li className="pl-1">{children}</li>,
   strong: ({ children }) => <strong className="font-semibold text-foreground/90">{children}</strong>,
   pre: ({ children }) => {
-    // Mermaid blocks: render MermaidDiagram directly without <pre> wrapper
     const child = children as React.ReactElement<{ className?: string; children?: unknown }> | undefined;
-    if (
-      child &&
-      typeof child === "object" &&
-      "props" in child &&
-      child.props?.className?.includes("language-mermaid") &&
-      typeof child.props?.children === "string"
-    ) {
-      return <MermaidDiagram code={child.props.children} />;
+    if (child && typeof child === "object" && "props" in child && typeof child.props?.children === "string") {
+      const cls = child.props.className ?? "";
+      // Mermaid blocks
+      if (cls.includes("language-mermaid")) {
+        return <MermaidDiagram code={child.props.children} />;
+      }
+      // Chart placeholder blocks (chart-timeline, chart-concept, chart-compare, chart-tree)
+      const chartMatch = cls.match(/language-(chart-\w+)/);
+      if (chartMatch) {
+        return <ChartPlaceholder type={chartMatch[1]} description={child.props.children} />;
+      }
     }
     return <pre>{children}</pre>;
   },
@@ -444,10 +448,34 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <RotateCw className="h-4 w-4 animate-spin" />
-          正在读取学习笔记...
+      <div className="flex h-full flex-col p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-4 w-4 rounded" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+          <Skeleton className="h-8 w-16 rounded-lg" />
+        </div>
+        <div className="flex-1 space-y-6">
+          <Skeleton className="h-7 w-2/5 rounded-lg" />
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-11/12" />
+            <Skeleton className="h-4 w-4/5" />
+          </div>
+          <Skeleton className="h-5 w-32 rounded-lg" />
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-9/12" />
+            <Skeleton className="h-4 w-10/12" />
+            <Skeleton className="h-4 w-3/5" />
+          </div>
+          <Skeleton className="h-5 w-28 rounded-lg" />
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-7/12" />
+          </div>
         </div>
       </div>
     );
@@ -620,7 +648,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                     </Button>
                   </div>
                 ) : (
-                  <div className="mb-4 space-y-2">
+                  <div className="mb-5 space-y-3">
                     <div className="flex items-center gap-2 text-xs text-primary/70">
                       <RotateCw className="h-3.5 w-3.5 animate-spin" />
                       正在生成笔记...
@@ -632,18 +660,33 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                         取消
                       </button>
                     </div>
-                    {streamingProgress > 0 && (
-                      <div
-                        className="h-1 w-full overflow-hidden rounded-full bg-muted/50"
-                        role="progressbar"
-                        aria-valuenow={streamingProgress}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-label="笔记生成进度"
-                      >
-                        <div className="h-full rounded-full bg-primary/50 transition-all duration-300" style={{ width: `${streamingProgress}%` }} />
-                      </div>
-                    )}
+                    <div
+                      className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted/40"
+                      role="progressbar"
+                      aria-valuenow={streamingProgress}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="笔记生成进度"
+                    >
+                      {streamingProgress > 0 ? (
+                        <div
+                          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-primary/60 to-primary transition-all duration-500 ease-out"
+                          style={{ width: `${streamingProgress}%` }}
+                        />
+                      ) : (
+                        <div className="absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-[shimmer_1.5s_ease-in-out_infinite]" />
+                      )}
+                    </div>
+                  </div>
+                )}
+                {/* 骨架屏闪烁：内容不足 100 字时叠加骨架条 */}
+                {streamingContent.length < 100 && !streamingError && (
+                  <div className="space-y-3 mb-4 pointer-events-none" aria-hidden>
+                    <Skeleton className="h-5 w-3/5" />
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-4/5" />
+                    <Skeleton className="h-4 w-11/12" />
+                    <Skeleton className="h-4 w-2/3" />
                   </div>
                 )}
                 <article className="max-w-none">
