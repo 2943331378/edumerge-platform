@@ -26,7 +26,7 @@ import java.util.Map;
 public class AiFlashcardGenerator extends AiGeneratorBase {
 
     @Autowired
-    @org.springframework.beans.factory.annotation.Qualifier("contentChatModel")
+    @org.springframework.beans.factory.annotation.Qualifier("flashcardChatModel")
     private ChatModel chatLanguageModel;
 
     @Autowired
@@ -90,23 +90,33 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
 
     private String callLLM(String context, String existingHint, String sectionContext, String subjectRules, int cardCount) {
         String systemTemplate = """
-                你是一个严谨的 AI 学习导师。请分析文档片段，提取{COUNT}个核心知识点并转化为学习卡片。
+                你是一位认知心理学专家和记忆大师。你的任务是基于文档内容，生成一组**高信息密度、促进深度理解**的 Anki 风格闪卡。
 
                 {COMMON_RULES}
-
-                # 任务
-                提取{COUNT}个核心知识点，转化为问答式学习卡片。
-
-                # 质量红线
-                - 禁止元数据问题（章节归属、页码等）— 必须问概念本身
-                - 禁止是/否型或答案仅为术语名的低价值问题
-                - 禁止"X的定义是什么"、"X有哪些特点"这类仅考察记忆的浅层问题
-                - 单卡不超过200字
-
                 {SUBJECT_RULES}
 
-                # 输出格式（仅输出JSON）
-                {"deckTitle":"10字以内主题","cards":[{"question":"...","answer":"..."}]}
+                # 闪卡设计哲学（拒绝死记硬背）
+                1. **情境触发**：正面(question)不要只问定义，要提供情境、条件、症状或代码片段，让大脑在"解决问题"中回忆。
+                2. **原子化**：一张卡片只考察一个核心知识点（Minimum Information Principle）。
+                3. **记忆锚点**：背面(answer)必须提供辅助记忆的"钩子"（如：类比、口诀、词根、图像描述）。
+
+                # 卡片类型矩阵（动态选择最合适的类型）
+                - **概念辨析卡**：正面给出易混淆场景，背面给出区分核心差异。
+                - **机制推导卡**：正面给出初始状态和条件，背面给出推导过程和最终结果。
+                - **填空/代码卡**：正面给出缺失关键部分的代码或公式，背面补全并解释原因。
+                - **反向应用卡**：正面给出结果或现象，背面反推原因或底层机制。
+
+                # 任务
+                提取{COUNT}个核心知识点，转化为高质量学习卡片。
+
+                # 质量红线（触发即废弃该卡片）
+                - ❌ 禁止"X的定义是什么？"
+                - ❌ 禁止"X有哪些特点？"（列举类问题如果超过3点，必须拆分为多张卡片或改为填空）
+                - ❌ 禁止答案超过 100 字（必须精简提炼）
+                - ❌ 禁止元数据问题（章节归属、页码等）
+
+                # 输出格式（仅输出JSON，question=正面，answer=背面）
+                {"deckTitle":"10字以内主题","cards":[{"question":"【情境/问题/代码片段】","answer":"【核心答案+记忆锚点】"}]}
                 """;
         SystemMessage system = new SystemMessage(systemTemplate
                 .replace("{COUNT}", String.valueOf(cardCount))
@@ -183,7 +193,9 @@ public class AiFlashcardGenerator extends AiGeneratorBase {
             List<Map<String, String>> items = (List<Map<String, String>>) (List<?>) (root.getOrDefault("cards", List.of()));
             for (int i = 0; i < items.size(); i++) {
                 Map<String, String> item = items.get(i);
-                String q = item.getOrDefault("question", ""), a = item.getOrDefault("answer", "");
+                // 兼容 question/answer 和 front/back 两种 key
+                String q = item.getOrDefault("question", item.getOrDefault("front", ""));
+                String a = item.getOrDefault("answer", item.getOrDefault("back", ""));
                 if (q.isBlank() || a.isBlank()) continue;
                 String src = i < matches.size() ? truncate(matches.get(i).embedded().text(), 1000) : "";
                 cards.add(Flashcard.builder().docId(docId).deckId(deckId).userId(userId)

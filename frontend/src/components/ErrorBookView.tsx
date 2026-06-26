@@ -71,6 +71,7 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
   const [retakeCorrect, setRetakeCorrect] = useState(0);
   const [retakeTotal, setRetakeTotal] = useState(0);
   const [retakeDone, setRetakeDone] = useState(false);
+  const retakeMasteredRef = useRef<Set<number>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -188,6 +189,7 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
       setRetakeCorrect(0);
       setRetakeTotal(pool.length);
       setRetakeDone(false);
+      retakeMasteredRef.current = new Set();
       setRetakeMode(true);
     },
     [items, visibleItems],
@@ -203,16 +205,26 @@ export function ErrorBookView({ docId, onBack, onContextChange }: Props) {
       : retakeSelected === retakeCurrent.answer;
     if (isCorrect) {
       setRetakeCorrect((c) => c + 1);
-      // Auto-mark mastered
-      const next = new Set(mastered).add(retakeCurrent.quizId);
-      persistMastered(next, retakeCurrent.quizId);
-      toast.success("答对了！已自动标记掌握");
+      retakeMasteredRef.current.add(retakeCurrent.quizId);
+      toast.success("答对了");
     }
   }, [retakeSelected, retakeCurrent, mastered, persistMastered]);
 
   const handleRetakeNext = useCallback(() => {
     const nextIdx = retakeIdx + 1;
     if (nextIdx >= retakeQueue.length) {
+      // Batch-mark all correct answers as mastered
+      if (retakeMasteredRef.current.size > 0) {
+        const next = new Set(mastered);
+        for (const qid of retakeMasteredRef.current) {
+          next.add(qid);
+          markQuizMastered(qid).catch(() => {});
+        }
+        setMastered(next);
+        if (docId) {
+          try { localStorage.setItem(MASTERED_KEY(docId), JSON.stringify([...next])); } catch { /* ignore */ }
+        }
+      }
       setRetakeDone(true);
     } else {
       setRetakeIdx(nextIdx);

@@ -778,6 +778,19 @@ export function AppSidebar({
     );
   };
 
+  // First-use gesture hint — SSR-safe
+  const [showGestureHint, setShowGestureHint] = useState(false);
+  useEffect(() => {
+    if (documents.length > 0 && !localStorage.getItem("edumerge_gesture_hint_dismissed")) {
+      setShowGestureHint(true);
+    }
+  }, [documents.length]);
+
+  const dismissGestureHint = useCallback(() => {
+    setShowGestureHint(false);
+    try { localStorage.setItem("edumerge_gesture_hint_dismissed", "1"); } catch { /* ignore */ }
+  }, []);
+
   const hasAnyFolders = folders.length > 0;
 
   return (
@@ -1045,7 +1058,7 @@ export function AppSidebar({
           )}
 
           {/* First-use gesture hint */}
-          {documents.length > 0 && !localStorage.getItem("edumerge_gesture_hint_dismissed") && (
+          {showGestureHint && (
             <div className="mx-3 mb-2 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-[11px] text-primary/80 shrink-0">
               <span className="shrink-0 mt-0.5">💡</span>
               <div className="flex-1 min-w-0">
@@ -1053,7 +1066,7 @@ export function AppSidebar({
               </div>
               <button
                 type="button"
-                onClick={() => localStorage.setItem("edumerge_gesture_hint_dismissed", "1")}
+                onClick={dismissGestureHint}
                 className="shrink-0 h-4 w-4 flex items-center justify-center rounded hover:bg-primary/10"
               >
                 <X className="h-3 w-3" />

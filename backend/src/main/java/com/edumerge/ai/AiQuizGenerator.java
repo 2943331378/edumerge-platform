@@ -91,18 +91,22 @@ public class AiQuizGenerator extends AiGeneratorBase {
                             String subjectRules, int singleCount, int fillCount) {
         int totalCount = singleCount + fillCount;
         String systemTemplate = """
-                你是一个严谨的 AI 学习导师。请分析文档片段，生成{TOTAL}道高质量测试题。
+                你是一位严苛的标准化考试命题专家（如考研、CPA、AWS认证）。你的任务是基于文档内容，设计具备**高区分度、强迷惑性**的测试题。
 
                 {COMMON_RULES}
+                {SUBJECT_RULES}
 
                 # 任务
-                生成{TOTAL}道测试题：{SINGLE}道选择题（4选项，含3个有迷惑性的干扰项）+ {FILL}道填空题（____标记，答案2-8字）。
+                生成{TOTAL}道测试题：{SINGLE}道选择题（4选项）+ {FILL}道填空题（____标记，答案2-8字）。
 
-                # 质量红线
-                - 禁止元数据问题（章节归属、页码等）、禁止常识题
-                - 禁止"以下哪项是X的定义"这类仅考察记忆的低价值题
-                - 选择题干扰项须有迷惑性，来自文档语义，且每个干扰项都应有合理依据
-                - 覆盖文档不同主题/概念层级
+                # 命题与干扰项构建策略
+                1. **题干设计**：多使用"以下说法错误的是"、"在X条件下，最合适的方案是"、"导致Y现象的根本原因是"。
+                2. **干扰项（Distractors）构建铁律**：
+                   - **概念混淆**：使用与正确答案相似但本质不同的概念。
+                   - **条件缺失**：选项本身在某种特定条件下是对的，但在题干给定的前提下是错的。
+                   - **因果倒置**：将原因和结果颠倒。
+                   - **常识陷阱**：利用日常直觉中正确但在专业领域错误的观点。
+                   - *严禁使用"以上皆非"、"以上皆是"或明显荒谬的凑数选项。*
 
                 # 难度分布
                 - 基础题：考察核心概念的准确理解（非死记硬背，需理解内涵）
@@ -112,12 +116,21 @@ public class AiQuizGenerator extends AiGeneratorBase {
                   · 因果推理：改变某个前提条件，结果如何变化
                   · 错误诊断：给出一个常见错误用法，识别问题所在
 
-                {SUBJECT_RULES}
+                # explanation 字段格式要求
+                explanation 必须为结构化纯文本，包含：
+                - 【正确原因】：详细解释正确答案的底层逻辑和适用条件
+                - 【干扰项分析】：逐项解释每个错误选项为什么错（B:... C:... D:...）
+
+                # 质量红线
+                - ❌ 严禁出现"是/否"判断题改造的单选题
+                - ❌ 严禁选项之间存在明显的包含或互斥关系
+                - ❌ 严禁在题干中泄露答案的暗示
+                - ❌ 禁止元数据问题（章节归属、页码等）
 
                 # 输出格式（仅输出JSON）
                 {"deckTitle":"10字以内主题","quizzes":[
-                  {"type":"SINGLE","question":"...","options":["A. ...","B. ...","C. ...","D. ..."],"correctAnswer":"A. ...","explanation":"...","difficulty":"basic"},
-                  {"type":"FILL_BLANK","question":"...____...","correctAnswer":"关键词","explanation":"...","difficulty":"application"}
+                  {"type":"SINGLE","question":"...","options":["A. ...","B. ...","C. ...","D. ..."],"correctAnswer":"A. ...","explanation":"【正确原因】...【干扰项分析】B:... C:... D:...","difficulty":"basic"},
+                  {"type":"FILL_BLANK","question":"...____...","correctAnswer":"关键词","explanation":"【正确原因】...","difficulty":"application"}
                 ]}
                 选择题options必须有4项；填空题options必须为空数组[]。
                 """;

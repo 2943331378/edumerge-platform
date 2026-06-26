@@ -24,7 +24,7 @@ import {
   Check, Minus, Pencil,
   RotateCw, Sparkles, Layers, GitFork, HelpCircle, NotebookText,
   Loader2, RefreshCw, Download, MoreHorizontal,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Target, AlertTriangle,
 } from "lucide-react";
 
 // ═══════ 文档类型配置 ═══════
@@ -568,12 +568,12 @@ export function DocumentOutlineView({
     <>
       {/* 内联 CSS 变量 + 字体 */}
       <style>{`
-        :root {
+        .document-outline-root {
           --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', Georgia, serif;
           --outline-bg: linear-gradient(180deg, #fefdf8 0%, #faf8f3 50%, #f5f2eb 100%);
           --outline-bg-dark: linear-gradient(180deg, #1a1814 0%, #1c1915 50%, #1e1b16 100%);
         }
-        .dark { --outline-bg: var(--outline-bg-dark); }
+        .dark .document-outline-root { --outline-bg: var(--outline-bg-dark); }
         @keyframes outline-fade-in {
           from { opacity: 0; transform: translateY(8px); }
           to   { opacity: 1; transform: translateY(0); }
@@ -602,7 +602,7 @@ export function DocumentOutlineView({
         }
       `}</style>
 
-      <div className="flex flex-col h-full" style={{ background: "var(--outline-bg)" }}>
+      <div className="document-outline-root flex flex-col h-full" style={{ background: "var(--outline-bg)" }}>
         {/* ── 顶部标题栏 ── */}
         <div className="shrink-0 px-6 max-md:px-4 pt-5 pb-4 border-b border-amber-200/30 dark:border-amber-800/15">
           <div className="flex items-start justify-between">
@@ -658,6 +658,18 @@ export function DocumentOutlineView({
                 )}
                 <span className="max-md:hidden">重新生成</span>
               </Button>
+              {onGenerate && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="rounded-lg gap-1.5 h-8 px-2.5 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+                  onClick={() => onGenerate("mindmap", "")}
+                  disabled={!docId || docStatus !== "COMPLETED"}
+                >
+                  <GitFork className="h-3.5 w-3.5" />
+                  <span className="max-md:hidden">全书思维大纲</span>
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -698,7 +710,7 @@ export function DocumentOutlineView({
 
         {/* ── 大纲树 ── */}
         <div className="flex-1 overflow-y-auto overscroll-contain">
-          <div className="max-w-3xl mx-auto px-6 max-md:px-4 pt-4 pb-32">
+          <div className="max-w-3xl mx-auto px-6 max-md:px-4 pt-4 pb-8">
             {outline.outline.sections.map((section, idx) => (
               <OutlineNode
                 key={section.id}
@@ -726,7 +738,7 @@ export function DocumentOutlineView({
 
         {/* ── 底部浮动生成工具栏 ── */}
         {checkedLeaves > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none">
+          <div className="sticky bottom-0 left-0 right-0 z-40 pointer-events-none mt-auto">
             <div className="toolbar-enter max-w-3xl mx-auto px-4 pb-5">
               <div
                 className={cn(
@@ -927,6 +939,34 @@ function OutlineNode({
           </span>
         )}
 
+        {/* 权重标记 */}
+        {node.weight && node.weight !== "low" && (
+          <span
+            className={cn(
+              "shrink-0 inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wide border",
+              node.weight === "high"
+                ? "text-red-700 dark:text-red-400 bg-red-50/80 dark:bg-red-900/20 border-red-200/50 dark:border-red-800/30"
+                : "text-amber-700 dark:text-amber-400 bg-amber-50/80 dark:bg-amber-900/20 border-amber-200/50 dark:border-amber-800/30",
+            )}
+          >
+            {node.weight === "high" ? "重点" : "重要"}
+          </span>
+        )}
+
+        {/* 难度标记 */}
+        {node.difficulty && node.difficulty !== "easy" && (
+          <span
+            className={cn(
+              "shrink-0 inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-wide border",
+              node.difficulty === "hard"
+                ? "text-purple-700 dark:text-purple-400 bg-purple-50/80 dark:bg-purple-900/20 border-purple-200/50 dark:border-purple-800/30"
+                : "text-sky-700 dark:text-sky-400 bg-sky-50/80 dark:bg-sky-900/20 border-sky-200/50 dark:border-sky-800/30",
+            )}
+          >
+            {node.difficulty === "hard" ? "难点" : "中等"}
+          </span>
+        )}
+
         {/* 展开/折叠箭头 */}
         {hasChildren && (
           <button
@@ -1044,6 +1084,32 @@ function OutlineNode({
       </div>
 
       {/* 子节点 */}
+      {/* 学习目标与易错点（展开时显示） */}
+      {isExpanded && (Array.isArray(node.learningObjectives) && node.learningObjectives.length > 0 || node.pitfalls) && (
+        <div className="relative ml-6 mr-4 mb-1">
+          <div className="rounded-lg bg-amber-50/30 dark:bg-amber-900/5 border border-amber-200/30 dark:border-amber-800/15 px-3 py-2 space-y-1.5">
+            {Array.isArray(node.learningObjectives) && node.learningObjectives.length > 0 ? (
+              <div className="flex items-start gap-1.5">
+                <Target className="h-3 w-3 mt-0.5 shrink-0 text-amber-500/70" />
+                <div className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                  <span className="font-medium text-amber-700/70 dark:text-amber-400/70">学习目标：</span>
+                  {node.learningObjectives.join("；")}
+                </div>
+              </div>
+            ) : null}
+            {node.pitfalls ? (
+              <div className="flex items-start gap-1.5">
+                <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0 text-orange-500/70" />
+                <div className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                  <span className="font-medium text-orange-700/70 dark:text-orange-400/70">易错点：</span>
+                  {node.pitfalls}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
       {hasChildren && isExpanded && (
         <div className={cn("relative", ds.connectorIndent)}>
           {/* 连接线 */}

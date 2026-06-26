@@ -111,7 +111,7 @@ const markdownComponents: Components = {
     <h3 id={`heading-${headingSlug(children)}`} className="mt-5 text-sm font-semibold text-foreground/85 scroll-mt-20">{children}</h3>
   ),
   p: ({ children }) => (
-    <p className="my-3 text-sm leading-7 text-foreground/75">{children}</p>
+    <p className="my-3 text-[15px] leading-7 text-foreground/75">{children}</p>
   ),
   ul: ({ children }) => (
     <ul className="my-3 space-y-2 pl-5 text-sm leading-7 text-foreground/75 list-disc">{children}</ul>
@@ -478,7 +478,7 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                 复制
               </Button>
               <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-input bg-background text-sm font-medium hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+                <DropdownMenuTrigger className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors">
                   <MoreHorizontal className="h-4 w-4" />
                   <span className="sr-only">更多操作</span>
                 </DropdownMenuTrigger>
@@ -625,6 +625,12 @@ export function StudyNoteView({ docId, docStatus, embedded, onGenerated, onConte
                       <RotateCw className="h-3.5 w-3.5 animate-spin" />
                       正在生成笔记...
                       {streamingProgress > 0 && <span className="text-muted-foreground/50">{streamingProgress}%</span>}
+                      <button
+                        onClick={cancelGeneration}
+                        className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-[11px] text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        取消
+                      </button>
                     </div>
                     {streamingProgress > 0 && (
                       <div

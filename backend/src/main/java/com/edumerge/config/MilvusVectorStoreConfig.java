@@ -112,24 +112,43 @@ public class MilvusVectorStoreConfig {
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
                 .modelName("deepseek-v4-flash")
-                .temperature(0.1)
+                .temperature(0.2)
                 .timeout(Duration.ofSeconds(120))
                 .build();
     }
 
     /**
-     * 内容生成模型 (DeepSeek, 用于笔记/卡片/测验/思维导图)
+     * 内容生成模型 (DeepSeek, 用于笔记/测验/思维导图)
      */
     @Bean("contentChatModel")
     public ChatModel contentChatModel(
             @Value("${app.ai.content.base-url:https://api.deepseek.com/v1}") String contentBaseUrl,
             @Value("${app.ai.content.model:deepseek-chat}") String contentModel) {
-        log.info("初始化内容生成模型: {} (baseUrl={})", contentModel, contentBaseUrl);
+        log.info("初始化内容生成模型: {} (baseUrl={}, maxTokens=8192)", contentModel, contentBaseUrl);
         return OpenAiChatModel.builder()
                 .baseUrl(contentBaseUrl)
                 .apiKey(contentApiKey)
                 .modelName(contentModel)
                 .temperature(0.3)
+                .maxTokens(8192)
+                .topP(0.85)
+                .timeout(Duration.ofSeconds(180))
+                .build();
+    }
+
+    /**
+     * 闪卡生成专用模型 (较高 temperature 激发情境构建创造性)
+     */
+    @Bean("flashcardChatModel")
+    public ChatModel flashcardChatModel(
+            @Value("${app.ai.content.base-url:https://api.deepseek.com/v1}") String contentBaseUrl,
+            @Value("${app.ai.content.model:deepseek-chat}") String contentModel) {
+        log.info("初始化闪卡生成模型: {} (baseUrl={}, temperature=0.6)", contentModel, contentBaseUrl);
+        return OpenAiChatModel.builder()
+                .baseUrl(contentBaseUrl)
+                .apiKey(contentApiKey)
+                .modelName(contentModel)
+                .temperature(0.6)
                 .maxTokens(4096)
                 .topP(0.85)
                 .timeout(Duration.ofSeconds(180))
@@ -143,13 +162,13 @@ public class MilvusVectorStoreConfig {
     public StreamingChatModel streamingContentChatModel(
             @Value("${app.ai.content.base-url:https://api.deepseek.com/v1}") String contentBaseUrl,
             @Value("${app.ai.content.model:deepseek-chat}") String contentModel) {
-        log.info("初始化内容生成流式模型: {} (baseUrl={})", contentModel, contentBaseUrl);
+        log.info("初始化内容生成流式模型: {} (baseUrl={}, maxTokens=8192)", contentModel, contentBaseUrl);
         return OpenAiStreamingChatModel.builder()
                 .baseUrl(contentBaseUrl)
                 .apiKey(contentApiKey)
                 .modelName(contentModel)
                 .temperature(0.3)
-                .maxTokens(4096)
+                .maxTokens(8192)
                 .topP(0.85)
                 .timeout(Duration.ofSeconds(180))
                 .build();

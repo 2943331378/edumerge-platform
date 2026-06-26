@@ -111,9 +111,9 @@ export function LearningPath({ steps, currentStep, completedSteps, onStepClick }
               >
                 {step.label}
               </span>
-              {/* 未完成标记 */}
+              {/* 未完成指示点 */}
               {!isCompleted && !isActive && idx > 0 && !completedSteps.has(steps[idx - 1].id) && (
-                <span className="text-[11px] text-muted-foreground/30 mt-0.5">未解锁</span>
+                <span className="text-[11px] text-muted-foreground/30 mt-0.5">未完成</span>
               )}
             </button>
 

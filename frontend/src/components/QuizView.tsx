@@ -13,19 +13,19 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, GitFork, Target, XCircle, Pencil, Download, Loader2, Clock } from "lucide-react";
+import { Sparkles, HelpCircle, RotateCw, ArrowLeft, ChevronRight, Check, X, Trash2, Sparkle, Target, XCircle, Pencil, Download, Loader2, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { DeckRecord, QuizItem, QuizAttemptRecord, WeaknessItem } from "@/lib/api";
-import { listDecks, listQuizzesByDeck, generateQuizzes as generateApi, deleteDeck, getMindMap, saveQuizAttempt, listQuizAttempts, updateQuiz, deleteQuiz, listWeakness } from "@/lib/api";
+import { listDecks, listQuizzesByDeck, generateQuizzes as generateApi, deleteDeck, saveQuizAttempt, listQuizAttempts, updateQuiz, deleteQuiz, listWeakness } from "@/lib/api";
 import { ErrorBookView } from "@/components/ErrorBookView";
 import { saveProgress, loadProgress, clearProgress, quizProgressKey } from "@/lib/progressStorage";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface Props {
   docId: number | null;
   docUuid: string | null;
   sessionId: number | null;
-  onMindMapGenerated?: () => void;
   onGenerated?: () => void;
   onContextChange?: (hint: string) => void;
   embedded?: boolean;
@@ -58,13 +58,12 @@ function formatElapsed(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
+export function QuizView({ docId, docUuid, sessionId, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [view, setView] = useState<"decks" | "quiz">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [mindMapGenerating, setMindMapGenerating] = useState(false);
-  const [mindMapProgress, setMindMapProgress] = useState(0);
   const [currentDeck, setCurrentDeck] = useState<DeckRecord | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -131,16 +130,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     setReviewIdx(0);
   };
 
-  const mindMapProgressTexts = [
-    "正在解构知识要素...",
-    "正在提取层级结构...",
-    "正在识别核心主题...",
-    "正在生成思维导图...",
-    "正在组织知识图谱...",
-  ];
-  const [mindMapTextIdx, setMindMapTextIdx] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
-  const mindMapAbortRef = useRef<AbortController | null>(null);
   const generatingRef = useRef(false);
   const propGeneratingRef = useRef(generating);
   propGeneratingRef.current = generating;
@@ -153,7 +143,6 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
     return () => {
       mountedRef.current = false;
       prevCounterRef.current = undefined;
-      mindMapAbortRef.current?.abort();
       generatingRef.current = false;
       if (propGeneratingRef.current) onGeneratingChange?.(false);
     };
@@ -182,13 +171,8 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
       abortRef.current.abort();
       abortRef.current = null;
     }
-    if (mindMapAbortRef.current) {
-      mindMapAbortRef.current.abort();
-      mindMapAbortRef.current = null;
-    }
     setLoading(false);
     onGeneratingChange?.(false);
-    setMindMapGenerating(false);
     toast.info("已取消生成");
   };
 
@@ -236,35 +220,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
   // docId 变化时自动重载 deck 列表并回到列表视图
   useEffect(() => { reloadDecks(); setView("decks"); }, [docId]);
 
-  // 思维导图生成进度文字轮播
-  useEffect(() => {
-    if (!mindMapGenerating) return;
-    const timer = setInterval(() => {
-      setMindMapTextIdx((i) => (i + 1) % mindMapProgressTexts.length);
-      setMindMapProgress((p) => Math.min(p + 8, 90));
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [mindMapGenerating]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /** 生成全书思维大纲 → 自动跳转导图页 */
-  const handleGenerateMindMap = async () => {
-    if (!docId || mindMapGenerating) return;
-    const controller = new AbortController();
-    mindMapAbortRef.current = controller;
-    setMindMapGenerating(true);
-    setMindMapProgress(0);
-    setMindMapTextIdx(0);
-    try {
-      await getMindMap(docId, controller.signal);
-      setMindMapProgress(100);
-      toast.success("思维导图生成成功");
-      setTimeout(() => onMindMapGenerated?.(), 400);
-    } catch {
-      toast.error("思维导图生成失败");
-    }
-    mindMapAbortRef.current = null;
-    setMindMapGenerating(false);
-  };
+  /** 生成后自动加载列表并进入最新 Deck */
 
   const enterDeck = async (deck: DeckRecord) => {
     setCurrentDeck(deck);
@@ -304,10 +260,12 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
           if (saved.elapsed > 0) {
             setElapsedSeconds(saved.elapsed);
             setStartTime(new Date(Date.now() - saved.elapsed * 1000));
+            toast.info(`已恢复进度（已用时 ${formatElapsed(saved.elapsed)}）`);
+          } else {
+            toast.info("已恢复上次学习进度");
           }
 
           restored = true;
-          toast.info("已恢复上次学习进度");
         }
       }
       if (!saved || !restored) {
@@ -372,7 +330,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
 
   const handleDeleteDeck = async (e: React.MouseEvent, deckId: number) => {
     e.stopPropagation();
-    if (!confirm("确定删除该测验组？组内所有题目将被删除且无法恢复。")) return;
+    if (!await confirm({ title: "删除测验组", description: "确定删除该测验组？组内所有题目将被删除且无法恢复。", confirmLabel: "删除", destructive: true })) return;
     try {
       await deleteDeck(deckId);
       setDecks((prev) => prev.filter((d) => d.id !== deckId));
@@ -454,11 +412,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                 导出
               </Button>
             )}
-            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>
-              {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
-              {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
-            </Button>
-            {(loading || mindMapGenerating) ? (
+            {loading ? (
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
                 <XCircle className="h-3.5 w-3.5" />
                 取消生成
@@ -471,22 +425,6 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
             )}
           </div>
         </div>
-
-        {/* 思维导图生成进度条 */}
-        {mindMapGenerating && (
-          <div className="px-6 py-2 border-b bg-purple-50/30 dark:bg-purple-950/10">
-            <div className="flex items-center gap-3 max-w-3xl mx-auto">
-              <GitFork className="h-3.5 w-3.5 text-purple-500 animate-pulse shrink-0" />
-              <span className="text-[11px] text-purple-700 dark:text-purple-300 shrink-0 transition-all duration-500">
-                {mindMapProgressTexts[mindMapTextIdx]}
-              </span>
-              <div className="flex-1 h-1 rounded-full bg-purple-200 dark:bg-purple-900 overflow-hidden">
-                <div className="h-full rounded-full bg-purple-500 transition-all duration-700 ease-out" style={{ width: `${mindMapProgress}%` }} />
-              </div>
-              <span className="text-[11px] text-purple-400 shrink-0">{mindMapProgress}%</span>
-            </div>
-          </div>
-        )}
 
         <div className="flex-1 overflow-y-auto p-6">
           {decks.length === 0 ? (
@@ -609,6 +547,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
             </div>
           )}
         </div>
+        {confirmDialog}
       </div>
     );
   }
@@ -806,7 +745,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
                           className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
                           <Pencil className="h-3 w-3" />
                         </button>
-                        <button type="button" onClick={() => { if (confirm("确定删除这道题目？")) { deleteQuiz(quiz.id).then(() => { setQuizzes(prev => prev.filter(q => q.id !== quiz.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
+                        <button type="button" onClick={async () => { if (await confirm({ title: "删除题目", description: "确定删除这道题目？", confirmLabel: "删除", destructive: true })) { deleteQuiz(quiz.id).then(() => { setQuizzes(prev => prev.filter(q => q.id !== quiz.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
                           className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
                           <X className="h-3 w-3" />
                         </button>
@@ -838,7 +777,19 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
               {quiz?.quizType === "SINGLE" && (
                 <span className="inline-flex items-center rounded-md bg-purple-50 dark:bg-purple-900/20 px-1.5 py-0.5 text-[11px] font-medium text-purple-700 dark:text-purple-300">选择题</span>
               )}
-              {quiz?.difficulty && <span>{quiz.difficulty >= 4 ? "综合应用" : "基础概念"}</span>}
+              {quiz?.difficulty && (
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                    quiz.difficulty >= 4
+                      ? "bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300"
+                      : "bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300",
+                  )}
+                  title={quiz.difficulty >= 4 ? "综合应用：需要跨章节知识整合" : "基础概念：考查单一知识点"}
+                >
+                  {quiz.difficulty >= 4 ? "综合应用" : "基础概念"}
+                </span>
+              )}
             </div>
             {reviewMode && <span className="text-amber-500 font-medium">错题回顾</span>}
           </div>
@@ -932,7 +883,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
             ) : (
               <>
                 {!reviewMode && (
-                  <Button variant="outline" className="rounded-xl h-9" onClick={() => { if (confirm("开始新测验将覆盖当前进度，确定继续？")) handleGenerate(); }} disabled={loading}>
+                  <Button variant="outline" className="rounded-xl h-9" onClick={async () => { if (await confirm({ title: "开启新任务", description: "开始新测验将覆盖当前进度，确定继续？", confirmLabel: "继续" })) handleGenerate(); }} disabled={loading}>
                     {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
                     开启新任务
                   </Button>
@@ -976,6 +927,7 @@ export function QuizView({ docId, docUuid, sessionId, onMindMapGenerated, onGene
         </div>
       </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

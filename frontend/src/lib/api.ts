@@ -94,41 +94,6 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return json.data as T;
 }
 
-/** 流式请求 — 返回 ReadableStream，由调用方逐行解析 SSE。支持 401 token 刷新重试。 */
-async function streamRequest(url: string, body: Record<string, string>, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}${url}`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (e) {
-    throw e;
-  }
-  if (res.status === 401) {
-    const refreshed = await tryRefreshToken();
-    if (refreshed) {
-      res = await fetch(`${BASE}${url}`, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(body),
-        signal,
-      });
-    } else {
-      clearAuthAndRedirect();
-      throw new Error("登录已过期，请重新登录");
-    }
-  }
-  if (!res.ok) {
-    const json = await res.json().catch(() => null);
-    throw new Error(json?.message ?? `HTTP ${res.status}`);
-  }
-  if (!res.body) throw new Error("浏览器不支持流式响应");
-  return res.body;
-}
-
 // ===== 对话会话 (Conversation) =====
 
 export interface ConversationRecord {
@@ -222,6 +187,11 @@ export interface OutlineSection {
   level: number;
   startChunk?: number;
   endChunk?: number;
+  weight?: "high" | "medium" | "low";
+  difficulty?: "easy" | "medium" | "hard";
+  learningObjectives?: string[];
+  keyConcepts?: string[];
+  pitfalls?: string;
   children: OutlineSection[];
 }
 
@@ -229,6 +199,9 @@ export interface OutlineData {
   docType: string;
   docTypeLabel: string;
   totalChunks: number;
+  title?: string;
+  summary?: string;
+  prerequisites?: string[];
   sections: OutlineSection[];
 }
 
@@ -432,8 +405,77 @@ export async function generateMindMap(docId: number, sectionContext?: string, st
   return request<MindMapRecord>(`/mindmap/generate?${params}`, { method: "POST", signal });
 }
 
-/** 流式生成思维导图 — SSE token 流 + 进度 + 完成元数据 */
-export async function generateMindMapStream(
+/** XHR + SSE 流式请求，支持 401 token 刷新自动重试 */
+function xhrSSE<T>(
+  url: string,
+  body: string | undefined,
+  signal: AbortSignal | undefined,
+  cbs: {
+    onToken: (token: string) => void;
+    onProgress?: (progress: number) => void;
+    onDone: (data: T) => void;
+    onError: (msg: string) => void;
+  }
+): void {
+  function start(retry: boolean) {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    const token = getStoredToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    let processedLen = 0;
+    let done = false;
+
+    xhr.onprogress = () => {
+      if (done) return;
+      const text = xhr.responseText;
+      const newPart = text.substring(processedLen);
+      processedLen = text.length;
+      for (const line of newPart.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") { done = true; return; }
+        try {
+          const json = JSON.parse(data);
+          if (json.token) cbs.onToken(json.token);
+          if (json.progress != null && cbs.onProgress) cbs.onProgress(json.progress);
+          if (json.done) { done = true; cbs.onDone(json.done); return; }
+          if (json.error) { done = true; cbs.onError(json.error); return; }
+        } catch { /* 忽略非 JSON 行 */ }
+      }
+    };
+
+    xhr.onload = async () => {
+      if (done) return;
+      if (xhr.status === 401 && retry) {
+        const refreshed = await tryRefreshToken();
+        if (refreshed) { start(false); return; }
+        clearAuthAndRedirect();
+      }
+      if (xhr.status >= 400) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          cbs.onError(json?.message ?? `HTTP ${xhr.status}`);
+        } catch { cbs.onError(`HTTP ${xhr.status}`); }
+        return;
+      }
+      if (!done) { done = true; cbs.onError("流式响应异常结束"); }
+    };
+
+    xhr.onerror = () => { if (!done) { done = true; cbs.onError("网络错误"); } };
+    xhr.onabort = () => { done = true; };
+    xhr.send(body);
+    if (signal) {
+      if (signal.aborted) xhr.abort();
+      else signal.addEventListener("abort", () => xhr.abort(), { once: true });
+    }
+  }
+  start(true);
+}
+
+/** 流式生成思维导图 — XHR + SSE */
+export function generateMindMapStream(
   docId: number,
   opts: {
     sectionContext?: string;
@@ -445,43 +487,12 @@ export async function generateMindMapStream(
     onDone: (meta: MindMapRecord) => void;
     onError: (msg: string) => void;
   }
-): Promise<void> {
+): void {
   const params = new URLSearchParams({ docId: String(docId) });
   if (opts.sectionContext) params.set("sectionContext", opts.sectionContext);
   if (opts.startChunk != null) params.set("startChunk", String(opts.startChunk));
   if (opts.endChunk != null) params.set("endChunk", String(opts.endChunk));
-
-  const stream = await streamRequest(`/mindmap/stream?${params}`, {}, opts.signal);
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (data === "[DONE]") return;
-        try {
-          const json = JSON.parse(data);
-          if (json.token) opts.onToken(json.token);
-          if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
-          if (json.done) {
-            try { await opts.onDone(json.done); } catch { /* onDone 回调异常不阻塞流 */ }
-            return;
-          }
-          if (json.error) { opts.onError(json.error); return; }
-        } catch { /* 忽略非 JSON 行 */ }
-      }
-    }
-  } catch (e) {
-    if ((e as Error).name !== "AbortError") opts.onError((e as Error).message);
-  }
+  xhrSSE(`${BASE}/mindmap/stream?${params}`, undefined, opts.signal, opts);
 }
 
 export async function deleteMindMap(deckId: number): Promise<void> {
@@ -522,7 +533,7 @@ export async function generateStudyNote(docId: number, requirements?: string, si
   });
 }
 
-/** 流式生成笔记 — 用 XHR + onprogress 实现实时 SSE 读取（fetch ReadableStream 在部分环境下不实时） */
+/** 流式生成笔记 — XHR + SSE */
 export function generateStudyNoteStream(
   docId: number,
   opts: {
@@ -542,83 +553,7 @@ export function generateStudyNoteStream(
   if (opts.sectionContext) body.sectionContext = opts.sectionContext;
   if (opts.startChunk != null) body.startChunk = String(opts.startChunk);
   if (opts.endChunk != null) body.endChunk = String(opts.endChunk);
-
-  const xhr = new XMLHttpRequest();
-  xhr.open("POST", `${BASE}/notes/stream`);
-  xhr.setRequestHeader("Content-Type", "application/json");
-  const token = getStoredToken();
-  if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-
-  let processedLen = 0;
-  let done = false;
-
-  xhr.onprogress = () => {
-    if (done) return;
-    const text = xhr.responseText;
-    const newPart = text.substring(processedLen);
-    processedLen = text.length;
-    const lines = newPart.split("\n");
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const data = line.slice(5).trim();
-      if (data === "[DONE]") { done = true; return; }
-      try {
-        const json = JSON.parse(data);
-        if (json.token) opts.onToken(json.token);
-        if (json.progress != null && opts.onProgress) opts.onProgress(json.progress);
-        if (json.done) {
-          done = true;
-          opts.onDone(json.done);
-          return;
-        }
-        if (json.error) { done = true; opts.onError(json.error); return; }
-      } catch { /* 忽略非 JSON 行 */ }
-    }
-  };
-
-  xhr.onload = () => {
-    if (done) return;
-    if (xhr.status === 401) {
-      opts.onError("登录已过期，请重新登录");
-      return;
-    }
-    if (xhr.status >= 400) {
-      try {
-        const json = JSON.parse(xhr.responseText);
-        opts.onError(json?.message ?? `HTTP ${xhr.status}`);
-      } catch {
-        opts.onError(`HTTP ${xhr.status}`);
-      }
-      return;
-    }
-    // Stream ended without [DONE] — treat as complete
-    if (!done) {
-      done = true;
-      opts.onError("流式响应异常结束");
-    }
-  };
-
-  xhr.onerror = () => {
-    if (!done) {
-      done = true;
-      opts.onError("网络错误");
-    }
-  };
-
-  xhr.onabort = () => {
-    done = true;
-  };
-
-  xhr.send(JSON.stringify(body));
-
-  // Wire up AbortSignal
-  if (opts.signal) {
-    if (opts.signal.aborted) {
-      xhr.abort();
-    } else {
-      opts.signal.addEventListener("abort", () => xhr.abort(), { once: true });
-    }
-  }
+  xhrSSE(`${BASE}/notes/stream`, JSON.stringify(body), opts.signal, opts);
 }
 
 export async function updateStudyNote(id: number, data: { content?: string; title?: string }): Promise<StudyNoteRecord> {

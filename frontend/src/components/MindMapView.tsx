@@ -12,7 +12,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { GitFork, ArrowLeft, Sparkles, RotateCw, Trash2, Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import type { MindMapRecord } from "@/lib/api";
-import { listMindMaps, getMindMapDetail, generateMindMap, generateMindMapStream, deleteMindMap } from "@/lib/api";
+import { listMindMaps, getMindMapDetail, generateMindMapStream, deleteMindMap } from "@/lib/api";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MindMapViewer } from "./MindMapViewer";
@@ -35,6 +36,7 @@ interface Props {
 }
 
 export function MindMapView({ docId, docStatus, embedded, onContextChange, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange, onGenerated }: Props) {
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [view, setView] = useState<"list" | "viewer">("list");
   const [mindMaps, setMindMaps] = useState<MindMapRecord[]>([]);
   const [currentMap, setCurrentMap] = useState<MindMapRecord | null>(null);
@@ -43,7 +45,6 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
   const [streamingError, setStreamingError] = useState<string | null>(null);
   const [streamingProgress, setStreamingProgress] = useState(0);
   const streamingRef = useRef("");
-  const rafIdRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const generatingRef = useRef(generating);
   generatingRef.current = generating;
@@ -56,7 +57,6 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
     return () => {
       mountedRef.current = false;
       prevCounterRef.current = undefined;
-      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
       if (generatingRef.current) onGeneratingChange?.(false);
     };
   }, []);
@@ -75,7 +75,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
   useEffect(() => { reloadList(); setView("list"); setCurrentMap(null); }, [docId]);
 
   // 生成思维导图（流式）
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(() => {
     if (!docId || generating) return;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -86,58 +86,49 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
     setStreamingError(null);
     setStreamingProgress(0);
 
-    try {
-      await generateMindMapStream(docId, {
-        sectionContext: sectionContext || undefined,
-        startChunk,
-        endChunk,
-        signal: controller.signal,
-        onToken: (token) => {
-          if (!mountedRef.current || abortRef.current !== controller) return;
-          streamingRef.current += token;
-          setStreamingContent(streamingRef.current);
-        },
-        onProgress: (p) => {
-          if (mountedRef.current && abortRef.current === controller) setStreamingProgress(p);
-        },
-        onDone: async (meta) => {
-          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-          if (!mountedRef.current || abortRef.current !== controller) return;
-          setStreamingContent(null);
-          setStreamingError(null);
-          setStreamingProgress(0);
-          streamingRef.current = "";
-          setCurrentMap(meta);
-          setView("viewer");
-          await reloadList();
-          if (!mountedRef.current) return;
-          toast.success("思维导图生成成功");
-          onGenerated?.();
-        },
-        onError: (msg) => {
-          if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-          if (!mountedRef.current || abortRef.current !== controller) return;
-          setStreamingError(msg || "生成中断");
-          onGeneratingChange?.(false);
-        },
-      });
-    } catch (err) {
-      if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-      if (!mountedRef.current || abortRef.current !== controller) return;
-      if ((err as Error).name !== "AbortError") {
-        setStreamingError(err instanceof Error ? err.message : "生成中断");
-        toast.error(err instanceof Error ? err.message : "思维导图生成失败");
-      } else {
+    generateMindMapStream(docId, {
+      sectionContext: sectionContext || undefined,
+      startChunk,
+      endChunk,
+      signal: controller.signal,
+      onToken: (token) => {
+        if (!mountedRef.current || abortRef.current !== controller) return;
+        streamingRef.current += token;
+        setStreamingContent(streamingRef.current);
+      },
+      onProgress: (p) => {
+        if (mountedRef.current && abortRef.current === controller) setStreamingProgress(p);
+      },
+      onDone: async (meta) => {
+        clearTimeout(timeoutId);
+        if (!mountedRef.current || abortRef.current !== controller) return;
         setStreamingContent(null);
+        setStreamingError(null);
+        setStreamingProgress(0);
         streamingRef.current = "";
-      }
-      onGeneratingChange?.(false);
-    }
-    clearTimeout(timeoutId);
-    if (abortRef.current === controller) {
-      abortRef.current = null;
-      onGeneratingChange?.(false);
-    }
+        setCurrentMap(meta);
+        setView("viewer");
+        try {
+          await reloadList();
+        } catch { /* reloadList 内部已处理 toast */ }
+        if (!mountedRef.current) return;
+        toast.success("思维导图生成成功");
+        onGenerated?.();
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          onGeneratingChange?.(false);
+        }
+      },
+      onError: (msg) => {
+        clearTimeout(timeoutId);
+        if (!mountedRef.current || abortRef.current !== controller) return;
+        setStreamingError(msg || "生成中断");
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          onGeneratingChange?.(false);
+        }
+      },
+    });
   }, [docId, generating, sectionContext, startChunk, endChunk, reloadList, onGeneratingChange]);
 
   // 从大纲跳转自动触发
@@ -165,7 +156,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
   // 删除
   const handleDelete = useCallback(async (e: React.MouseEvent, deckId: number) => {
     e.stopPropagation();
-    if (!window.confirm("确定要删除此思维导图？")) return;
+    if (!await confirm({ title: "删除思维导图", description: "确定要删除此思维导图？", confirmLabel: "删除", destructive: true })) return;
     try {
       await deleteMindMap(deckId);
       setMindMaps((prev) => prev.filter((m) => m.deckId !== deckId));
@@ -195,6 +186,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
         <div className="flex-1 min-h-0">
           <MindMapViewer markdown={currentMap.content} className="h-full" onContextChange={onContextChange} />
         </div>
+        {confirmDialog}
       </div>
     );
   }
@@ -251,7 +243,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
                     )}
                   </div>
                 )}
-                <article className="max-w-none text-sm leading-7 text-foreground/75">
+                <article className="max-w-none">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
                 </article>
               </CardContent>
@@ -314,6 +306,7 @@ export function MindMapView({ docId, docStatus, embedded, onContextChange, secti
           </div>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }

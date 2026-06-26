@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { FlowNoteItem, FlowNoteStats } from "@/lib/api";
@@ -10,6 +9,7 @@ import {
   listFlowNotes, extractFlowNotes, createFlowNote,
   deleteFlowNote, markFlowNoteReviewed, getFlowNoteStats,
 } from "@/lib/api";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import {
   BookOpen, Lightbulb, MessageCircle, AlertTriangle,
   Sparkles, Plus, RotateCw, Trash2, Check, Loader2,
@@ -58,6 +58,7 @@ const HEADER_BG_MAP: Record<string, string> = {
 };
 
 export function FlowNoteView({ docId, docStatus, embedded, onContextChange, onGenerated }: Props) {
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [entries, setEntries] = useState<FlowNoteItem[]>([]);
   const [stats, setStats] = useState<FlowNoteStats | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -134,7 +135,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange, onGe
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("确定删除该条目？")) return;
+    if (!await confirm({ title: "删除条目", description: "确定删除该条目？", confirmLabel: "删除", destructive: true })) return;
     try {
       await deleteFlowNote(id);
       setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -174,29 +175,30 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange, onGe
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      {!embedded && (
-        <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
+      <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/20 shrink-0">
+        {!embedded && (
           <h2 className="text-sm font-medium text-foreground/80 flex items-center gap-2">
             <BookOpen className="h-4 w-4 text-muted-foreground" />
             学习日志
           </h2>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs" onClick={handleExport} disabled={entries.length === 0}>
-              <Download className="h-3.5 w-3.5" />导出
+        )}
+        {embedded && <div />}
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs" onClick={handleExport} disabled={entries.length === 0}>
+            <Download className="h-3.5 w-3.5" />导出
+          </Button>
+          <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs" onClick={() => setShowAddForm((v) => !v)}>
+            <Plus className="h-3.5 w-3.5" />手动添加
+          </Button>
+          <div className="flex flex-col items-end gap-0.5">
+            <Button size="sm" className="rounded-xl gap-1.5 h-8 text-xs" onClick={handleExtract} disabled={extracting || !docId || docStatus !== "COMPLETED"} title="需至少 5 轮对话后可提取">
+              {extracting ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {extracting ? "提取中..." : "从对话提取"}
             </Button>
-            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs" onClick={() => setShowAddForm((v) => !v)}>
-              <Plus className="h-3.5 w-3.5" />手动添加
-            </Button>
-            <div className="flex flex-col items-end gap-0.5">
-              <Button size="sm" className="rounded-xl gap-1.5 h-8 text-xs" onClick={handleExtract} disabled={extracting || !docId || docStatus !== "COMPLETED"} title="需至少 5 轮对话后可提取">
-                {extracting ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                {extracting ? "提取中..." : "从对话提取"}
-              </Button>
-              <span className="text-[11px] text-muted-foreground/40 leading-none">需至少 5 轮对话后可提取</span>
-            </div>
+            <span className="text-[11px] text-muted-foreground/40 leading-none">需至少 5 轮对话后可提取</span>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Category filter + stats bar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 shrink-0 overflow-x-auto" role="tablist" aria-label="学习日志分类">
@@ -376,7 +378,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange, onGe
                         type="button"
                         onClick={() => handleReview(entry.id)}
                         className={cn(
-                          "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all",
+                          "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 min-h-[44px] text-[11px] font-medium transition-all",
                           entry.isReviewed
                             ? "text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-900/20"
                             : "text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20",
@@ -389,7 +391,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange, onGe
                       <button
                         type="button"
                         onClick={() => handleDelete(entry.id)}
-                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-all"
+                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 min-h-[44px] text-[11px] font-medium text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-all"
                         title="删除"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -403,6 +405,7 @@ export function FlowNoteView({ docId, docStatus, embedded, onContextChange, onGe
           </div>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }

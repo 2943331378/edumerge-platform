@@ -181,20 +181,47 @@ public class AiMindMapGenerator extends AiGeneratorBase {
     private List<ChatMessage> buildMindMapMessages(String context, String sectionContext, String subjectType) {
         String subjectGuide = buildMindMapSubjectGuide(subjectType);
         String systemTemplate = """
-                你是一个严谨的 AI 知识架构师，擅长从非结构化文本中提取层级知识结构。
+                你是一位擅长知识可视化和结构化思维的专家。你的任务是基于文档内容，提取核心知识骨架，生成一份**层级清晰、突出关联**的 Markdown 思维导图。
 
                 {COMMON_RULES}
+                {SUBJECT_GUIDE}
 
-                # 任务
-                从文档中提取层级知识结构，输出 Markdown 思维导图。
-                # = 中心主题（1个） ## = 主要分支（3-6个） ### = 子细节（每分支2-4个） - = 补充细节（可选）
+                # 思维导图设计原则
+                1. **广度优先于深度**：严格控制层级，最多不超过 4 级（中心主题 → 核心分支 → 子分支 → 叶子节点）。避免变成冗长的文本列表。
+                2. **关键词化**：节点内容必须是精炼的"关键词"或"短句"（不超过15个字），严禁大段文本。
+                3. **凸显枢纽**：识别出连接多个分支的"核心枢纽概念"，并在中心主题后单独列出。
+
+                # 输出格式（仅输出 Markdown）
+                # [文档核心主题]
+
+                ## 核心枢纽概念
+                *(提取 2-3 个贯穿全文、连接多个分支的核心概念，并用一句话解释其枢纽作用)*
+                - **[枢纽概念1]**：...
+                - **[枢纽概念2]**：...
+
+                ## 知识结构树
+                *(使用 Markdown 标题层级，严格控制在 4 级以内)*
+                # [一级分支：宏观模块/核心阶段]
+                ## [二级分支：子模块/关键机制]
+                ### [三级分支：具体概念/步骤]
+                - [四级分支：关键细节/参数/条件]
+
+                ## 跨分支关联 (Hidden Links)
+                *(指出知识树中不同分支之间隐藏的因果、对比或依赖关系)*
+                1. [分支A的节点X] → 导致/影响 → [分支B的节点Y]：(简述关联机制)
+                2. [分支C的节点Z] ↔ 对比/互斥 → [分支D的节点W]：(简述核心差异)
 
                 # 格式约束
                 1. 仅输出 Markdown，禁止引导语/结束语
-                2. 每个节点须为完整短语或句子，不可仅为单个词
+                2. 每个节点须为精炼短语（不超过15字），严禁大段文本
                 3. 层级间无空行，保持紧凑树状结构
+                4. 如果某一部分内容属于线性流程，请在节点后追加 (流程: 1→2→3) 标记
 
-                {SUBJECT_GUIDE}
+                # Mermaid 语法铁律（若需内嵌 Mermaid 图表）
+                1. 节点文本必须用双引号包裹：A["说明文字"]，禁止裸露特殊字符
+                2. 边标签禁止使用引号：A -->|标签文字| B
+                3. subgraph 标题禁止括号：subgraph 标题名称
+                4. 节点 ID 只用英文字母和数字：A、B、node1，禁止中文 ID
                 """;
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage(systemTemplate

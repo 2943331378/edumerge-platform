@@ -14,18 +14,18 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExportBottomSheet } from "@/components/ui/export-bottom-sheet";
-import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Trash2, Sparkle, GitFork, XCircle, Pencil, X, Download, Loader2, Shuffle, Star } from "lucide-react";
+import { Sparkles, Layers, RotateCw, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Trash2, Sparkle, XCircle, Pencil, X, Download, Loader2, Shuffle, Star, Lightbulb } from "lucide-react";
 import type { DeckRecord, FlashcardItem } from "@/lib/api";
-import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, getMindMap, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards, toggleFlashcardImportant } from "@/lib/api";
+import { listDecks, listFlashcardsByDeck, generateFlashcards as generateApi, deleteDeck, updateFlashcard, deleteFlashcard, reviewFlashcard, listDueFlashcards, toggleFlashcardImportant } from "@/lib/api";
 import { toast } from "sonner";
 import { saveProgress, loadProgress, clearProgress, flashcardProgressKey } from "@/lib/progressStorage";
 import { printFlashcards } from "@/lib/printExport";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface Props {
   docId: number | null;
   docUuid: string | null;
   sessionId: number | null;
-  onMindMapGenerated?: () => void;
   onGenerated?: () => void;
   onContextChange?: (hint: string) => void;
   embedded?: boolean;
@@ -81,28 +81,19 @@ function splitAnswer(answer: string): { core: string; detail: string; isShort: b
   return { core: answer.slice(0, pos), detail: answer.slice(pos).trimStart(), isShort: false };
 }
 
-export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
+export function FlashcardView({ docId, docUuid, sessionId, onGenerated, onContextChange, embedded, sectionContext, startChunk, endChunk, generateTrigger, generating = false, onGeneratingChange }: Props) {
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [view, setView] = useState<"decks" | "preview" | "cards">("decks");
   const [decks, setDecks] = useState<DeckRecord[]>([]);
   const [cards, setCards] = useState<FlashcardItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [mindMapGenerating, setMindMapGenerating] = useState(false);
-  const [mindMapProgress, setMindMapProgress] = useState(0);
   const [currentDeck, setCurrentDeck] = useState<DeckRecord | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(true);
 
-  const mindMapProgressTexts = [
-    "正在解构知识要素...",
-    "正在提取层级结构...",
-    "正在识别核心主题...",
-    "正在生成思维导图...",
-    "正在组织知识图谱...",
-  ];
-  const [mindMapTextIdx, setMindMapTextIdx] = useState(0);
-  const [editingCardId, setEditingCardId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ question: "", answer: "", explanation: "" });
+  const [editingCardId, setEditingCardId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [selfAssessed, setSelfAssessed] = useState(false);
   const [shuffled, setShuffled] = useState(false);
@@ -111,7 +102,6 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   const [showImportantOnly, setShowImportantOnly] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const mindMapAbortRef = useRef<AbortController | null>(null);
   const generatingRef = useRef(false);
   const propGeneratingRef = useRef(generating);
   propGeneratingRef.current = generating;
@@ -124,7 +114,6 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
     return () => {
       mountedRef.current = false;
       prevCounterRef.current = undefined;
-      mindMapAbortRef.current?.abort();
       generatingRef.current = false;
       if (propGeneratingRef.current) onGeneratingChange?.(false);
     };
@@ -195,13 +184,8 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
       abortRef.current.abort();
       abortRef.current = null;
     }
-    if (mindMapAbortRef.current) {
-      mindMapAbortRef.current.abort();
-      mindMapAbortRef.current = null;
-    }
     setLoading(false);
     onGeneratingChange?.(false);
-    setMindMapGenerating(false);
     toast.info("已取消生成");
   };
 
@@ -331,36 +315,6 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
   // docId 变化时自动重载 deck 列表并回到列表视图
   useEffect(() => { reloadDecks(); setView("decks"); }, [docId]);
 
-  // 思维导图生成进度文字轮播
-  useEffect(() => {
-    if (!mindMapGenerating) return;
-    const timer = setInterval(() => {
-      setMindMapTextIdx((i) => (i + 1) % mindMapProgressTexts.length);
-      setMindMapProgress((p) => Math.min(p + 8, 90));
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [mindMapGenerating]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /** 生成全书思维大纲 → 自动跳转导图页 */
-  const handleGenerateMindMap = async () => {
-    if (!docId || mindMapGenerating) return;
-    const controller = new AbortController();
-    mindMapAbortRef.current = controller;
-    setMindMapGenerating(true);
-    setMindMapProgress(0);
-    setMindMapTextIdx(0);
-    try {
-      await getMindMap(docId, controller.signal);
-      setMindMapProgress(100);
-      toast.success("思维导图生成成功");
-      setTimeout(() => onMindMapGenerated?.(), 400);
-    } catch {
-      toast.error("思维导图生成失败");
-    }
-    mindMapAbortRef.current = null;
-    setMindMapGenerating(false);
-  };
-
   const enterDeck = async (deck: DeckRecord) => {
     setCurrentDeck(deck);
     setLoading(true);
@@ -452,7 +406,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
 
   const handleDeleteDeck = async (e: React.MouseEvent, deckId: number) => {
     e.stopPropagation();
-    if (!confirm("确定删除该卡片组？组内所有卡片将被删除且无法恢复。")) return;
+    if (!await confirm({ title: "删除卡片组", description: "确定删除该卡片组？组内所有卡片将被删除且无法恢复。", confirmLabel: "删除", destructive: true })) return;
     try {
       await deleteDeck(deckId);
       setDecks((prev) => prev.filter((d) => d.id !== deckId));
@@ -504,11 +458,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                 导出
               </Button>
             )}
-            <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={handleGenerateMindMap} disabled={mindMapGenerating || !docId}>
-              {mindMapGenerating ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
-              {mindMapGenerating ? "生成大纲中..." : "全书思维大纲"}
-            </Button>
-            {(loading || mindMapGenerating) ? (
+            {loading ? (
               <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={cancelGeneration}>
                 <XCircle className="h-3.5 w-3.5" />
                 取消生成
@@ -521,22 +471,6 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
             )}
           </div>
         </div>
-
-        {/* 思维导图生成进度条 */}
-        {mindMapGenerating && (
-          <div className="px-6 py-2 border-b bg-purple-50/30 dark:bg-purple-950/10">
-            <div className="flex items-center gap-3 max-w-3xl mx-auto">
-              <GitFork className="h-3.5 w-3.5 text-purple-500 animate-pulse shrink-0" />
-              <span className="text-[11px] text-purple-700 dark:text-purple-300 shrink-0 transition-all duration-500">
-                {mindMapProgressTexts[mindMapTextIdx]}
-              </span>
-              <div className="flex-1 h-1 rounded-full bg-purple-200 dark:bg-purple-900 overflow-hidden">
-                <div className="h-full rounded-full bg-purple-500 transition-all duration-700 ease-out" style={{ width: `${mindMapProgress}%` }} />
-              </div>
-              <span className="text-[11px] text-purple-400 shrink-0">{mindMapProgress}%</span>
-            </div>
-          </div>
-        )}
 
         {/* 内容: 空状态 或 卡片组网格 */}
         <div className="flex-1 overflow-y-auto p-6">
@@ -637,7 +571,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" className="rounded-xl gap-1.5 h-8 text-xs border-destructive/20 text-destructive hover:bg-destructive/10" onClick={async () => {
-              if (currentDeck && confirm("确定放弃这组卡片？已生成的内容将被删除。")) {
+              if (currentDeck && await confirm({ title: "放弃卡片", description: "确定放弃这组卡片？已生成的内容将被删除。", confirmLabel: "放弃", destructive: true })) {
                 try {
                   await deleteDeck(currentDeck.id);
                   setDecks((prev) => prev.filter((d) => d.id !== currentDeck.id));
@@ -673,7 +607,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                     className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded active:bg-muted hover:bg-muted text-muted-foreground/50 hover:text-foreground" title="编辑">
                     <Pencil className="h-3 w-3" />
                   </button>
-                  <button type="button" onClick={() => { if (confirm("确定删除这张卡片？")) { deleteFlashcard(card.id).then(() => { setCards(prev => prev.filter(c => c.id !== card.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
+                  <button type="button" onClick={async () => { if (await confirm({ title: "删除卡片", description: "确定删除这张卡片？", confirmLabel: "删除", destructive: true })) { deleteFlashcard(card.id).then(() => { setCards(prev => prev.filter(c => c.id !== card.id)); toast.success("已删除"); }).catch(() => toast.error("删除失败")); } }}
                     className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded active:bg-destructive/10 hover:bg-destructive/10 text-muted-foreground/50 hover:text-destructive" title="删除">
                     <X className="h-3 w-3" />
                   </button>
@@ -857,7 +791,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
               {/* 顶部装饰区 — 渐变背景 */}
               <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-emerald-50/60 to-transparent dark:from-emerald-950/20 dark:to-transparent pointer-events-none" />
 
-              <CardContent className="relative flex flex-col h-full min-h-[260px] sm:min-h-[450px] overflow-y-auto">
+              <CardContent className="relative flex flex-col h-full min-h-[260px] sm:min-h-[450px] overflow-y-auto overscroll-contain">
                 {/* 答案区域 — 分层显示: 核心答案 + 可展开详情 */}
                 <div className="flex-1 flex flex-col justify-center px-4 sm:px-14 py-4 sm:py-14">
                   {/* 标签 */}
@@ -898,7 +832,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
                           <div className="mt-3 sm:mt-4 rounded-xl bg-muted/30 dark:bg-muted/10 border border-border/20 p-3 sm:p-5">
                             <div className="flex items-center gap-2 mb-2.5">
                               <div className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 dark:bg-amber-900/30">
-                                <span className="text-[11px]">💡</span>
+                                <Lightbulb className="h-3 w-3 text-amber-600 dark:text-amber-400" />
                               </div>
                               <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">解析</span>
                             </div>
@@ -944,7 +878,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           >
             <Shuffle className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" className="ml-auto rounded-lg text-xs gap-1.5 h-8" onClick={() => { if (confirm("重新生成将覆盖当前卡片，确定继续？")) handleGenerate(); }} disabled={loading}>
+          <Button variant="ghost" size="sm" className="ml-auto rounded-lg text-xs gap-1.5 h-8" onClick={async () => { if (await confirm({ title: "重新生成", description: "重新生成将覆盖当前卡片，确定继续？", confirmLabel: "继续" })) handleGenerate(); }} disabled={loading}>
             {loading ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             开启新任务
           </Button>
@@ -1004,6 +938,7 @@ export function FlashcardView({ docId, docUuid, sessionId, onMindMapGenerated, o
           { icon: Download, iconColor: "text-emerald-500", title: "PDF — Anki 风格", description: "所有问题在前，答案在后（分页打印）", onClick: () => handleExportPDF("anki") },
         ]}
       />
+      {confirmDialog}
     </div>
   );
 }

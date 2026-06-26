@@ -56,11 +56,11 @@ public class AiNoteGenerator extends AiGeneratorBase {
             }
             context = buildContext(matches);
         }
-        String subjectRules = buildSubjectRules(getSubjectType(docId));
+        String subjectGuide = buildNoteSubjectGuide(getSubjectType(docId));
         log.info("笔记上下文构建完成: docId={}, 块数={}, 检索耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
 
         long llmStart = System.currentTimeMillis();
-        String content = cleanMarkdown(callLLM(context, requirements, sectionContext, subjectRules));
+        String content = cleanMarkdown(callLLM(context, requirements, sectionContext, subjectGuide));
         log.info("LLM 笔记生成完成: docId={}, 长度={}, LLM耗时={}ms", docId, content.length(), System.currentTimeMillis() - llmStart);
         if (content.isBlank()) {
             return StudyNoteResult.empty();
@@ -99,11 +99,11 @@ public class AiNoteGenerator extends AiGeneratorBase {
             if (matches.isEmpty()) return StudyNoteResult.empty();
             context = buildContext(matches);
         }
-        String subjectRules = buildSubjectRules(getSubjectType(docId));
+        String subjectGuide = buildNoteSubjectGuide(getSubjectType(docId));
         log.info("流式笔记上下文构建完成: docId={}, 块数={}, 耗时={}ms", docId, matches.size(), System.currentTimeMillis() - startTime);
 
         // 流式调用 LLM (DeepSeek 支持真正的流式回调)
-        List<ChatMessage> messages = buildNoteMessages(context, requirements, sectionContext, subjectRules);
+        List<ChatMessage> messages = buildNoteMessages(context, requirements, sectionContext, subjectGuide);
 
         StringBuilder fullContent = new StringBuilder();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
@@ -163,41 +163,71 @@ public class AiNoteGenerator extends AiGeneratorBase {
 
     /** 构建笔记生成的消息列表 (同步/流式共用) */
     private List<ChatMessage> buildNoteMessages(String context, String requirements,
-                                                  String sectionContext, String subjectRules) {
+                                                  String sectionContext, String subjectGuide) {
         String systemTemplate = """
-                你是一个严谨的 AI 学习笔记助手。请基于文档片段，生成一份适合学生备考复习的 Markdown 学习笔记。
+                你是一个顶尖的学术导师和认知科学家。你的任务是基于文档片段，生成一份**高信息密度、具备深度理解**的 Markdown 学习笔记。
 
                 {COMMON_RULES}
 
-                {SUBJECT_RULES}
+                {SUBJECT_NOTE_GUIDE}
 
-                # 输出格式
-                仅输出 Markdown，必须包含以下标题:
-                # 中文学习笔记
-                ## 文档概述（100-200字）
-                ## 核心知识点（5-8条，每条含原理说明和适用条件，而非仅列定义）
-                ## 知识图解（当文档涉及数据结构、算法、程序流程时，必须包含 2-3 个 Mermaid 图表。使用 ```mermaid 代码块。每图前后加一行说明文字。若文档为纯理论概念则跳过此节）
-                Mermaid 语法铁律（违反任何一条都会导致渲染失败）：
-                1. 节点文本必须用双引号包裹：A["说明文字"]，禁止裸露花括号/方括号/冒号/分号
-                2. 边标签禁止使用引号：A -->|标签文字| B，不要写 A -->|"标签"| B
-                3. subgraph 标题禁止括号：subgraph 标题名称，不要写 subgraph 标题(说明)
-                4. 节点 ID 只用英文字母和数字：A、B、node1，禁止中文 ID
-                5. 示例：graph LR; A["集合A"] -->|"合并"| B["集合B"]
-                ## 关键概念辨析（4-6组易混淆概念的对比分析，用表格或并列说明区别与联系）
-                ## 典型应用场景（每个知识点在什么条件下用、怎么用、举具体例子）
-                ## 易错点与注意事项（常见的错误理解、边界条件、特殊情况）
-                ## 复习清单（可勾选Markdown任务列表，按优先级排列）
-                ## 可自测问题（5个问题，考察理解深度而非记忆，不附答案）
+                # 核心工作流（隐式思考，无需输出）
+                1. **分析文本特征**：判断当前内容属于哪种"知识类型"（概念解析型、流程机制型、对比辨析型、推导证明型）。
+                2. **选择输出策略**：根据知识类型和学科指引，动态调整下方各模块的篇幅和侧重点。如果某模块在当前文本中完全不适用（如纯理论推导没有"典型应用场景"），请将其替换为"理论延伸"或"前置知识依赖"，**严禁编造废话**。
 
-                # 写作约束
-                - 内容面向备考学生，重点是"理解"和"会用"，不是罗列知识点
-                - 每个知识点都要说明"为什么"和"什么时候用"，不要只说"是什么"
-                - 不要引用片段编号作为正文标题
+                # 输出格式（仅输出 Markdown）
+                # [提炼一个极具吸引力的笔记标题，不超过15字]
+
+                ## 核心摘要与知识锚点
+                - **一句话总结**：（用费曼技巧，通俗易懂地解释这段内容的核心本质，50字以内）
+                - **前置依赖**：（理解本内容需要提前掌握什么概念？若无则写"无"）
+                - **后续延伸**：（本内容为哪些高级知识做铺垫？若无则写"无"）
+
+                ## 底层逻辑与核心机制
+                *(本部分是笔记的灵魂。拒绝罗列定义，必须讲透"为什么"和"怎么运作")*
+                - 针对每个核心概念，按以下结构展开：
+                  - **概念本质**：（专业定义 + 大白话类比解释）
+                  - **运作机制/推导过程**：（详细说明原理、步骤或公式推导）
+                  - **条件与边界**：（在什么前提下成立？什么情况下会失效？）
+
+                ## 知识可视化 (Mermaid)
+                *(按需生成，强调信息增量。如果文本逻辑简单，无需强行画图)*
+                - **触发条件**：仅当内容包含复杂的流程流转、状态变化、层级分类或对象关系时生成。
+                - **图表类型选择**：流程图(graph)、状态图(stateDiagram-v2)、时序图(sequenceDiagram)、类图(classDiagram)。
+                - **Mermaid 语法铁律（违反会导致渲染崩溃）**：
+                  1. 节点文本必须用双引号包裹：A["说明文字"]，禁止裸露特殊字符。
+                  2. 边标签禁止使用引号：A -->|标签文字| B。
+                  3. subgraph 标题禁止括号：subgraph 标题名称。
+                  4. 节点 ID 只用英文字母和数字：A、B、node1，禁止中文 ID。
+                *(在此处输出 ```mermaid 代码块，并在图表前后各加一行说明文字)*
+
+                ## 深度辨析与避坑指南
+                *(根据文本内容，选择以下 1-2 个最合适的维度展开，不要全选)*
+                - **易混淆概念对比**：（使用 Markdown 表格，对比 2-3 组极易混淆的概念，列出核心差异点）
+                - **常见误区与 Bug 陷阱**：（指出初学者最容易犯的错误、错误理解或代码 Bug）
+                - **方案选型对比**：（如果文档涉及多种方法/算法/技术，对比其优劣和适用场景）
+
+                ## 场景映射与实战应用
+                *(将理论落地。如果文本是纯理论/纯数学，此节可替换为"经典例题解析"或"定理几何直觉")*
+                - **典型应用场景**：（在什么具体条件下使用？解决什么实际问题？）
+                - **实战案例/代码片段**：（给出一个具体的例子或核心代码片段，并附带逐行/逐步解析）
+
+                ## 费曼自测清单
+                *(生成 3-5 个能检验"是否真正理解"的启发式问题，不附答案)*
+                - [ ] 问题1：（例如：如果改变X条件，Y结果会发生什么变化？为什么？）
+                - [ ] 问题2：（例如：你能用生活中的例子向非专业人士解释Z概念吗？）
+                - [ ] 问题3：（例如：A方案和B方案在极端情况下的表现有何不同？）
+
+                # 写作铁律
+                1. **认知降维**：遇到极其抽象的概念，必须尝试提供一个"生活中的类比"。
+                2. **信息密度**：删除所有"众所周知"、"如前所述"等废话，每一句话都要有信息量。
+                3. **排版美学**：合理使用加粗（**核心术语**）、高亮、列表和引用块（>）来引导视觉焦点。
+                4. **严禁编造**：如果文档中没有提供足够的信息来支撑某个模块，请直接省略该模块或替换为与文本强相关的其他分析维度。
                 """;
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new SystemMessage(systemTemplate
                 .replace("{COMMON_RULES}", buildCommonRules())
-                .replace("{SUBJECT_RULES}", subjectRules)));
+                .replace("{SUBJECT_NOTE_GUIDE}", subjectGuide)));
 
         StringBuilder userSb = new StringBuilder();
         if (requirements != null && !requirements.isBlank()) {
@@ -207,13 +237,13 @@ public class AiNoteGenerator extends AiGeneratorBase {
             userSb.append("# 重点关注章节\n请重点围绕以下章节生成笔记，但保持整体结构完整：").append(sectionContext.strip()).append("\n\n");
         }
         userSb.append("# 文档上下文\n").append(context).append("\n");
-        userSb.append("请基于以上文档内容生成一份结构化中文学习笔记。");
+        userSb.append("请深呼吸，一步步思考，基于以上文档内容生成一份高质量、结构化的中文学习笔记。");
         messages.add(new UserMessage(userSb.toString()));
         return messages;
     }
 
-    private String callLLM(String context, String requirements, String sectionContext, String subjectRules) {
-        List<ChatMessage> messages = buildNoteMessages(context, requirements, sectionContext, subjectRules);
+    private String callLLM(String context, String requirements, String sectionContext, String subjectGuide) {
+        List<ChatMessage> messages = buildNoteMessages(context, requirements, sectionContext, subjectGuide);
         ChatResponse response = chatContent(chatLanguageModel, messages);
         return response.aiMessage().text();
     }

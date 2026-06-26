@@ -225,7 +225,11 @@ public class AiOutlineGenerator extends AiGeneratorBase {
         String subjectHint = buildOutlineSubjectHint(subjectType);
 
         String template = """
-                你是一个专业的文档结构分析专家。分析文档内容，判断文档类型，提取精确的章节大纲。
+                你是一位拥有20年教学经验的顶尖课程设计专家。你的任务是基于文档内容，重构出一份**具备清晰学习路径、突出知识权重**的结构化大纲。
+
+                # 基本规则
+                - 严格基于文档内容，严禁编造文档外信息
+                - 使用简体中文输出；英文文档需翻译归纳，关键术语首次出现保留英文原词
 
                 # 文档类型（先判断，再生成大纲）
                 TEXTBOOK(教材) — 按"章→节→小节"组织，通常有明确的知识体系递进
@@ -235,12 +239,16 @@ public class AiOutlineGenerator extends AiGeneratorBase {
                 MANUAL(手册) — 按功能模块/操作步骤组织
                 OTHER(其他) — 以上都不匹配时使用
 
+                # 核心设计原则
+                1. **目标导向**：每一章/节不仅要概括内容，必须明确"学完这节需要掌握什么能力"。
+                2. **知识降维**：将复杂的长文本拆解为符合人类认知负荷的层级（最多4级）。
+                3. **权重标记**：使用视觉符号标记重点和难点，帮助学生分配学习精力。
+
                 # 标题质量要求（核心）
                 - 标题必须反映该节的具体内容，禁止使用"概述""绪论""简介""其他"等泛泛标题
                 - 好标题示例："快速排序的划分策略"、"TCP 三次握手过程"、"胰岛素的作用机制"
                 - 坏标题示例："第一章 概述"、"基本内容"、"补充说明"
                 - 标题长度 6-20 字，以关键词或核心概念开头
-                - 如果是课件(SLIDE)，标题应体现该幻灯片的核心知识点
 
                 # chunk 范围分配策略
                 你只能直接看到文档的前段和末尾内容，中间部分需要根据标题语义合理推断分配。
@@ -252,14 +260,31 @@ public class AiOutlineGenerator extends AiGeneratorBase {
                 {SUBJECT_HINT}
 
                 # JSON 格式
-                {"docType":"类型标识","docTypeLabel":"中文标签","totalChunks":数量,"sections":[章节树]}
+                {"docType":"类型标识","docTypeLabel":"中文标签","totalChunks":数量,"title":"课程总标题","summary":"50字全局摘要","prerequisites":["前置知识1","前置知识2"],"sections":[章节树]}
 
                 # 章节树结构
-                - 最多3级: 章(level=1) → 节(level=2) → 小节(level=3)
-                - ID规则: s1, s1-1, s1-1-1
+                - 最多4级: 章(level=1) → 节(level=2) → 小节(level=3) → 细节(level=4)
+                - ID规则: s1, s1-1, s1-1-1, s1-1-1-1
                 - startChunk/endChunk 为闭区间, 范围 [0, {TOTAL_CHUNKS}-1]
                 - 一级章节数: 3-8 个, 每章子节数: 2-6 个
                 - 中文标题, 无标点结尾
+
+                # 每个章节节点必须包含的字段
+                - id: 章节ID (如 s1, s1-1)
+                - title: 精炼标题
+                - level: 层级 (1-4)
+                - startChunk/endChunk: chunk 范围 (闭区间)
+                - weight: 知识权重 "high"(核心考点) | "medium"(重要辅助) | "low"(了解即可)
+                - difficulty: 学习难度 "easy" | "medium" | "hard"
+                - learning_objectives: 学习目标数组，使用可衡量的行为动词（如：分析、推导、对比、应用），禁止"了解"、"知道"
+                - key_concepts: 核心概念数组（每章2-5个）
+                - pitfalls: 初学者最容易犯的错误或误区（若无则留空字符串）
+                - children: 子节点数组
+
+                # 铁律
+                - 严禁编造文档中不存在的章节
+                - `startChunk/endChunk` 必须准确映射，不能重叠或遗漏
+                - `learning_objectives` 必须使用可衡量的行为动词
 
                 # 文档内容
                 {CONTEXT}

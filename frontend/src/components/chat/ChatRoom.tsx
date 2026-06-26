@@ -20,6 +20,7 @@ import type { MessageData } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { chatStream, chatHistory, listConversations, deleteConversation, renameConversation } from "@/lib/api";
 import { ArrowDown, Plus, Trash2, MessageSquare, Sparkles, Search, XIcon, Pencil } from "lucide-react";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 const ACTIVE_KEY = "active_chat_id";
 
@@ -42,6 +43,7 @@ interface ChatRoomProps {
 }
 
 export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoomProps) {
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -152,9 +154,9 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
     setMessages([]);
   };
 
-  const handleDeleteConv = (e: React.MouseEvent, id: string) => {
+  const handleDeleteConv = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm("删除此对话？所有聊天记录将一并删除。")) return;
+    if (!await confirm({ title: "删除对话", description: "删除此对话？所有聊天记录将一并删除。", confirmLabel: "删除", destructive: true })) return;
     const prev = conversations;
     const previousActiveId = activeId;
     setConversations((curr) => {
@@ -428,7 +430,9 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
           </div>
         </div>
         {/* 会话标签列表 */}
-        <div className="flex items-center gap-1.5 px-3 pb-2 overflow-x-auto">
+        <div className="flex items-center gap-1.5 px-3 pb-2 overflow-x-auto scrollbar-none"
+          style={{ maskImage: "linear-gradient(to right, black calc(100% - 24px), transparent 100%)" }}
+        >
           {filteredConversations.length === 0 && debouncedQuery.trim() ? (
             <p className="text-[11px] text-muted-foreground/50 px-1 select-none">未找到相关对话</p>
           ) : (
@@ -483,8 +487,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
                 ) : (
                   <span
                     className="max-w-[140px] truncate"
-                    onDoubleClick={() => { setRenamingId(c.id); setRenameTitle(c.title); }}
-                    title="双击重命名"
+                    title={c.title}
                   >{titleNode}</span>
                 )}
                 <button
@@ -584,6 +587,7 @@ export function ChatRoom({ docUuid, docId, activityType, contextHint }: ChatRoom
         onStop={handleStop}
         loading={loading}
       />
+      {confirmDialog}
     </div>
   );
 }

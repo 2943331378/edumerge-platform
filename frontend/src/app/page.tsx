@@ -33,7 +33,7 @@ import {
   Upload, NotebookText, GitFork, Layers, HelpCircle,
   MessageSquare, ChevronLeft, ChevronRight,
   FileText, Loader2, X, BarChart3, Menu, Search, LogOut, User, BookOpen, GitBranch,
-  CheckCircle2, Folder,
+  CheckCircle2, Folder, PanelLeftClose,
 } from "lucide-react";
 
 const STEPS: StepDef[] = [
@@ -494,13 +494,13 @@ export default function HomePage() {
     } catch { /* ignore */ }
   }, [sessions]);
 
-  // 文档向量化异步处理中，自适应轮询（处理中 2s，空闲 10s）
+  // 文档向量化异步处理中，自适应轮询（处理中 2s，空闲停止）
   useEffect(() => {
     const hasPending = sessions.some(
       (s) => s.docStatus && s.docStatus !== "COMPLETED" && s.docStatus !== "FAILED",
     );
-    const interval = hasPending ? 2000 : 10000;
-    const timer = setInterval(loadSessions, interval);
+    if (!hasPending) return; // 所有文档完成后停止轮询
+    const timer = setInterval(loadSessions, 2000);
     return () => clearInterval(timer);
   }, [sessions, loadSessions]);
 
@@ -894,9 +894,9 @@ export default function HomePage() {
               className="md:hidden h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
               onClick={() => setSidebarCollapsed((v) => !v)}
               title="菜单"
-              aria-label="打开侧边栏菜单"
+              aria-label={sidebarCollapsed ? "打开侧边栏菜单" : "关闭侧边栏菜单"}
             >
-              <Menu className="h-4 w-4" />
+              {sidebarCollapsed ? <Menu className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
             <div className="hidden sm:block">
               <BrandMark variant="header" />
@@ -950,7 +950,7 @@ export default function HomePage() {
               className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
               <User className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline max-w-[80px] truncate">
+              <span className="hidden sm:inline max-w-[120px] truncate">
                 {auth.user?.displayName ?? auth.user?.username ?? "用户"}
               </span>
             </button>
